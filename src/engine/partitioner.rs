@@ -1248,11 +1248,10 @@ fn pair_has_complex_value(pair_node: Node) -> bool {
                     return true;
                 }
                 // Nested expression might wrap a complex value
-                "parenthesized_expression" | "as_expression" => {
-                    // Check if this expression contains complex structure
-                    if node_contains_complex_structure(child) {
-                        return true;
-                    }
+                "parenthesized_expression" | "as_expression"
+                    if node_contains_complex_structure(child) =>
+                {
+                    return true;
                 }
                 _ => {}
             }
