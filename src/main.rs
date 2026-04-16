@@ -17,7 +17,7 @@ use engine::{
         resolve_commit_oid,
     },
     partitioner::{ChunkQualityReport, PartitionConfig, PartitionDebug, partition_typescript},
-    uploader::{LabelMetadata, PointResult, QdrantUploader, is_payload_limit_error},
+    uploader::{LabelMetadata, PointResult, QdrantUploader, SearchResult, is_payload_limit_error},
     util::compute_label_id,
 };
 use std::collections::{HashMap, HashSet};
@@ -264,6 +264,14 @@ enum Commands {
         /// Filter by catalog (optional - uses label or default context)
         #[arg(long)]
         catalog: Option<String>,
+
+        /// Output results as JSON
+        #[arg(long)]
+        json: bool,
+
+        /// Emit compact JSON records (requires --json)
+        #[arg(long, requires = "json")]
+        compact: bool,
     },
 
     /// View chunks by their file IDs with optional selectors
@@ -289,6 +297,14 @@ enum Commands {
         /// Omit catalog preamble (show only chunks)
         #[arg(long)]
         chunks_only: bool,
+
+        /// Output results as JSON
+        #[arg(long)]
+        json: bool,
+
+        /// Emit compact JSON records (requires --json)
+        #[arg(long, requires = "json")]
+        compact: bool,
     },
 
     /// Audit chunking quality across multiple files (AST-only mode).
@@ -454,6 +470,209 @@ fn sanitize_for_terminal(s: &str) -> String {
         .collect()
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum OutputMode {
+    Text,
+    Json { compact: bool },
+}
+
+#[derive(Debug, serde::Serialize)]
+struct SearchJsonRecord {
+    file_id: String,
+    chunk_ordinal: usize,
+    score: f32,
+    catalog: String,
+    relative_path: String,
+    source_uri: String,
+    package_name: String,
+    breadcrumb: Option<String>,
+    symbol_name: Option<String>,
+    start_line: usize,
+    end_line: usize,
+    chunk_count: usize,
+    chunk_type: String,
+    chunk_kind: String,
+    text: String,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct SearchCompactJsonRecord {
+    file_id: String,
+    chunk_ordinal: usize,
+    score: f32,
+    catalog: String,
+    relative_path: String,
+    breadcrumb: Option<String>,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct ViewJsonResponse<T> {
+    requests: Vec<ViewJsonRequest<T>>,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct ViewJsonRequest<T> {
+    request: String,
+    file_id: String,
+    selector: Option<String>,
+    status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+    results: Vec<T>,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct ViewJsonRecord {
+    file_id: String,
+    chunk_ordinal: usize,
+    catalog: String,
+    relative_path: String,
+    source_uri: String,
+    package_name: String,
+    breadcrumb: Option<String>,
+    symbol_name: Option<String>,
+    start_line: usize,
+    end_line: usize,
+    chunk_count: usize,
+    chunk_type: String,
+    chunk_kind: String,
+    text: String,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct ViewCompactJsonRecord {
+    file_id: String,
+    chunk_ordinal: usize,
+    catalog: String,
+    relative_path: String,
+    breadcrumb: Option<String>,
+}
+
+#[derive(Debug)]
+struct ViewRequestData {
+    request: String,
+    file_id: String,
+    selector: ChunkSelector,
+    results: Vec<PointResult>,
+}
+
+const CHUNK_NOT_FOUND_ERROR: &str = "CHUNK NOT FOUND";
+
+impl ViewRequestData {
+    fn is_missing(&self) -> bool {
+        self.results.is_empty()
+    }
+
+    fn status(&self) -> &'static str {
+        if self.is_missing() { "not_found" } else { "ok" }
+    }
+
+    fn error(&self) -> Option<&'static str> {
+        self.is_missing().then_some(CHUNK_NOT_FOUND_ERROR)
+    }
+
+    fn selector_string(&self) -> Option<String> {
+        match &self.selector {
+            ChunkSelector::All => None,
+            ChunkSelector::Single(n) => Some(n.to_string()),
+            ChunkSelector::Range(start, end) => Some(format!("{}-{}", start, end)),
+            ChunkSelector::ToEnd(start) => Some(format!("{}-end", start)),
+        }
+    }
+
+    fn display_suffix(&self) -> String {
+        self.selector_string()
+            .map(|selector| format!(":{}", selector))
+            .unwrap_or_default()
+    }
+}
+
+impl From<&SearchResult> for SearchJsonRecord {
+    fn from(result: &SearchResult) -> Self {
+        Self {
+            file_id: result.payload.file_id.clone(),
+            chunk_ordinal: result.payload.chunk_ordinal,
+            score: result.score,
+            catalog: result.payload.catalog.clone(),
+            relative_path: result.payload.relative_path.clone(),
+            source_uri: result.payload.source_uri.clone(),
+            package_name: result.payload.package_name.clone(),
+            breadcrumb: result.payload.breadcrumb.clone(),
+            symbol_name: result.payload.symbol_name.clone(),
+            start_line: result.payload.start_line,
+            end_line: result.payload.end_line,
+            chunk_count: result.payload.chunk_count,
+            chunk_type: result.payload.chunk_type.clone(),
+            chunk_kind: result.payload.chunk_kind.clone(),
+            text: result.payload.text.clone(),
+        }
+    }
+}
+
+impl From<&SearchResult> for SearchCompactJsonRecord {
+    fn from(result: &SearchResult) -> Self {
+        Self {
+            file_id: result.payload.file_id.clone(),
+            chunk_ordinal: result.payload.chunk_ordinal,
+            score: result.score,
+            catalog: result.payload.catalog.clone(),
+            relative_path: result.payload.relative_path.clone(),
+            breadcrumb: result.payload.breadcrumb.clone(),
+        }
+    }
+}
+
+impl From<&PointResult> for ViewJsonRecord {
+    fn from(result: &PointResult) -> Self {
+        Self {
+            file_id: result.payload.file_id.clone(),
+            chunk_ordinal: result.payload.chunk_ordinal,
+            catalog: result.payload.catalog.clone(),
+            relative_path: result.payload.relative_path.clone(),
+            source_uri: result.payload.source_uri.clone(),
+            package_name: result.payload.package_name.clone(),
+            breadcrumb: result.payload.breadcrumb.clone(),
+            symbol_name: result.payload.symbol_name.clone(),
+            start_line: result.payload.start_line,
+            end_line: result.payload.end_line,
+            chunk_count: result.payload.chunk_count,
+            chunk_type: result.payload.chunk_type.clone(),
+            chunk_kind: result.payload.chunk_kind.clone(),
+            text: result.payload.text.clone(),
+        }
+    }
+}
+
+impl From<&PointResult> for ViewCompactJsonRecord {
+    fn from(result: &PointResult) -> Self {
+        Self {
+            file_id: result.payload.file_id.clone(),
+            chunk_ordinal: result.payload.chunk_ordinal,
+            catalog: result.payload.catalog.clone(),
+            relative_path: result.payload.relative_path.clone(),
+            breadcrumb: result.payload.breadcrumb.clone(),
+        }
+    }
+}
+
+fn json_string<T: serde::Serialize>(value: &T) -> anyhow::Result<String> {
+    Ok(serde_json::to_string(value)?)
+}
+
+fn build_view_json_request<T, F>(request: &ViewRequestData, map: F) -> ViewJsonRequest<T>
+where
+    F: Fn(&PointResult) -> T,
+{
+    ViewJsonRequest {
+        request: request.request.clone(),
+        file_id: request.file_id.clone(),
+        selector: request.selector_string(),
+        status: request.status().to_string(),
+        error: request.error().map(str::to_string),
+        results: request.results.iter().map(map).collect(),
+    }
+}
+
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
@@ -514,6 +733,8 @@ fn main() -> anyhow::Result<()> {
             limit,
             label,
             catalog,
+            json,
+            compact,
         } => {
             run_search(
                 &config,
@@ -521,6 +742,11 @@ fn main() -> anyhow::Result<()> {
                 limit,
                 label.as_deref(),
                 catalog.as_deref(),
+                if json {
+                    OutputMode::Json { compact }
+                } else {
+                    OutputMode::Text
+                },
                 cli.debug,
             )?;
         }
@@ -529,6 +755,8 @@ fn main() -> anyhow::Result<()> {
             label,
             full_paths,
             chunks_only,
+            json,
+            compact,
         } => {
             run_view(
                 &config,
@@ -536,6 +764,11 @@ fn main() -> anyhow::Result<()> {
                 label.as_deref(),
                 full_paths,
                 chunks_only,
+                if json {
+                    OutputMode::Json { compact }
+                } else {
+                    OutputMode::Text
+                },
                 cli.debug,
             )?;
         }
@@ -1717,48 +1950,77 @@ fn run_search(
     limit: usize,
     label: Option<&str>,
     catalog: Option<&str>,
+    output_mode: OutputMode,
     debug: bool,
 ) -> anyhow::Result<()> {
-    // Resolve label ID from explicit flag or default context
-    let (label_id, _, _) = resolve_label_id(label, catalog)?;
+    let results = fetch_search_results(config, text, limit, label, catalog, debug)?;
 
-    // Generate embedding for query
+    match output_mode {
+        OutputMode::Text => {
+            print!("{}", render_search_text(&results));
+        }
+        OutputMode::Json { compact } => {
+            println!("{}", render_search_json(&results, compact)?);
+        }
+    }
+
+    Ok(())
+}
+
+fn fetch_search_results(
+    config: &Config,
+    text: &str,
+    limit: usize,
+    label: Option<&str>,
+    catalog: Option<&str>,
+    debug: bool,
+) -> anyhow::Result<Vec<SearchResult>> {
+    let (label_id, _, _) = resolve_label_id(label, catalog)?;
     let embedder = ParallelEmbedder::new()?;
     let embedding = embedder.encode(text, 0)?;
-
-    // Query Qdrant with label filter
     let uploader = QdrantUploader::new(
         &config.qdrant.collection,
         config.qdrant.url.as_deref(),
         debug,
         config.qdrant.get_max_upload_bytes(),
     )?;
-
-    // Extract catalog from label_id (format: catalog:label)
     let catalog = label_id.split(':').next().unwrap_or("");
-    let results = uploader.search_with_label(&embedding, limit, catalog, &label_id)?;
+    uploader.search_with_label(&embedding, limit, catalog, &label_id)
+}
 
-    // Display results as blurbs
-    for result in &results {
-        // Line 1: file_id:chunk_ordinal  score  breadcrumb
-        // E.1: Sanitize breadcrumb to prevent terminal injection
+fn render_search_text(results: &[SearchResult]) -> String {
+    use std::fmt::Write as _;
+
+    let mut output = String::new();
+
+    for result in results {
         let breadcrumb =
             sanitize_for_terminal(result.payload.breadcrumb.as_deref().unwrap_or("unknown"));
-        println!(
+        let _ = writeln!(
+            output,
             "{}:{}  {:.3}  {}",
             result.payload.file_id, result.payload.chunk_ordinal, result.score, breadcrumb
         );
 
-        // Lines 2-4: first 3 lines of code (quoted with >)
         for line in result.payload.text.lines().take(3) {
-            println!("> {}", line);
+            let _ = writeln!(output, "> {}", line);
         }
 
-        // Blank line between results
-        println!();
+        output.push('\n');
     }
 
-    Ok(())
+    output
+}
+
+fn render_search_json(results: &[SearchResult], compact: bool) -> anyhow::Result<String> {
+    if compact {
+        let records: Vec<SearchCompactJsonRecord> =
+            results.iter().map(SearchCompactJsonRecord::from).collect();
+        json_string(&records)
+    } else {
+        let records: Vec<SearchJsonRecord> = results.iter().map(SearchJsonRecord::from).collect();
+        json_string(&records)
+    }
 }
 
 /// Run view command to display full chunks by IDs
@@ -1785,12 +2047,10 @@ enum ChunkSelector {
 fn parse_file_id_with_selector(s: &str) -> anyhow::Result<(String, ChunkSelector)> {
     let s = s.trim();
 
-    // Check for selector suffix
     if let Some(colon_pos) = s.find(':') {
         let file_id = s[..colon_pos].to_string();
         let selector = &s[colon_pos + 1..];
 
-        // Validate file_id is 16 hex chars
         if file_id.len() != 16 || !file_id.chars().all(|c| c.is_ascii_hexdigit()) {
             return Err(anyhow::anyhow!(
                 "Invalid file ID '{}'. Expected 16 hex characters.",
@@ -1798,14 +2058,11 @@ fn parse_file_id_with_selector(s: &str) -> anyhow::Result<(String, ChunkSelector
             ));
         }
 
-        // Parse selector
         if selector == "end" {
-            // Invalid: ":end" without start
             Err(anyhow::anyhow!(
                 "Invalid selector ':end'. Use ':N-end' format."
             ))
         } else if let Some(start_str) = selector.strip_suffix("-end") {
-            // :N-end format
             let start: usize = start_str
                 .parse()
                 .map_err(|_| anyhow::anyhow!("Invalid chunk number in selector '{}'", selector))?;
@@ -1817,7 +2074,6 @@ fn parse_file_id_with_selector(s: &str) -> anyhow::Result<(String, ChunkSelector
             }
             Ok((file_id, ChunkSelector::ToEnd(start)))
         } else if selector.contains('-') {
-            // :N-M format
             let parts: Vec<&str> = selector.split('-').collect();
             if parts.len() != 2 {
                 return Err(anyhow::anyhow!(
@@ -1843,7 +2099,6 @@ fn parse_file_id_with_selector(s: &str) -> anyhow::Result<(String, ChunkSelector
             }
             Ok((file_id, ChunkSelector::Range(start, end)))
         } else {
-            // :N format (single chunk)
             let chunk_num: usize = selector
                 .parse()
                 .map_err(|_| anyhow::anyhow!("Invalid chunk number in selector '{}'", selector))?;
@@ -1856,7 +2111,6 @@ fn parse_file_id_with_selector(s: &str) -> anyhow::Result<(String, ChunkSelector
             Ok((file_id, ChunkSelector::Single(chunk_num)))
         }
     } else {
-        // No selector - validate file_id and return All selector
         if s.len() != 16 || !s.chars().all(|c| c.is_ascii_hexdigit()) {
             return Err(anyhow::anyhow!(
                 "Invalid file ID '{}'. Expected 16 hex characters.",
@@ -1873,25 +2127,46 @@ fn run_view(
     label: Option<&str>,
     show_full_paths: bool,
     chunks_only: bool,
+    output_mode: OutputMode,
     debug: bool,
 ) -> anyhow::Result<()> {
+    let all_results = fetch_view_results(config, id_specs, label, debug)?;
+
+    match output_mode {
+        OutputMode::Text => {
+            print!(
+                "{}",
+                render_view_text(config, &all_results, show_full_paths, chunks_only)
+            );
+        }
+        OutputMode::Json { compact } => {
+            println!("{}", render_view_json(&all_results, compact)?);
+        }
+    }
+
+    Ok(())
+}
+
+fn fetch_view_results(
+    config: &Config,
+    id_specs: &[String],
+    label: Option<&str>,
+    debug: bool,
+) -> anyhow::Result<Vec<ViewRequestData>> {
     if id_specs.is_empty() {
         return Err(anyhow::anyhow!(
             "No IDs provided. Use --id <file_id>[:<selector>]"
         ));
     }
 
-    // Resolve label ID from explicit flag or default context
     let (label_id, _, _) = resolve_label_id(label, None)?;
 
-    // Parse all file IDs with selectors
-    let mut requests: Vec<(String, ChunkSelector)> = Vec::new();
+    let mut requests: Vec<(String, String, ChunkSelector)> = Vec::new();
     for spec in id_specs {
         let (file_id, selector) = parse_file_id_with_selector(spec)?;
-        requests.push((file_id, selector));
+        requests.push((spec.clone(), file_id, selector));
     }
 
-    // Query Qdrant
     let uploader = QdrantUploader::new(
         &config.qdrant.collection,
         config.qdrant.url.as_deref(),
@@ -1899,13 +2174,11 @@ fn run_view(
         config.qdrant.get_max_upload_bytes(),
     )?;
 
-    // Collect all results with their original selectors for display
-    let mut all_results: Vec<(String, ChunkSelector, Vec<PointResult>)> = Vec::new();
+    let mut all_results: Vec<ViewRequestData> = Vec::new();
 
-    for (file_id, selector) in requests {
+    for (request, file_id, selector) in requests {
         let chunks = uploader.get_chunks_by_file_id_with_label(&file_id, &label_id)?;
 
-        // Filter by selector
         let filtered: Vec<PointResult> = match &selector {
             ChunkSelector::All => chunks,
             ChunkSelector::Single(n) => chunks
@@ -1922,95 +2195,133 @@ fn run_view(
                 .collect(),
         };
 
-        all_results.push((file_id, selector, filtered));
+        all_results.push(ViewRequestData {
+            request,
+            file_id,
+            selector,
+            results: filtered,
+        });
     }
 
-    // Collect unique catalogs for preamble
+    Ok(all_results)
+}
+
+fn render_view_text(
+    config: &Config,
+    all_results: &[ViewRequestData],
+    show_full_paths: bool,
+    chunks_only: bool,
+) -> String {
+    use std::fmt::Write as _;
+
+    let mut output = String::new();
+
     if !chunks_only {
         let catalogs: std::collections::HashSet<&str> = all_results
             .iter()
-            .flat_map(|(_, _, results)| results.iter().map(|r| r.payload.catalog.as_str()))
+            .flat_map(|request| request.results.iter().map(|r| r.payload.catalog.as_str()))
             .collect();
 
         if !catalogs.is_empty() {
-            println!("Catalogs:");
+            let _ = writeln!(output, "Catalogs:");
             for cat in catalogs {
                 if let Some(cat_config) = config.catalogs.get(cat) {
-                    // E.1: Sanitize catalog name and path
-                    println!("- {}", sanitize_for_terminal(cat));
-                    println!(
+                    let _ = writeln!(output, "- {}", sanitize_for_terminal(cat));
+                    let _ = writeln!(
+                        output,
                         "  Catalog path: {}",
                         sanitize_for_terminal(&cat_config.path)
                     );
                 }
             }
-            println!();
+            output.push('\n');
         }
     }
 
-    // Display results
-    for (file_id, selector, results) in &all_results {
-        if results.is_empty() {
-            // No chunks found
-            let selector_str = match selector {
-                ChunkSelector::All => String::new(),
-                ChunkSelector::Single(n) => format!(":{}", n),
-                ChunkSelector::Range(start, end) => format!(":{}-{}", start, end),
-                ChunkSelector::ToEnd(start) => format!(":{}-end", start),
-            };
-            println!("{}{} ERROR: CHUNK NOT FOUND", file_id, selector_str);
+    for request in all_results {
+        if request.results.is_empty() {
+            let _ = writeln!(
+                output,
+                "{}{} ERROR: {}",
+                request.file_id,
+                request.display_suffix(),
+                CHUNK_NOT_FOUND_ERROR
+            );
             continue;
         }
 
-        for result in results {
-            // E.1: Sanitize output fields to prevent terminal injection
+        for result in &request.results {
             let breadcrumb =
                 sanitize_for_terminal(result.payload.breadcrumb.as_deref().unwrap_or("unknown"));
             let chunk_count = result.payload.chunk_count;
             let chunk_ordinal = result.payload.chunk_ordinal;
 
-            // Header line: <file_id>:<chunk_ordinal> (<n>/<total>) <breadcrumb>
-            println!(
+            let _ = writeln!(
+                output,
                 "{}:{} ({}/{}) {}",
-                file_id, chunk_ordinal, chunk_ordinal, chunk_count, breadcrumb
+                request.file_id, chunk_ordinal, chunk_ordinal, chunk_count, breadcrumb
             );
 
-            // Source line
-            println!(
+            let _ = writeln!(
+                output,
                 "Source: {}:{}",
                 sanitize_for_terminal(&result.payload.catalog),
                 sanitize_for_terminal(&result.payload.relative_path)
             );
 
-            // Full path (optional)
             if show_full_paths {
-                println!(
+                let _ = writeln!(
+                    output,
                     "Full path: {}",
                     sanitize_for_terminal(&result.payload.source_uri)
                 );
             }
 
-            // Lines and type
-            println!(
+            let _ = writeln!(
+                output,
                 "Lines: {}-{}",
                 result.payload.start_line, result.payload.end_line
             );
-            println!(
+            let _ = writeln!(
+                output,
                 "Type: {}",
                 sanitize_for_terminal(&result.payload.chunk_type)
             );
 
-            // Content
-            println!();
+            output.push('\n');
             for line in result.payload.text.lines() {
-                println!("> {}", line);
+                let _ = writeln!(output, "> {}", line);
             }
 
-            println!();
+            output.push('\n');
         }
     }
 
-    Ok(())
+    output
+}
+
+fn render_view_json(all_results: &[ViewRequestData], compact: bool) -> anyhow::Result<String> {
+    if compact {
+        let response = ViewJsonResponse {
+            requests: all_results
+                .iter()
+                .map(|request| {
+                    build_view_json_request(request, |result| ViewCompactJsonRecord::from(result))
+                })
+                .collect(),
+        };
+        json_string(&response)
+    } else {
+        let response = ViewJsonResponse {
+            requests: all_results
+                .iter()
+                .map(|request| {
+                    build_view_json_request(request, |result| ViewJsonRecord::from(result))
+                })
+                .collect(),
+        };
+        json_string(&response)
+    }
 }
 
 /// Run purge command (delete all chunks from a catalog or entire collection)
@@ -2319,6 +2630,87 @@ mod tests {
     use std::io::Write;
     use tempfile::tempdir;
 
+    fn test_point_payload() -> engine::uploader::PointPayload {
+        engine::uploader::PointPayload {
+            text: "const unsafe = true;\nconsole.log(unsafe);".to_string(),
+            source_type: "code".to_string(),
+            catalog: "rushstack".to_string(),
+            label_id: "rushstack:main".to_string(),
+            active_label_ids: vec!["rushstack:main".to_string()],
+            embedder_id: "embedder".to_string(),
+            chunker_id: "chunker".to_string(),
+            blob_id: "blob123".to_string(),
+            content_hash: "hash123".to_string(),
+            file_id: "30440fb2ecd5fa62".to_string(),
+            relative_path: "libraries/example/src/File.ts".to_string(),
+            package_name: "@scope/example".to_string(),
+            source_uri: "/repo/libraries/example/src/File.ts".to_string(),
+            chunk_ordinal: 2,
+            chunk_count: 4,
+            start_line: 10,
+            end_line: 20,
+            symbol_name: Some("doThing".to_string()),
+            chunk_type: "function".to_string(),
+            chunk_kind: "content".to_string(),
+            breadcrumb: Some("@scope/example:File.ts:doThing".to_string()),
+            file_complete: false,
+        }
+    }
+
+    fn test_search_result() -> SearchResult {
+        SearchResult {
+            id: engine::uploader::QdrantId::String("point-id".to_string()),
+            score: 0.987,
+            payload: test_point_payload(),
+        }
+    }
+
+    fn test_point_result() -> PointResult {
+        PointResult {
+            id: engine::uploader::QdrantId::String("point-id".to_string()),
+            payload: test_point_payload(),
+        }
+    }
+
+    fn view_request(
+        request: &str,
+        selector: ChunkSelector,
+        results: Vec<PointResult>,
+    ) -> ViewRequestData {
+        let file_id = request
+            .split(':')
+            .next()
+            .expect("request should contain file id")
+            .to_string();
+
+        ViewRequestData {
+            request: request.to_string(),
+            file_id,
+            selector,
+            results,
+        }
+    }
+
+    fn test_config_for_rendering() -> Config {
+        let mut catalogs = HashMap::new();
+        catalogs.insert(
+            "rushstack".to_string(),
+            CatalogConfig {
+                r#type: "monorepo".to_string(),
+                path: "/repo".to_string(),
+            },
+        );
+
+        Config {
+            qdrant: QdrantConfig {
+                url: None,
+                collection: "monodex".to_string(),
+                max_upload_bytes: None,
+            },
+            catalogs,
+        }
+    }
+
     #[test]
     fn test_catalog_config_validates_monorepo_type() {
         let config = CatalogConfig {
@@ -2460,5 +2852,174 @@ mod tests {
             config.qdrant.get_max_upload_bytes(),
             30 * 1024 * 1024 // 30MB default
         );
+    }
+
+    #[test]
+    fn test_search_json_full_record_shape() {
+        let output = render_search_json(&[test_search_result()], false).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&output).unwrap();
+        let first = &parsed[0];
+
+        assert_eq!(first["file_id"], "30440fb2ecd5fa62");
+        assert_eq!(first["chunk_ordinal"], 2);
+        assert_eq!(first["score"], 0.987);
+        assert_eq!(first["catalog"], "rushstack");
+        assert_eq!(first["relative_path"], "libraries/example/src/File.ts");
+        assert_eq!(first["source_uri"], "/repo/libraries/example/src/File.ts");
+        assert_eq!(first["package_name"], "@scope/example");
+        assert_eq!(first["breadcrumb"], "@scope/example:File.ts:doThing");
+        assert_eq!(first["symbol_name"], "doThing");
+        assert_eq!(first["start_line"], 10);
+        assert_eq!(first["end_line"], 20);
+        assert_eq!(first["chunk_count"], 4);
+        assert_eq!(first["chunk_type"], "function");
+        assert_eq!(first["chunk_kind"], "content");
+        assert_eq!(first["text"], "const unsafe = true;\nconsole.log(unsafe);");
+    }
+
+    #[test]
+    fn test_search_json_compact_record_shape() {
+        let output = render_search_json(&[test_search_result()], true).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&output).unwrap();
+        let first = &parsed[0];
+
+        assert_eq!(first["file_id"], "30440fb2ecd5fa62");
+        assert_eq!(first["chunk_ordinal"], 2);
+        assert_eq!(first["score"], 0.987);
+        assert_eq!(first["catalog"], "rushstack");
+        assert_eq!(first["relative_path"], "libraries/example/src/File.ts");
+        assert_eq!(first["breadcrumb"], "@scope/example:File.ts:doThing");
+        assert!(first.get("text").is_none());
+        assert!(first.get("source_uri").is_none());
+    }
+
+    #[test]
+    fn test_search_json_empty_results_returns_empty_array() {
+        assert_eq!(render_search_json(&[], false).unwrap(), "[]");
+        assert_eq!(render_search_json(&[], true).unwrap(), "[]");
+    }
+
+    #[test]
+    fn test_view_json_successful_selectors_and_not_found() {
+        let point = test_point_result();
+        let requests = vec![
+            view_request("30440fb2ecd5fa62", ChunkSelector::All, vec![point]),
+            view_request(
+                "30440fb2ecd5fa62:3",
+                ChunkSelector::Single(3),
+                vec![test_point_result()],
+            ),
+            view_request(
+                "30440fb2ecd5fa62:2-4",
+                ChunkSelector::Range(2, 4),
+                vec![test_point_result()],
+            ),
+            view_request(
+                "30440fb2ecd5fa62:3-end",
+                ChunkSelector::ToEnd(3),
+                vec![test_point_result()],
+            ),
+            view_request("30440fb2ecd5fa62:99", ChunkSelector::Single(99), vec![]),
+        ];
+
+        let output = render_view_json(&requests, false).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&output).unwrap();
+        let request_items = parsed["requests"].as_array().unwrap();
+
+        assert!(request_items[0]["selector"].is_null());
+        assert_eq!(request_items[1]["selector"], "3");
+        assert_eq!(request_items[2]["selector"], "2-4");
+        assert_eq!(request_items[3]["selector"], "3-end");
+        assert_eq!(request_items[4]["status"], "not_found");
+        assert_eq!(request_items[4]["error"], CHUNK_NOT_FOUND_ERROR);
+        assert_eq!(request_items[4]["results"], serde_json::json!([]));
+    }
+
+    #[test]
+    fn test_view_json_compact_record_shape() {
+        let requests = vec![view_request(
+            "30440fb2ecd5fa62:2-4",
+            ChunkSelector::Range(2, 4),
+            vec![test_point_result()],
+        )];
+
+        let output = render_view_json(&requests, true).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&output).unwrap();
+        let first = &parsed["requests"][0]["results"][0];
+
+        assert_eq!(first["file_id"], "30440fb2ecd5fa62");
+        assert_eq!(first["chunk_ordinal"], 2);
+        assert_eq!(first["catalog"], "rushstack");
+        assert_eq!(first["relative_path"], "libraries/example/src/File.ts");
+        assert_eq!(first["breadcrumb"], "@scope/example:File.ts:doThing");
+        assert!(first.get("text").is_none());
+        assert!(first.get("source_uri").is_none());
+    }
+
+    #[test]
+    fn test_search_text_sanitizes_breadcrumb_but_json_preserves_it() {
+        let mut result = test_search_result();
+        result.payload.breadcrumb = Some("bad\u{1b}[31mcrumb".to_string());
+
+        let text_output = render_search_text(&[result]);
+        assert!(!text_output.contains('\u{1b}'));
+
+        let mut json_result = test_search_result();
+        json_result.payload.breadcrumb = Some("bad\u{1b}[31mcrumb".to_string());
+        let json_output = render_search_json(&[json_result], false).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json_output).unwrap();
+        assert_eq!(parsed[0]["breadcrumb"], "bad\u{1b}[31mcrumb");
+    }
+
+    #[test]
+    fn test_view_text_sanitizes_paths_but_json_preserves_them() {
+        let config = test_config_for_rendering();
+        let mut point = test_point_result();
+        point.payload.relative_path = "src/\u{1b}[31mFile.ts".to_string();
+        point.payload.source_uri = "/repo/src/\u{1b}[31mFile.ts".to_string();
+        point.payload.chunk_type = "func\u{1b}[0mtion".to_string();
+
+        let requests = vec![view_request(
+            "30440fb2ecd5fa62",
+            ChunkSelector::All,
+            vec![point],
+        )];
+
+        let text_output = render_view_text(&config, &requests, true, false);
+        assert!(!text_output.contains('\u{1b}'));
+
+        let mut json_point = test_point_result();
+        json_point.payload.relative_path = "src/\u{1b}[31mFile.ts".to_string();
+        json_point.payload.source_uri = "/repo/src/\u{1b}[31mFile.ts".to_string();
+        let json_requests = vec![view_request(
+            "30440fb2ecd5fa62",
+            ChunkSelector::All,
+            vec![json_point],
+        )];
+        let json_output = render_view_json(&json_requests, false).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json_output).unwrap();
+        assert_eq!(
+            parsed["requests"][0]["results"][0]["relative_path"],
+            "src/\u{1b}[31mFile.ts"
+        );
+        assert_eq!(
+            parsed["requests"][0]["results"][0]["source_uri"],
+            "/repo/src/\u{1b}[31mFile.ts"
+        );
+    }
+
+    #[test]
+    fn test_search_compact_requires_json() {
+        let result = Cli::try_parse_from(["monodex", "search", "--text", "query", "--compact"]);
+        let err = result.err().unwrap();
+        assert_eq!(err.kind(), clap::error::ErrorKind::MissingRequiredArgument);
+    }
+
+    #[test]
+    fn test_view_compact_requires_json() {
+        let result =
+            Cli::try_parse_from(["monodex", "view", "--id", "30440fb2ecd5fa62", "--compact"]);
+        let err = result.err().unwrap();
+        assert_eq!(err.kind(), clap::error::ErrorKind::MissingRequiredArgument);
     }
 }
