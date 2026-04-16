@@ -2305,7 +2305,9 @@ fn render_view_json(all_results: &[ViewRequestData], compact: bool) -> anyhow::R
         let response = ViewJsonResponse {
             requests: all_results
                 .iter()
-                .map(|request| build_view_json_request(request, ViewCompactJsonRecord::from))
+                .map(|request| {
+                    build_view_json_request(request, |result| ViewCompactJsonRecord::from(result))
+                })
                 .collect(),
         };
         json_string(&response)
@@ -2313,7 +2315,9 @@ fn render_view_json(all_results: &[ViewRequestData], compact: bool) -> anyhow::R
         let response = ViewJsonResponse {
             requests: all_results
                 .iter()
-                .map(|request| build_view_json_request(request, ViewJsonRecord::from))
+                .map(|request| {
+                    build_view_json_request(request, |result| ViewJsonRecord::from(result))
+                })
                 .collect(),
         };
         json_string(&response)
@@ -3007,7 +3011,7 @@ mod tests {
     #[test]
     fn test_search_compact_requires_json() {
         let result = Cli::try_parse_from(["monodex", "search", "--text", "query", "--compact"]);
-        let err = result.unwrap_err();
+        let err = result.err().unwrap();
         assert_eq!(err.kind(), clap::error::ErrorKind::MissingRequiredArgument);
     }
 
@@ -3015,7 +3019,7 @@ mod tests {
     fn test_view_compact_requires_json() {
         let result =
             Cli::try_parse_from(["monodex", "view", "--id", "30440fb2ecd5fa62", "--compact"]);
-        let err = result.unwrap_err();
+        let err = result.err().unwrap();
         assert_eq!(err.kind(), clap::error::ErrorKind::MissingRequiredArgument);
     }
 }
