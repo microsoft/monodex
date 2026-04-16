@@ -257,7 +257,15 @@ monodex search --text "how to read JSON files"
 
 # With explicit label (full format: catalog:label)
 monodex search --text "API Extractor" --label rushstack:main --limit 10
+
+# JSON output for scripting/tool use
+monodex search --text "API Extractor" --label rushstack:main --json
+
+# Compact JSON output (minimal fields)
+monodex search --text "API Extractor" --label rushstack:main --json --compact
 ```
+
+`--compact` is only valid with `--json` and omits larger metadata fields like `text` and `source_uri`.
 
 ### View Full Chunks
 
@@ -285,7 +293,15 @@ monodex view --id 30440fb2ecd5fa62 --chunks-only
 
 # Filter by label (full format: catalog:label)
 monodex view --id 30440fb2ecd5fa62 --label rushstack:main
+
+# JSON output for structured chunk retrieval
+monodex view --id 30440fb2ecd5fa62:2-4 --label rushstack:main --json
+
+# Compact JSON output (minimal fields)
+monodex view --id 30440fb2ecd5fa62:2-4 --label rushstack:main --json --compact
 ```
+
+For `view --json`, the output is a top-level object with a `requests` array so missing selectors can be reported alongside successful chunk results.
 
 ### Debug Chunking Algorithm
 

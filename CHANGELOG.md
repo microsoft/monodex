@@ -22,6 +22,12 @@ PUBLISHING INSTRUCTIONS (DO NOT MODIFY):
 Subsubheadings must be one of: Added, Changed, Fixed, Deprecated, Removed, Security
 -->
 
+## Unreleased
+
+### Added
+
+- **Structured JSON output for search and view**: `monodex search` and `monodex view` now support `--json` output for scripting and tool integration, plus `--compact` for minimal JSON records.
+
 ## 0.3.0 (2026-04-16)
 
 ### Changed
