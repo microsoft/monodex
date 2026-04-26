@@ -62,7 +62,11 @@ pub fn get_physical_core_count() -> usize {
     // This is relatively cheap compared to System::new_all()
     use sysinfo::System;
     let sys = System::new();
-    System::physical_core_count(&sys).unwrap_or_else(num_cpus::get)
+    System::physical_core_count(&sys).unwrap_or_else(|| {
+        std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(1)
+    })
 }
 
 /// Compute embedding configuration from system properties.

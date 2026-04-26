@@ -16,26 +16,14 @@ use crate::engine::system_info::{
     get_physical_core_count,
 };
 
-/// Qdrant configuration
-#[derive(Debug, serde::Deserialize)]
-pub struct QdrantConfig {
-    pub url: Option<String>,
-    pub collection: String,
-    /// Maximum upload payload size in bytes (default: 30MB)
-    /// Qdrant has a 32MB limit; we default to 30MB for safety margin
-    #[serde(rename = "maxUploadBytes")]
-    pub max_upload_bytes: Option<usize>,
-}
-
-impl QdrantConfig {
-    /// Default max upload size: 30MB (safely under Qdrant's 32MB limit)
-    const DEFAULT_MAX_UPLOAD_BYTES: usize = 30 * 1024 * 1024;
-
-    /// Get the configured max upload bytes, or the default
-    pub fn get_max_upload_bytes(&self) -> usize {
-        self.max_upload_bytes
-            .unwrap_or(Self::DEFAULT_MAX_UPLOAD_BYTES)
-    }
+/// Database configuration (LanceDB)
+#[derive(Debug, serde::Deserialize, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct DatabaseConfig {
+    /// Optional path to the database directory.
+    /// If not specified, defaults to <tool_home>/default-db.
+    /// Must be an absolute path; tilde (~) and environment variables ($VAR) are not supported.
+    pub path: Option<String>,
 }
 
 /// Catalog configuration
@@ -184,21 +172,39 @@ impl<'de> serde::Deserialize<'de> for EmbeddingSizeValue {
 
 /// Main configuration file
 #[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Config {
-    pub qdrant: QdrantConfig,
     pub catalogs: HashMap<String, CatalogConfig>,
     #[serde(rename = "embeddingModel", default)]
     pub embedding_model: EmbeddingModelConfig,
+    /// Optional database configuration (LanceDB).
+    /// If absent, defaults to <tool_home>/default-db.
+    #[serde(default)]
+    pub database: Option<DatabaseConfig>,
 }
 
 /// Load config from a file path.
 /// Validates catalog names and types after parsing.
+///
+/// Error messages:
+/// - File not found: "No config found at <path>. See the README for instructions on creating a config file."
+/// - Other IO errors: preserved with context
+/// - Parse/validation errors: preserved
 pub fn load_config(path: &PathBuf) -> anyhow::Result<Config> {
-    let content = std::fs::read_to_string(path)
-        .map_err(|e| anyhow!("Failed to read config file {}: {}", path.display(), e))?;
+    let content = std::fs::read_to_string(path).map_err(|e| {
+        if e.kind() == std::io::ErrorKind::NotFound {
+            anyhow!(
+                "No config found at {}. See the README for instructions on creating a config file.",
+                path.display()
+            )
+        } else {
+            anyhow!("Failed to read config file {}: {}", path.display(), e)
+        }
+    })?;
 
-    // Parse JSON (for now - will add JSONC support later)
-    let config: Config = serde_json::from_str(&content)
+    // Parse JSONC (JSON with comments, per Rush Stack convention)
+    let stripped = json_comments::StripComments::new(content.as_bytes());
+    let config: Config = serde_json::from_reader(stripped)
         .map_err(|e| anyhow!("Failed to parse config file: {}", e))?;
 
     // Validate catalog names and types
@@ -211,6 +217,56 @@ pub fn load_config(path: &PathBuf) -> anyhow::Result<Config> {
     }
 
     Ok(config)
+}
+
+/// Validate that a config-file path setting is an absolute, literal path.
+///
+/// Rejects tilde expansion ('~'), environment variable substitution ('$'),
+/// and relative paths so config values mean the same thing regardless of
+/// the user's shell, working directory, or platform.
+pub fn validate_config_path(field_name: &str, value: &str) -> anyhow::Result<PathBuf> {
+    if value.starts_with('~') {
+        anyhow::bail!(
+            "Invalid {} '{}': '~' is not supported. Provide an absolute path.",
+            field_name,
+            value
+        );
+    }
+    if value.contains('$') {
+        anyhow::bail!(
+            "Invalid {} '{}': environment variable substitution is not supported. Provide an absolute path.",
+            field_name,
+            value
+        );
+    }
+    let path = PathBuf::from(value);
+    if !path.is_absolute() {
+        anyhow::bail!(
+            "Invalid {} '{}': must be an absolute path.",
+            field_name,
+            value
+        );
+    }
+    Ok(path)
+}
+
+/// Resolve the database path from config.
+///
+/// - If `database.path` is specified in config, validates it as an absolute path and returns it.
+/// - Otherwise returns `<tool_home>/default-db`.
+///
+/// Note: This uses `crate::paths::tool_home()` which handles MONODEX_HOME.
+pub fn resolve_database_path(config: Option<&Config>) -> anyhow::Result<PathBuf> {
+    // Check if database.path is specified in config
+    if let Some(config) = config
+        && let Some(db_config) = &config.database
+        && let Some(path) = &db_config.path
+    {
+        return validate_config_path("database.path", path);
+    }
+
+    // Default: <tool_home>/default-db
+    Ok(crate::paths::tool_home()?.join("default-db"))
 }
 
 // ============================================================================
@@ -239,10 +295,17 @@ pub fn resolve_embedding_config(config: &EmbeddingModelConfig) -> ResolvedEmbedd
                 }
                 Err(e) => {
                     eprintln!("Warning: Failed to auto-detect embedding config: {}", e);
-                    eprintln!("Using fallback: 1 instance × {} threads", num_cpus::get());
+                    eprintln!(
+                        "Using fallback: 1 instance × {} threads",
+                        std::thread::available_parallelism()
+                            .map(|n| n.get())
+                            .unwrap_or(1)
+                    );
                     ResolvedEmbeddingConfig {
                         model_instances: 1,
-                        threads_per_instance: num_cpus::get(),
+                        threads_per_instance: std::thread::available_parallelism()
+                            .map(|n| n.get())
+                            .unwrap_or(1),
                         total_ram: 0,
                         available_ram: 0,
                         estimated_ram_usage: estimate_ram_usage(1),
@@ -266,7 +329,7 @@ pub fn resolve_embedding_config(config: &EmbeddingModelConfig) -> ResolvedEmbedd
                 }
                 Err(e) => {
                     eprintln!("Warning: Failed to auto-detect embedding config: {}", e);
-                    eprintln!("Using fallback: 1 instance × {} threads", threads);
+                    eprintln!("Using fallback: 1 instance × {} threads", *threads);
                     ResolvedEmbeddingConfig {
                         model_instances: 1,
                         threads_per_instance: *threads,
@@ -422,7 +485,6 @@ mod tests {
         writeln!(
             file,
             r#"{{
-                "qdrant": {{ "collection": "test" }},
                 "catalogs": {{
                     "test": {{
                         "type": "invalid",
@@ -451,7 +513,6 @@ mod tests {
         writeln!(
             file,
             r#"{{
-                "qdrant": {{ "collection": "test" }},
                 "catalogs": {{
                     "sparo": {{
                         "type": "monorepo",
@@ -467,7 +528,7 @@ mod tests {
     }
 
     #[test]
-    fn test_load_config_accepts_max_upload_bytes() {
+    fn test_load_config_accepts_database_path() {
         let dir = tempdir().unwrap();
         let config_path = dir.path().join("config.json");
         let mut file = std::fs::File::create(&config_path).unwrap();
@@ -475,24 +536,25 @@ mod tests {
         writeln!(
             file,
             r#"{{
-                "qdrant": {{ "collection": "test", "maxUploadBytes": 20971520 }},
                 "catalogs": {{
                     "sparo": {{
                         "type": "monorepo",
                         "path": "/tmp/sparo"
                     }}
-                }}
+                }},
+                "database": {{ "path": "/custom/db" }}
             }}"#
         )
         .unwrap();
 
         let config = load_config(&config_path).unwrap();
-        assert_eq!(config.qdrant.max_upload_bytes, Some(20971520));
-        assert_eq!(config.qdrant.get_max_upload_bytes(), 20971520);
+        assert!(config.database.is_some());
+        let db_config = config.database.unwrap();
+        assert_eq!(db_config.path, Some("/custom/db".to_string()));
     }
 
     #[test]
-    fn test_load_config_max_upload_bytes_defaults() {
+    fn test_load_config_database_section_optional() {
         let dir = tempdir().unwrap();
         let config_path = dir.path().join("config.json");
         let mut file = std::fs::File::create(&config_path).unwrap();
@@ -500,7 +562,6 @@ mod tests {
         writeln!(
             file,
             r#"{{
-                "qdrant": {{ "collection": "test" }},
                 "catalogs": {{
                     "sparo": {{
                         "type": "monorepo",
@@ -512,10 +573,233 @@ mod tests {
         .unwrap();
 
         let config = load_config(&config_path).unwrap();
-        assert_eq!(config.qdrant.max_upload_bytes, None);
-        assert_eq!(
-            config.qdrant.get_max_upload_bytes(),
-            30 * 1024 * 1024 // 30MB default
+        assert!(config.database.is_none());
+    }
+
+    #[test]
+    fn test_resolve_database_path_rejects_tilde() {
+        let dir = tempdir().unwrap();
+        let config_path = dir.path().join("config.json");
+        let mut file = std::fs::File::create(&config_path).unwrap();
+
+        writeln!(
+            file,
+            r#"{{
+                "catalogs": {{}},
+                "database": {{ "path": "~/my-db" }}
+            }}"#
+        )
+        .unwrap();
+
+        let config = load_config(&config_path).unwrap();
+        let result = resolve_database_path(Some(&config));
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("'~' is not supported"),
+            "Expected error about tilde, got: {}",
+            err
         );
+        assert!(
+            err.contains("database.path"),
+            "Expected error to mention field name, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_resolve_database_path_rejects_env_var() {
+        let dir = tempdir().unwrap();
+        let config_path = dir.path().join("config.json");
+        let mut file = std::fs::File::create(&config_path).unwrap();
+
+        writeln!(
+            file,
+            r#"{{
+                "catalogs": {{}},
+                "database": {{ "path": "$HOME/my-db" }}
+            }}"#
+        )
+        .unwrap();
+
+        let config = load_config(&config_path).unwrap();
+        let result = resolve_database_path(Some(&config));
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("environment variable substitution is not supported"),
+            "Expected error about env var, got: {}",
+            err
+        );
+        assert!(
+            err.contains("database.path"),
+            "Expected error to mention field name, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_resolve_database_path_rejects_relative_path() {
+        let dir = tempdir().unwrap();
+        let config_path = dir.path().join("config.json");
+        let mut file = std::fs::File::create(&config_path).unwrap();
+
+        writeln!(
+            file,
+            r#"{{
+                "catalogs": {{}},
+                "database": {{ "path": "./my-db" }}
+            }}"#
+        )
+        .unwrap();
+
+        let config = load_config(&config_path).unwrap();
+        let result = resolve_database_path(Some(&config));
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("must be an absolute path"),
+            "Expected error about absolute path, got: {}",
+            err
+        );
+        assert!(
+            err.contains("database.path"),
+            "Expected error to mention field name, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_resolve_database_path_accepts_absolute_path() {
+        let dir = tempdir().unwrap();
+        let config_path = dir.path().join("config.json");
+        let mut file = std::fs::File::create(&config_path).unwrap();
+
+        writeln!(
+            file,
+            r#"{{
+                "catalogs": {{}},
+                "database": {{ "path": "/custom/db" }}
+            }}"#
+        )
+        .unwrap();
+
+        let config = load_config(&config_path).unwrap();
+        let path = resolve_database_path(Some(&config)).unwrap();
+        assert_eq!(path, PathBuf::from("/custom/db"));
+    }
+
+    #[test]
+    fn test_resolve_database_path_defaults_to_tool_home() {
+        // When no config or no database.path, should use <tool_home>/default-db
+        let path = resolve_database_path(None).unwrap();
+
+        // Should end with default-db
+        assert!(path.ends_with("default-db"));
+    }
+
+    #[test]
+    fn test_resolve_database_path_config_without_database_section() {
+        let dir = tempdir().unwrap();
+        let config_path = dir.path().join("config.json");
+        let mut file = std::fs::File::create(&config_path).unwrap();
+
+        writeln!(
+            file,
+            r#"{{
+                "catalogs": {{}}
+            }}"#
+        )
+        .unwrap();
+
+        let config = load_config(&config_path).unwrap();
+        let path = resolve_database_path(Some(&config)).unwrap();
+
+        // Should end with default-db
+        assert!(path.ends_with("default-db"));
+    }
+
+    #[test]
+    fn test_config_rejects_unknown_fields() {
+        let dir = tempdir().unwrap();
+        let config_path = dir.path().join("config.json");
+        let mut file = std::fs::File::create(&config_path).unwrap();
+
+        // Config with an unknown field "qdrant" (old Qdrant-era config)
+        writeln!(
+            file,
+            r#"{{
+                "catalogs": {{}},
+                "qdrant": {{
+                    "url": "http://localhost:6333",
+                    "collection": "monodex"
+                }}
+            }}"#
+        )
+        .unwrap();
+
+        let result = load_config(&config_path);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("unknown field"),
+            "Expected error about unknown field, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_load_config_missing_file_centralized_error() {
+        // Test that the "config file not found" error uses the centralized wording
+        let nonexistent_path = PathBuf::from("/nonexistent/path/to/config.json");
+        let result = load_config(&nonexistent_path);
+
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+
+        // Exact match on the centralized error message format
+        assert!(
+            err.starts_with("No config found at"),
+            "Expected error to start with 'No config found at', got: {}",
+            err
+        );
+        assert!(
+            err.contains("See the README for instructions on creating a config file."),
+            "Expected error to contain README hint, got: {}",
+            err
+        );
+        // Verify the path is included
+        assert!(
+            err.contains("/nonexistent/path/to/config.json"),
+            "Expected error to contain the path, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_load_config_parses_jsonc_with_line_comments() {
+        let dir = tempdir().unwrap();
+        let config_path = dir.path().join("config.json");
+        let mut file = std::fs::File::create(&config_path).unwrap();
+
+        // Config with // line comments (JSONC)
+        writeln!(
+            file,
+            r#"{{
+                // This is a line comment
+                "catalogs": {{
+                    // Another comment
+                    "sparo": {{
+                        "type": "monorepo", // inline comment
+                        "path": "/tmp/sparo"
+                    }}
+                }}
+                // Final comment
+            }}"#
+        )
+        .unwrap();
+
+        let config = load_config(&config_path).unwrap();
+        assert_eq!(config.catalogs.get("sparo").unwrap().r#type, "monorepo");
     }
 }

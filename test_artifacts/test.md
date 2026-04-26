@@ -14,29 +14,18 @@ Make sure you have Rust 1.70 or later installed.
 
 ## Configuration
 
-Create a configuration file at `~/.config/monodex/config.json`:
+Create a configuration file at `~/.monodex/config.json`:
 
 ```json
 {
-  "qdrant": {
-    "url": "http://localhost:6333",
-    "collection": "rush-stack"
-  },
   "catalogs": {
     "node-core-library": {
-      "type": "filesystem",
+      "type": "monorepo",
       "path": "/path/to/rushstack/libraries/node-core-library"
     }
   }
 }
 ```
-
-### Environment Variables
-
-You can also use environment variables:
-
-- `QDRANT_URL` - Qdrant server URL
-- `QDRANT_COLLECTION` - Collection name
 
 ## Usage
 
@@ -45,56 +34,29 @@ You can also use environment variables:
 To index a catalog:
 
 ```bash
-monodex crawl --catalog node-core-library
+monodex init-db
+monodex crawl --catalog node-core-library --label main --commit HEAD
 ```
 
 This will:
 1. Scan all TypeScript files
 2. Generate embeddings
-3. Upload to Qdrant
+3. Store in the local LanceDB database
 
 ### Querying
 
 To search the index:
 
 ```bash
-monodex query --text "how to read a JSON file"
+monodex search "JsonFile"
 ```
-
-Results are returned with:
-- Breadcrumb path
-- Code preview
-- Line numbers
-
-## Advanced Topics
-
-### Custom Chunking
-
-The partition algorithm splits code at AST boundaries:
-
-1. **Functions** - Split at statement blocks
-2. **Classes** - Split at method boundaries
-3. **Enums** - Split at member boundaries
-
-### Embedding Model
-
-We use `BAAI/bge-small-en-v1.5` which provides:
-- 384-dimensional vectors
-- 512 token maximum
-- Good semantic search quality
 
 ## Troubleshooting
 
-### Common Issues
+**Q: I get "No config found" error**
 
-**Q: Embeddings are slow**
+A: Make sure you have created the config file at `~/.monodex/config.json`.
 
-A: The first run downloads the model (~50MB). Subsequent runs are faster.
+**Q: I get "No monodex database" error**
 
-**Q: Out of memory**
-
-A: Reduce batch size with `--batch-size 16`.
-
-**Q: Connection refused**
-
-A: Make sure Qdrant is running on the configured URL.
+A: Run `monodex init-db` first to create the database.

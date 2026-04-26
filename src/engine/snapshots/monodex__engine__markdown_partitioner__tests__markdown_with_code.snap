@@ -28,113 +28,58 @@ cargo install monodex
 === CHUNK 3 ===
 Breadcrumb: monodex:API.md:configuration
 Type: section
-Lines: 15-33
-Size: 329 chars
+Lines: 15-29
+Size: 234 chars
 Preview:
 ## Configuration
 
-Create a configuration file at `~/.config/monodex/config.json`:
+Create a configuration file at `~/.monodex/config.json`:
 
 ```json
 {
 
 === CHUNK 4 ===
-Breadcrumb: monodex:API.md:environment-variables
-Type: section
-Lines: 34-40
-Size: 143 chars
-Preview:
-### Environment Variables
-
-You can also use environment variables:
-
-- `QDRANT_URL` - Qdrant server URL
-- `QDRANT_COLLECTION` - Collection name
-
-=== CHUNK 5 ===
 Breadcrumb: monodex:API.md:usage
 Type: section
-Lines: 41-42
+Lines: 30-31
 Size: 9 chars
 Preview:
 ## Usage
 
-=== CHUNK 6 ===
+=== CHUNK 5 ===
 Breadcrumb: monodex:API.md:indexing
 Type: section
-Lines: 43-55
-Size: 173 chars
+Lines: 32-45
+Size: 235 chars
 Preview:
 ### Indexing
 
 To index a catalog:
 
 ```bash
-monodex crawl --catalog node-core-library
+monodex init-db
 
-=== CHUNK 7 ===
+=== CHUNK 6 ===
 Breadcrumb: monodex:API.md:querying
 Type: section
-Lines: 56-68
-Size: 171 chars
+Lines: 46-53
+Size: 74 chars
 Preview:
 ### Querying
 
 To search the index:
 
 ```bash
-monodex query --text "how to read a JSON file"
+monodex search "JsonFile"
 
-=== CHUNK 8 ===
-Breadcrumb: monodex:API.md:advanced-topics
-Type: section
-Lines: 69-70
-Size: 19 chars
-Preview:
-## Advanced Topics
-
-=== CHUNK 9 ===
-Breadcrumb: monodex:API.md:custom-chunking
-Type: section
-Lines: 71-78
-Size: 208 chars
-Preview:
-### Custom Chunking
-
-The partition algorithm splits code at AST boundaries:
-
-1. **Functions** - Split at statement blocks
-2. **Classes** - Split at method boundaries
-
-=== CHUNK 10 ===
-Breadcrumb: monodex:API.md:embedding-model
-Type: section
-Lines: 79-85
-Size: 146 chars
-Preview:
-### Embedding Model
-
-We use `BAAI/bge-small-en-v1.5` which provides:
-- 384-dimensional vectors
-- 512 token maximum
-- Good semantic search quality
-
-=== CHUNK 11 ===
+=== CHUNK 7 ===
 Breadcrumb: monodex:API.md:troubleshooting
 Type: section
-Lines: 86-87
-Size: 19 chars
+Lines: 54-62
+Size: 230 chars
 Preview:
 ## Troubleshooting
 
-=== CHUNK 12 ===
-Breadcrumb: monodex:API.md:common-issues
-Type: section
-Lines: 88-100
-Size: 270 chars
-Preview:
-### Common Issues
+**Q: I get "No config found" error**
 
-**Q: Embeddings are slow**
-
-A: The first run downloads the model (~50MB). Subsequent runs are faster.
+A: Make sure you have created the config file at `~/.monodex/config.json`.

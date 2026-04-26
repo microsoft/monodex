@@ -277,7 +277,7 @@ fn validate_label_payload(payload: &str) -> Result<(), IdentifierError> {
 /// A validated label identifier in storage form (catalog:label).
 ///
 /// This type guarantees that the label_id has been validated and contains
-/// only allowed characters. It is used internally for Qdrant storage and
+/// only allowed characters. It is used internally for storage and
 /// is never shown directly to users.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct LabelId {
@@ -299,8 +299,8 @@ impl LabelId {
         })
     }
 
-    /// Creates a LabelId without validation (for reading from Qdrant).
-    #[allow(dead_code)]
+    /// Creates a LabelId without validation (for reading from storage).
+    #[cfg(test)]
     pub fn new_unchecked(catalog: &str, label: &str) -> Self {
         Self {
             catalog: catalog.to_string(),
@@ -325,13 +325,13 @@ impl LabelId {
     }
 
     /// Returns the catalog component.
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn catalog(&self) -> &str {
         &self.catalog
     }
 
     /// Returns the label component.
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn label(&self) -> &str {
         &self.label
     }
@@ -375,7 +375,7 @@ impl serde::Serialize for LabelId {
 // ============================================================================
 
 /// Computes the label_id string from catalog and label names.
-#[allow(dead_code)]
+#[cfg(test)]
 pub fn compute_label_id(catalog: &str, label: &str) -> Result<String, IdentifierError> {
     validate_catalog(catalog)?;
     validate_label(label)?;

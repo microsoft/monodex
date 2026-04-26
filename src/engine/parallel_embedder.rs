@@ -58,7 +58,9 @@ impl Default for ParallelConfig {
     fn default() -> Self {
         // 4 workers × 3 threads = 12 cores (good for M3 MacBook Pro)
         // Adjust based on available cores
-        let total_cores = num_cpus::get();
+        let total_cores = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(1);
         let num_workers = 4;
         let intra_threads = (total_cores / num_workers).max(1);
 

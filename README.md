@@ -11,11 +11,11 @@
 [![crates.io](https://img.shields.io/crates/v/monodex.svg)](https://crates.io/crates/monodex)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-**Semantic search indexer for Rush monorepos using Qdrant vector database**
+**Semantic search indexer for Rush monorepos**
 
 ## Overview
 
-`monodex` is a CLI tool that indexes Rush monorepo source code and documentation into a Qdrant vector database for scalable semantic search. It supports **label-based indexing**, allowing you to maintain multiple queryable snapshots (branches, commits) within a single catalog.
+`monodex` is a CLI tool that indexes Rush monorepo source code and documentation into a local LanceDB database for fast semantic search. It supports **label-based indexing**, allowing you to maintain multiple queryable snapshots (branches, commits) within a single catalog.
 
 See [CHANGELOG.md](./CHANGELOG.md) for release history.
 
@@ -27,10 +27,21 @@ See [CHANGELOG.md](./CHANGELOG.md) for release history.
 - **Breadcrumb context**: Full symbol paths like `@rushstack/node-core-library:JsonFile.ts:JsonFile.load`
 - **Oversized chunk handling**: Functions split at natural AST boundaries (statement blocks, if/else, try/catch)
 - **Local embeddings**: Uses jina-embeddings-v2-base-code with ONNX Runtime (no external APIs)
-- **Qdrant integration**: Direct batch uploads to Qdrant vector database
+- **LanceDB integration**: Embedded vector database (no external services required)
 - **Incremental sync**: Content-hash based change detection for fast re-indexing
 - **Intelligent deduplication**: Identical content at same path across labels shares chunks
 - **Rush-optimized**: Smart exclusion rules for Rush monorepo patterns
+
+### Vocabulary
+
+Monodex uses a few terms to describe the containment hierarchy:
+
+- A **database** is the on-disk store — by default `~/.monodex/default-db`. Everything lives here.
+- A **catalog** is a named monorepo registered in your config. You might have one catalog per codebase.
+- A **label** is a named fileset within a catalog — typically a branch or commit. Searches are scoped to a label.
+- A **chunk** is a unit of indexed content (function, class, section) with its embedding.
+
+Hierarchy: **database** › **catalog** › **label** › **chunk**
 
 ## Agent Usage Guide
 
@@ -71,10 +82,19 @@ This tool is designed for AI assistants. The indexed database provides a complet
 
 ## Prerequisites
 
-- **Rust**: 1.91+ (for edition 2024)
-- **Qdrant**: Vector database running on localhost:6333 (only needed for crawling/searching)
+- **Rust**: 1.93+ (for edition 2024)
 
-  Installation instructions can be found in the [Qdrant Quickstart](https://qdrant.tech/documentation/quickstart/) documentation.
+- **Protocol Buffers compiler (`protoc`)**: Required at build time by LanceDB's transitive dependencies. Install via your platform package manager:
+
+  | Platform      | Command                                  |
+  | ------------- | ---------------------------------------- |
+  | Windows       | `winget install protobuf`                |
+  | macOS         | `brew install protobuf`                  |
+  | Debian/Ubuntu | `sudo apt-get install protobuf-compiler` |
+  | Fedora/RHEL   | `sudo dnf install protobuf-compiler`     |
+  | Arch          | `sudo pacman -S protobuf`                |
+
+  Verify with `protoc --version` (any recent 3.x or 4.x/20+ release works). If `protoc` is installed in a non-standard location, set the `PROTOC` environment variable to its full path before building.
 
 - **Model**: jina-embeddings-v2-base-code (auto-downloaded from HuggingFace to `models/` on first use)
 
@@ -96,31 +116,70 @@ cargo build --release
 # Binary will be at ./target/release/monodex
 ```
 
-## Qdrant Setup
+## Configuration
 
-Create the collection before first use:
+Create `~/.monodex/config.json`:
 
-```bash
-curl -X PUT "http://localhost:6333/collections/monodex" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "vectors": {
-      "size": 768,
-      "distance": "Cosine"
+```json
+{
+  // Database configuration (optional, defaults to ~/.monodex/default-db)
+  // "database": {
+  //   "path": "/absolute/path/to/your/db"
+  // },
+
+  // Catalog definitions (required)
+  "catalogs": {
+    "sparo": {
+      "type": "monorepo",
+      "path": "/path/to/sparo"
+    },
+    "rushstack": {
+      "type": "monorepo",
+      "path": "/path/to/rushstack"
     }
-  }'
+  },
+
+  // Embedding model configuration (optional, defaults shown)
+  // "embeddingModel": {
+  //   "modelInstances": "auto",
+  //   "threadsPerInstance": "auto"
+  // }
+}
 ```
 
-Verify the collection exists:
+> **Note:** We use the [Sparo](https://github.com/tiktok/sparo) monorepo for development testing, since it's a small open-source Rush monorepo.
+
+**Fields:**
+
+| Field                               | Required | Description                                                                         |
+| ----------------------------------- | -------- | ----------------------------------------------------------------------------------- |
+| `catalogs.<name>.type`              | Yes      | Catalog type: `"monorepo"`                                                          |
+| `catalogs.<name>.path`              | Yes      | Absolute path to the repository root                                                |
+| `database.path`                     | No       | Custom database path (default: `~/.monodex/default-db`). If set, it must be an absolute path. Tilde (`~`), environment variables (`$VAR`), and relative paths are not supported. |
+| `embeddingModel.modelInstances`     | No       | Number of ONNX model instances (default: `"auto"`). Primary driver of memory usage. |
+| `embeddingModel.threadsPerInstance` | No       | Threads per model instance (default: `"auto"`). CPU tuning only.                    |
+
+**Embedding model configuration:**
+
+The `embeddingModel` section controls memory and CPU usage for embedding generation:
+
+- **`modelInstances`**: Number of ONNX sessions. Each session uses approximately 700MB–1GB for the model weights and runtime, but the auto-detection heuristic plans for 2.5 GiB per instance to provide conservative headroom for memory fragmentation, peak usage during inference, and avoiding OOM on memory-constrained systems. Use `"auto"` to automatically size based on available system memory, or an integer ≥ 1 for explicit control.
+- **`threadsPerInstance`**: Threads per ONNX session for intra-op parallelism. Use `"auto"` to automatically size based on CPU cores, or an integer ≥ 1 for explicit control.
+
+**Catalog types:**
+
+- **`monorepo`**: Walks upward to find the nearest `package.json` for package name resolution. Breadcrumbs show `@scope/package-name:File.ts:Symbol`.
+
+
+## First-Time Setup
+
+Before using monodex, initialize the database:
 
 ```bash
-curl http://localhost:6333/collections/monodex | jq '.result.status'
+monodex init-db
 ```
 
-The collection uses:
-
-- **768 dimensions** (jina-embeddings-v2-base-code output size)
-- **Cosine distance** (best for semantic similarity)
+This creates a local LanceDB database at `~/.monodex/default-db/`. No external services are required.
 
 ## Usage
 
@@ -130,7 +189,7 @@ The collection uses:
 # Use a custom config file location
 monodex --config /path/to/config.json search --text "query"
 
-# Enable verbose debug logging for network requests
+# Enable verbose debug logging for storage operations
 monodex --debug crawl --catalog myrepo --label main --commit HEAD
 
 # Show help for any command
@@ -145,67 +204,15 @@ monodex --version
 
 The `--debug` flag enables verbose logging for troubleshooting:
 
-- Logs HTTP request/response details for Qdrant API calls
-- Shows batch sizes and payload sizes during uploads
-- Useful for diagnosing connectivity or payload issues
+- Logs storage-layer operations
+- Shows batch sizes during uploads
+- Useful for diagnosing database issues
 
 Example:
 
 ```bash
 monodex --debug crawl --catalog sparo --label main --commit HEAD
 ```
-
-### Configuration
-
-Create `~/.monodex/config.json`:
-
-```json
-{
-  "qdrant": {
-    "url": "http://localhost:6333",
-    "collection": "monodex"
-  },
-  "catalogs": {
-    "sparo": {
-      "type": "monorepo",
-      "path": "/path/to/sparo"
-    },
-    "rushstack": {
-      "type": "monorepo",
-      "path": "/path/to/rushstack"
-    }
-  },
-  "embeddingModel": {
-    "modelInstances": "auto",
-    "threadsPerInstance": "auto"
-  }
-}
-```
-
-> **Note:** We use the [Sparo](https://github.com/tiktok/sparo) monorepo for development testing, since it's a small open-source Rush monorepo.
-
-**Fields:**
-
-| Field                               | Required | Description                                                                         |
-| ----------------------------------- | -------- | ----------------------------------------------------------------------------------- |
-| `qdrant.url`                        | No       | Qdrant server URL (default: `http://localhost:6333`)                                |
-| `qdrant.collection`                 | Yes      | Qdrant collection name                                                              |
-| `qdrant.maxUploadBytes`             | No       | Max upload payload size in bytes (default: 30MB)                                    |
-| `catalogs.<name>.type`              | Yes      | Catalog type: `"monorepo"`                                                          |
-| `catalogs.<name>.path`              | Yes      | Absolute path to the repository root                                                |
-| `embeddingModel.modelInstances`     | No       | Number of ONNX model instances (default: `"auto"`). Primary driver of memory usage. |
-| `embeddingModel.threadsPerInstance` | No       | Threads per model instance (default: `"auto"`). CPU tuning only.                    |
-
-**Embedding model configuration:**
-
-The `embeddingModel` section controls memory and CPU usage for embedding generation:
-
-- **`modelInstances`**: Number of ONNX sessions. Each session uses approximately 700MB–1GB for the model weights and runtime, but the auto-detection heuristic plans for 2.5 GiB per instance to provide conservative headroom for memory fragmentation, peak usage during inference, and avoiding OOM on memory-constrained systems. Use `"auto"` to automatically size based on available system memory, or an integer ≥ 1 for explicit control.
-- **`threadsPerInstance`**: Threads per ONNX session for intra-op parallelism. Use `"auto"` to automatically size based on CPU cores, or an integer ≥ 1 for explicit control.
-
-**Catalog types:**
-
-- **`monorepo`**: Walks upward to find the nearest `package.json` for package name resolution. Breadcrumbs show `@scope/package-name:File.ts:Symbol`.
 
 ### Label-Based Indexing
 
@@ -330,11 +337,23 @@ monodex audit-chunks --count 20 --dir /path/to/project
 # Purge all chunks from a catalog (all labels)
 monodex purge --catalog rushstack
 
-# Purge entire collection (all catalogs)
+# Purge entire database (all catalogs)
 monodex purge --all
 ```
 
 **Note:** Purge operates at catalog level. To remove a specific label's chunks, re-crawl that label with a different commit or manually update the `active_label_ids` field.
+
+### Database Management
+
+```bash
+# Initialize the database (required before first crawl)
+monodex init-db
+
+# Re-run is safe - idempotent if database already exists
+monodex init-db
+```
+
+The database is stored at `~/.monodex/default-db/` by default. You can customize this location via the `database.path` field in config.
 
 ## Development
 
@@ -411,6 +430,7 @@ monodex/
 │       ├── markdown_partitioner.rs # Markdown heading-based chunking
 │       ├── package_lookup.rs     # Package name resolution
 │       ├── parallel_embedder.rs  # Parallel embedding with ONNX sessions
+│       ├── schema.rs             # LanceDB schema definitions
 │       ├── system_info.rs        # Memory and CPU detection
 │       ├── util.rs               # Hash utilities for chunk IDs
 │       ├── partitioner/          # TypeScript/TSX AST-based chunking
@@ -421,14 +441,12 @@ monodex/
 │       │   ├── node_analysis.rs  # AST node analysis helpers
 │       │   ├── scoring.rs        # Chunk quality scoring
 │       │   └── debug.rs          # Debug output types
-│       └── uploader/             # Qdrant HTTP client
+│       └── storage/              # LanceDB storage layer
 │           ├── mod.rs            # Module exports
-│           ├── client.rs         # HTTP client and connection
-│           ├── models.rs         # Request/response types
-│           ├── upload.rs         # Batch upload operations
-│           ├── file_ops.rs       # File-level operations
-│           ├── label_ops.rs      # Label metadata operations
-│           └── search.rs         # Query operations
+│           ├── database.rs       # Database open and validation
+│           ├── chunks.rs         # Chunk storage operations
+│           ├── labels.rs         # Label metadata operations
+│           └── rows.rs           # Row type definitions
 ├── Cargo.toml                    # Dependencies
 ├── DESIGN.md                     # Design documentation
 └── README.md                     # This file
@@ -557,7 +575,7 @@ In this repo:
 
 Online references:
 
-- [Qdrant](https://qdrant.ai/) - Vector similarity search engine
+- [LanceDB](https://lancedb.github.io/lancedb/) - Serverless vector database
 - [ONNX Runtime](https://onnxruntime.ai/) - Cross-platform ML inference
 - [Rush Stack](https://rushstack.io/) - Monorepo toolkit for JavaScript/TypeScript
 

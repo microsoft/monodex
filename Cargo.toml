@@ -1,12 +1,12 @@
 [package]
 name = "monodex"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2024"
 rust-version = "1.93"
-description = "Semantic search indexer for Rush monorepos using Qdrant vector database"
+description = "Fast, accurate code search for large Rush monorepos"
 license = "MIT"
 repository = "https://github.com/microsoft/monodex"
-keywords = ["semantic-search", "qdrant", "monorepo", "embeddings", "code-search"]
+keywords = ["semantic-search", "monorepo", "embeddings", "code-search"]
 categories = ["command-line-utilities", "development-tools"]
 readme = "README.md"
 exclude = [
@@ -36,22 +36,30 @@ walkdir = "2.5.0"
 # Serialization
 serde = { version = "1.0.215", features = ["derive"] }
 serde_json = "1.0.133"
+json_comments = "0.2"
 
-# HTTP
-reqwest = { version = "0.13", features = ["json", "blocking"] }
+# Vector database (LanceDB - embedded, in-process)
+lancedb = "0.27"
+arrow-array = "57"
+arrow-schema = "57"
+arrow-buffer = "57"
+
+# Async runtime (needed for LanceDB)
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+futures = "0.3"
 
 # Utilities
 anyhow = "1.0.93"
 thiserror = "2.0"
+time = "0.3"
 globset = "0.4"
 dirs = "5.0"
 twox-hash = "2.1"
-shellexpand = "3.0"
 sha2 = "0.11"
 hex = "0.4"
 github-slugger = "0.1"
-num_cpus = "1.16"
 rayon = "1.10"
+fs4 = "0.12"
 crossbeam-channel = "0.5"
 sysinfo = "0.33"
 

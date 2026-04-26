@@ -34,6 +34,9 @@ jobs:
           rustc --version
           cargo --version
 
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+
       - name: Cache cargo registry, git deps, and target
         uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809
         with:

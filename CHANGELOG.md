@@ -23,17 +23,36 @@ PUBLISHING PROCEDURE:
 4. After publishing, the next PR author will add a new "## Unreleased" section
 -->
 
-## Unreleased
+## 0.5.0 (2026-04-26)
 
 ### Changed
 
-- **Tool home moved to `~/.monodex/`**: All monodex state files now live under `~/.monodex/` instead of `~/.config/monodex/`. This provides a consistent location across all platforms (Linux, macOS, Windows) and follows the convention of developer tools like `cargo`, `rustup`, and `npm`. Set the `MONODEX_HOME` environment variable to override the default location. On first run, if old config files are found at the previous location, monodex prints a warning suggesting migration.
+- **Breaking: switched vector storage from Qdrant to LanceDB**: Monodex now uses LanceDB as an embedded, in-process vector database instead of a separate Qdrant server.
+  - No external service to install, run, or configure. The database is a directory on disk.
+  - The on-disk format is incompatible with prior versions. Existing users must delete their old Qdrant collection and re-crawl.
+  - Removes the `qdrant` section (`url`, `collection`, `maxUploadBytes`) from `config.json`. An old config containing a `qdrant` section will be rejected.
+
+- **Breaking: new `init-db` command, required before first crawl**: Run `monodex init-db` once to create the database. This replaces the old step of provisioning a Qdrant collection.
+
+- **Database location is configurable**: Defaults to `~/.monodex/default-db/`. Set `database.path` in `config.json` to override. The path must be absolute. Tilde expansion (`~`), environment variables (`$VAR`), and relative paths are not supported.
+
+- **Search output now reports distance instead of score**: Lower numbers are better. Output format is `dist=N.NNN`.
+
+- **Tool home moved to `~/.monodex/`**: All monodex state files now live under `~/.monodex/` instead of `~/.config/monodex/`. This provides a consistent location across all platforms (Linux, macOS, Windows). Set the `MONODEX_HOME` environment variable to override the default location. On first run, if old config files are found at the previous location, monodex prints a warning suggesting migration.
 
 ### Added
 
-- **Chunking warning persistence**: Files that require fallback line-based splitting (when AST chunking fails) are now tracked and persisted to `~/.config/monodex/warnings-<catalog>.json`. The crawl command reports these files with their relative paths and shows a warning count during progress.
+- **Chunking warning persistence**: Files that require fallback line-based splitting (when AST chunking fails) are now tracked and persisted to `<database>/warnings-<catalog>.json`. The crawl command reports these files with their relative paths and shows a warning count during progress.
 
-## 0.4.0 (2025-01-17)
+- **Documentation updates**: README now shows Configuration before First-Time Setup, correct Rust version (1.93+), and updated debug flag description. DESIGN.md has a new vocabulary orientation, corrected schema documentation, and a current-state error-handling section.
+
+### Fixed
+
+- **Config files now support JSONC (JSON with comments)**: Config files can include `//` line comments, per Rush Stack convention.
+
+- **Example config catalog names**: The example `config.json` now uses valid kebab-case catalog names (`my-monorepo`, `another-monorepo`) instead of invalid underscored names that would fail validation.
+
+## 0.4.0 (2026-04-18)
 
 ### Changed
 
@@ -49,9 +68,7 @@ PUBLISHING PROCEDURE:
 - **Cgroup-aware memory warning**: Fixed a bug where memory warnings in containerized environments would compare against host-level available RAM instead of cgroup-limited available RAM. This caused the warning to never fire even when the container was at risk of OOM.
 - **Config field mapping**: The `embeddingModel` field in `config.json` is now correctly mapped to the Rust struct via `#[serde(rename = "embeddingModel")]`. Previously, this field was silently ignored due to snake_case/camelCase mismatch.
 
-## 0.3.0
-
-_Released on April 16, 2026 (UTC)_
+## 0.3.0 (2026-04-16)
 
 ### Changed
 
@@ -65,9 +82,7 @@ _Released on April 16, 2026 (UTC)_
 
 - **Working directory blob IDs now match Git blob IDs**: `--working-dir` mode now uses Git CLI batch commands (`git ls-files`, `git status`, `git hash-object`) to compute blob IDs that respect `.gitattributes`, clean filters, and other repo-specific settings. This ensures identical content produces the same `file_id` in both `--commit` and `--working-dir` modes, enabling proper incremental skipping.
 
-## 0.2.0
-
-_Released on April 14, 2026 (UTC)_
+## 0.2.0 (2026-04-14)
 
 ### Updates
 
@@ -76,9 +91,7 @@ _Released on April 14, 2026 (UTC)_
 - Implement rewind upload algorithm for large batch splitting to avoid Qdrant payload limits
 - Improve upload error handling: preserve chunks on failure, report clear error messages
 
-## 0.1.0
-
-_Released on April 10, 2026 (UTC)_
+## 0.1.0 (2026-04-10)
 
 ### Minor changes
 
@@ -99,8 +112,6 @@ _Released on April 10, 2026 (UTC)_
 - Fix race condition in crawl checkpointing
 - Increase HTTP timeout for wait=true operations
 
-## 0.0.1
-
-_Released on April 8, 2026 (UTC)_
+## 0.0.1 (2026-04-08)
 
 - Initial release

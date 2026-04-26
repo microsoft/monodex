@@ -20,7 +20,7 @@ Each file should have **one dominant reason to be edited**. Not "one subsystem" 
 ## Where to put new code
 
 - **New CLI command** → new file in `app/commands/`, named after the subcommand. Add variant to `Commands` in `cli.rs`. Add dispatch arm in `main.rs`.
-- **New Qdrant operation** → pick the `engine/uploader/` submodule by operation family: `upload.rs`, `file_ops.rs`, `label_ops.rs`, or `search.rs`.
+- **New storage operation** → pick the `engine/storage/` submodule by operation family: `database.rs` for connection/open, `chunks.rs` for chunk operations, `labels.rs` for label metadata operations.
 - **New partitioner heuristic** → `split_search.rs` for split-point logic, `node_analysis.rs` for AST node properties, `scoring.rs` for quality measurement.
 - **New config field** → `app/config.rs` for app-level config, `engine/config.rs` for engine-level chunking config, `engine/crawl_config.rs` for crawl filtering rules.
 - **Shared utility** → `engine/util.rs` for engine-wide, `app/util.rs` for app-wide formatting/display.
@@ -45,7 +45,7 @@ Every non-trivial file must start with:
 ## Naming
 
 - Command handlers: named after the CLI subcommand (`purge.rs`, `search.rs`). Use `use_cmd.rs` for `use` (reserved keyword).
-- Engine submodule directories: named after the concept (`partitioner/`, `uploader/`).
+- Engine submodule directories: named after the concept (`partitioner/`, `storage/`).
 - Type-only files: `types.rs` or `models.rs`.
 - Test files: `tests.rs` (singular).
 

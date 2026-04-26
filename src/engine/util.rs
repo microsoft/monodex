@@ -52,47 +52,8 @@ pub fn compute_file_id(
 /// # Arguments
 /// * `file_id` - The file's semantic identity (16-char hex string)
 /// * `chunk_ordinal` - 1-indexed position of the chunk in the file
-///
-/// Convert any string to a deterministic UUID for Qdrant compatibility
-pub fn string_to_uuid(input: &str) -> String {
-    let mut hasher = XxHash64::with_seed(0);
-    input.hash(&mut hasher);
-    let hash1 = hasher.finish();
-
-    // Hash again with different seed for second half
-    let mut hasher2 = XxHash64::with_seed(1);
-    input.hash(&mut hasher2);
-    let hash2 = hasher2.finish();
-
-    // Format as UUID: 8-4-4-4-12 (32 hex chars total)
-    format!(
-        "{:08x}-{:04x}-{:04x}-{:04x}-{:012x}",
-        (hash1 >> 32) as u32,
-        ((hash1 >> 16) as u16),
-        hash1 as u16,
-        (hash2 >> 48) as u16,
-        hash2 & 0xFFFFFFFFFFFF
-    )
-}
-
 pub fn compute_point_id(file_id: &str, chunk_ordinal: usize) -> String {
-    let combined = format!("{}:{}", file_id, chunk_ordinal);
-    string_to_uuid(&combined)
-}
-
-/// Legacy function: Compute file ID from relative path only.
-/// Used for backward compatibility during migration.
-#[allow(dead_code)]
-pub fn compute_file_id_legacy(relative_path: &str) -> u64 {
-    let mut hasher = XxHash64::with_seed(0);
-    relative_path.hash(&mut hasher);
-    hasher.finish()
-}
-
-/// Convert u64 file ID to display format (16-char lowercase hex)
-#[allow(dead_code)]
-pub fn display_file_id(file_id: u64) -> String {
-    format!("{:016x}", file_id)
+    format!("{}:{}", file_id, chunk_ordinal)
 }
 
 #[cfg(test)]

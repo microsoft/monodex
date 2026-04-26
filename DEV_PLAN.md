@@ -10,12 +10,10 @@ This plan implements label-based semantic indexing with incremental crawl. The w
 
 - **Development testing**: Use the `sparo` catalog (small monorepo, ~266 chunks, fast iteration)
 - **Final verification**: Use the `rushstack` catalog (large monorepo, hours to crawl - run by user only)
-- **Qdrant collection**: Named `monodex` (not `rushstack`)
 
 **Example catalogs in config:**
 ```json
 {
-  "qdrant": { "url": "http://localhost:6333", "collection": "monodex" },
   "catalogs": {
     "sparo": { "type": "monorepo", "path": "/path/to/sparo" },
     "rushstack": { "type": "monorepo", "path": "/path/to/rushstack" }
@@ -72,7 +70,7 @@ Create `src/engine/git_ops.rs`:
 
 ## Phase 2: Schema Changes ✅ COMPLETE
 
-**Goal:** Update Qdrant payload schema to support labels and commit-based identity.
+**Goal:** Update chunk schema to support labels and commit-based identity.
 
 ### 2.1 Update PointPayload Struct
 
@@ -91,12 +89,10 @@ In `src/engine/uploader.rs`:
 
 ### 2.2 Add LabelMetadata Struct
 
-- [x] Create `LabelMetadata` struct for label metadata points
-- [x] Use `source_type: "label-metadata"` as discriminator
-- [x] Point ID is the `label_id` string (direct lookup)
-- [x] Store zero-vector (768 dims of 0.0) - required by Qdrant but never used in search
+- [x] Create `LabelMetadata` struct for label metadata
+- [x] Store in separate `label_metadata` table (LanceDB)
 
-### 2.3 Update Qdrant Operations
+### 2.3 Update Storage Operations
 
 - [x] Add `upsert_label_metadata(label: LabelMetadata)`
 - [x] Add `get_label_metadata(label_id) -> Option<LabelMetadata>`
@@ -262,7 +258,7 @@ In `src/main.rs`:
 - [x] Changed warning emoji from ⚠️ to ❌ for actual errors to improve visibility
 
 **Deferred to Phase 6 (Edge Case Testing):**
-- [ ] Kill Qdrant mid-crawl: verify partial chunks exist, label metadata shows incomplete
+- [ ] Interrupt crawl (CTRL+C): verify partial chunks exist, label metadata shows incomplete
 - [ ] Resume after partial failure: verify crawl continues from where it stopped
 - [ ] Verify orphaned chunks (uploaded but not labeled) are found by future `monodex gc` command
 
@@ -320,7 +316,7 @@ In `src/main.rs`:
 
 ### 6.6 Fresh Installation Verification
 
-- [ ] Delete Qdrant collection
+- [ ] Delete database directory
 - [ ] Fresh crawl with new schema
 - [ ] Verify all operations work from clean state
 
@@ -350,7 +346,7 @@ The following tests were skipped and should be run manually before release:
   - Verify label reassignment does NOT run for partial crawls
 
 - [ ] **Fresh installation (Phase 6.6)**:
-  - Delete Qdrant collection
+  - Delete database directory
   - Fresh crawl with new schema
   - Verify all operations work from clean state
 
@@ -414,7 +410,7 @@ In `src/engine/git_ops.rs`:
   - Crawl `--working-dir --label working`
   - Verify both labels can coexist, search returns correct results for each
 
-**Note:** These tests require a live Qdrant instance and manual verification.
+**Note:** These tests require a live database and manual verification.
 
 ### 7.5 Document Working Directory Mode
 
@@ -463,7 +459,7 @@ In `src/engine/git_ops.rs`:
 
 ### 8.4 Implement Strict Validation ✅ COMPLETE
 
-- [x] Add `#[serde(deny_unknown_fields)]` to all config structs (crawl config + existing Config, QdrantConfig, DefaultContext)
+- [x] Add `#[serde(deny_unknown_fields)]` to all config structs (crawl config + existing Config, DatabaseConfig, DefaultContext)
 - [x] Implement `validate()` method on `CrawlConfig`:
   - `version == 1`
   - Strategy names are valid
@@ -623,7 +619,9 @@ In `src/engine/git_ops.rs`:
 
 ## Bug Fixes: Working Directory Hash Incompatibility
 
-**Issue:** The `--working-dir` feature uses a different content hash format than Git commit crawls, preventing incremental skipping between the two modes. The same file with identical content will have different `file_id` values, resulting in duplicate chunks stored in Qdrant and wasted embedding compute.
+> **Note:** This issue was resolved. The working directory mode now uses Git-compatible blob IDs, enabling incremental skipping between commit and working-dir crawls.
+
+**Issue:** The `--working-dir` feature uses a different content hash format than Git commit crawls, preventing incremental skipping between the two modes. The same file with identical content will have different `file_id` values, resulting in duplicate chunks stored and wasted embedding compute.
 
 **Root Cause Analysis:**
 
@@ -665,7 +663,9 @@ The `blob_id` component differs by crawl source:
 
 ---
 
-## Bug Fixes: Qdrant Upload Payload Limit
+## Bug Fixes: Qdrant Upload Payload Limit [OBSOLETE - Qdrant removed in LanceDB migration]
+
+> **Note:** This section documents work that was completed for the Qdrant backend. The Qdrant uploader was removed when Monodex migrated to LanceDB. This history is preserved for reference.
 
 **Issue:** Qdrant has a 32MB payload limit for HTTP requests. Large batches (3700+ chunks) exceed this limit, causing HTTP 400 errors. The original error handling swallowed these errors and did not retry, resulting in data loss and confusing output.
 
@@ -798,9 +798,9 @@ Monodex is explicitly designed for AI assistants, but agents currently have to s
 
 ### Hybrid Search (Vector + Keyword)
 
-Pure vector search can miss exact identifier matches — searching for `handleAuth` may not find the function if the embedding doesn't preserve the exact token. Combining vector similarity with keyword/text matching using Reciprocal Rank Fusion (RRF) addresses this. Qdrant supports full-text search indexes natively, so this can be implemented server-side rather than loading all chunks into memory.
+Pure vector search can miss exact identifier matches — searching for `handleAuth` may not find the function if the embedding doesn't preserve the exact token. Combining vector similarity with keyword/text matching using Reciprocal Rank Fusion (RRF) addresses this. Tantivy (planned for a future milestone) will provide per-label full-text search indexes.
 
-- [ ] Add a full-text search index to the Qdrant collection for the `text` field
+- [ ] Add Tantivy-based full-text search index per label
 - [ ] Implement RRF fusion of vector and keyword results
 - [ ] Make hybrid search configurable (enable/disable, tunable k parameter)
 
@@ -809,7 +809,7 @@ Pure vector search can miss exact identifier matches — searching for `handleAu
 Configurable score multipliers based on file path patterns would let users tune search relevance — boosting source directories and penalizing test/mock/generated/vendor files. Monodex's crawl config already excludes some file patterns entirely, but there are cases where files should be indexed but ranked lower, not invisible.
 
 - [ ] Add a `searchBoost` section to the crawl config with penalties and bonuses by path pattern
-- [ ] Apply multipliers to search scores after Qdrant returns results
+- [ ] Apply multipliers to search scores after vector search returns results
 - [ ] Ship sensible defaults (boost `src/`, penalize `test/`, `mock/`, `generated/`, `.md`)
 
 ### JSON Output Mode
@@ -857,15 +857,25 @@ When making a pull request, add a bullet under "## Unreleased" in CHANGELOG.md d
 src/
 ├── main.rs                    # CLI entry point
 └── engine/
+    ├── breadcrumb.rs          # Breadcrumb context generation
     ├── chunker.rs             # File chunking dispatcher
     ├── config.rs              # Config loading and file exclusion rules
+    ├── crawl_config.rs        # Crawl filtering rules
     ├── git_ops.rs             # Git tree enumeration and blob reading
+    ├── identifier.rs          # Catalog/label identifier validation
     ├── markdown_partitioner.rs # Markdown heading-based chunking
     ├── mod.rs                 # Module exports
     ├── package_lookup.rs      # Package name resolution (walk up to package.json)
     ├── parallel_embedder.rs   # Parallel embedding with multiple ONNX sessions
     ├── partitioner.rs         # AST-based TypeScript chunking
-    ├── uploader.rs            # Qdrant HTTP client
+    ├── schema.rs              # LanceDB schema definitions
+    ├── storage/               # LanceDB storage layer
+    │   ├── mod.rs             # Module exports
+    │   ├── database.rs        # Database open and validation
+    │   ├── chunks.rs          # Chunk storage operations
+    │   ├── labels.rs          # Label metadata operations
+    │   └── rows.rs            # Row type definitions
+    ├── system_info.rs         # Memory and CPU detection
     └── util.rs                # Hash utilities for chunk IDs
 ```
 

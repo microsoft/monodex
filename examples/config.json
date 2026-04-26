@@ -1,16 +1,24 @@
 {
-  "qdrant": {
-    "url": "http://localhost:6333",
-    "collection": "my_monorepo"
-  },
+  // Database configuration (optional, defaults to ~/.monodex/default-db)
+  // "database": {
+  //   "path": "/absolute/path/to/your/db"
+  // },
+
+  // Catalog definitions (required)
   "catalogs": {
-    "my_monorepo": {
+    "my-monorepo": {
       "type": "monorepo",
-      "path": "~/projects/my-monorepo"
+      "path": "/absolute/path/to/my-monorepo"
     },
-    "another_monorepo": {
+    "another-monorepo": {
       "type": "monorepo",
-      "path": "~/projects/another-monorepo"
+      "path": "/absolute/path/to/another-monorepo"
     }
-  }
+  },
+
+  // Embedding model configuration (optional, defaults shown)
+  // "embeddingModel": {
+  //   "modelInstances": "auto",
+  //   "threadsPerInstance": "auto"
+  // }
 }

@@ -1,44 +1,29 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "Monodex Config",
-  "description": "Main configuration for monodex - defines Qdrant connection and catalogs",
+  "description": "Main configuration for monodex - defines catalogs and optional database path",
   "type": "object",
-  "required": ["qdrant", "catalogs"],
+  "required": ["catalogs"],
   "additionalProperties": false,
   "properties": {
-    "qdrant": {
+    "database": {
       "type": "object",
-      "description": "Qdrant vector database connection settings",
-      "required": ["collection"],
+      "description": "Database configuration",
       "additionalProperties": false,
       "properties": {
-        "url": {
+        "path": {
           "type": "string",
-          "description": "Qdrant server URL (default: http://localhost:6333)",
-          "default": "http://localhost:6333",
-          "examples": ["http://localhost:6333", "http://qdrant.example.com:6333"]
-        },
-        "collection": {
-          "type": "string",
-          "description": "Qdrant collection name for storing embeddings",
-          "examples": ["my_monorepo", "code_index"]
-        },
-        "maxUploadBytes": {
-          "type": "integer",
-          "description": "Maximum upload payload size in bytes (default: 31457280 = 30MB). Qdrant has a 32MB limit; this setting provides a safety margin.",
-          "default": 31457280,
-          "minimum": 1048576,
-          "examples": [31457280, 20971520]
+          "description": "Path to the database directory. Must be an absolute path; tilde (~), environment variables ($VAR), and relative paths are not supported. Omit to use the default location.",
+          "examples": ["/absolute/path/to/db"]
         }
       }
     },
     "catalogs": {
       "type": "object",
-      "description": "Named catalog configurations. Keys are catalog names (kebab-case, 1-64 chars, e.g., my-repo, frontend-app). The schema pattern is intentionally permissive; full syntax is validated at runtime with detailed error messages.",
+      "description": "Named catalog configurations. Keys are catalog names (kebab-case, 1-64 chars, e.g., my-repo, frontend-app). The schema pattern is intentionally permissive; full syntax is validated at runtime with detailed error messages. May be empty for fresh installations.",
       "additionalProperties": {
         "$ref": "#/definitions/CatalogConfig"
-      },
-      "minProperties": 1
+      }
     },
     "embeddingModel": {
       "type": "object",
@@ -81,8 +66,8 @@
         },
         "path": {
           "type": "string",
-          "description": "Path to the catalog root directory",
-          "examples": ["/path/to/monorepo", "~/projects/my-app"]
+          "description": "Path to the catalog root directory. Must be an absolute path; tilde (~), environment variables ($VAR), and relative paths are not supported.",
+          "examples": ["/path/to/monorepo"]
         }
       }
     }

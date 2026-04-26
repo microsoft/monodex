@@ -19,9 +19,6 @@ pub struct Chunk {
     /// Source URI (full file path, issue reference, etc.)
     pub source_uri: String,
 
-    /// Source type (e.g., "code", "issue", "discussion", "document")
-    pub source_type: String,
-
     /// Catalog name (for multi-source partitioning)
     pub catalog: String,
 
@@ -47,9 +44,6 @@ pub struct Chunk {
     pub breadcrumb: String,
 
     // --- Phase 2: Label-aware indexing fields ---
-    /// The initiating label for this chunk (transitional)
-    pub label_id: String,
-
     /// All labels this chunk belongs to (authoritative)
     pub active_label_ids: Vec<String>,
 
@@ -225,7 +219,6 @@ impl Chunk {
         Chunk {
             text: p.text,
             source_uri: ctx.source_uri.clone(),
-            source_type: "code".to_string(),
             catalog: ctx.catalog.clone(),
             content_hash: p.content_hash,
             start_line: p.start_line,
@@ -235,7 +228,6 @@ impl Chunk {
             chunk_kind: p.chunk_kind,
             breadcrumb: p.breadcrumb,
             // Phase 2 fields
-            label_id: ctx.label_id.clone(),
             active_label_ids: vec![ctx.label_id.clone()],
             embedder_id: EMBEDDER_ID.to_string(),
             chunker_id: CHUNKER_ID.to_string(),
@@ -258,7 +250,6 @@ impl From<PartitionedChunk> for Chunk {
         Chunk {
             text: p.text,
             source_uri: p.source_uri,
-            source_type: "code".to_string(),
             catalog: p.catalog,
             content_hash: p.content_hash,
             start_line: p.start_line,
@@ -268,7 +259,6 @@ impl From<PartitionedChunk> for Chunk {
             chunk_kind: p.chunk_kind,
             breadcrumb: p.breadcrumb,
             // Phase 2 fields - must be filled in by caller
-            label_id: String::new(),
             active_label_ids: Vec::new(),
             embedder_id: EMBEDDER_ID.to_string(),
             chunker_id: CHUNKER_ID.to_string(),
@@ -329,7 +319,6 @@ fn chunk_by_lines(
             chunks.push(Chunk {
                 text: chunk_text,
                 source_uri: ctx.source_uri.clone(),
-                source_type: "code".to_string(),
                 catalog: ctx.catalog.clone(),
                 content_hash: content_hash.clone(),
                 start_line: start + 1,
@@ -339,7 +328,6 @@ fn chunk_by_lines(
                 chunk_kind: "content".to_string(),
                 breadcrumb: encoded_file_name.clone(),
                 // Phase 2 fields
-                label_id: ctx.label_id.clone(),
                 active_label_ids: vec![ctx.label_id.clone()],
                 embedder_id: EMBEDDER_ID.to_string(),
                 chunker_id: CHUNKER_ID.to_string(),

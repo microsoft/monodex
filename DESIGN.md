@@ -4,15 +4,27 @@
 
 - **Development testing**: Use the `sparo` catalog (small monorepo, fast iteration)
 - **Final verification**: Use the `rushstack` catalog (large monorepo, hours to crawl)
-- **Qdrant collection**: Named `monodex` (not `rushstack`)
 
 ## Overview
 
-monodex is a semantic search indexer for Rush monorepos, using Qdrant vector database with local embeddings. It supports label-based semantic indexing where each label defines a queryable fileset (like a Git commit or branch head) within a catalog.
+monodex is a semantic search indexer for Rush monorepos, using LanceDB as an embedded vector database with local embeddings. It supports label-based semantic indexing where each label defines a queryable fileset (like a Git commit or branch head) within a catalog.
 
 ---
 
 ## Core Concepts
+
+### Vocabulary
+
+Monodex organizes indexed content into a hierarchy:
+
+- **database**: The on-disk store. One directory containing everything monodex tracks — today that's LanceDB tables (`chunks` and `label_metadata`); future milestones will add adjacent stores (e.g., a Tantivy full-text index). Users typically have one database. The default location is `~/.monodex/default-db`.
+- **catalog**: A named monorepo registered in config. One database holds many catalogs. Each catalog has its own namespace for labels.
+- **label**: A named fileset inside a catalog (typically a branch or commit). One catalog has many labels. Searches are scoped to a single label.
+- **chunk**: A unit of indexed content with its embedding. Chunks belong to one or more labels via the `active_label_ids` field.
+
+Containment: **database** › **catalog** › **label** › **chunk**
+
+The database is the umbrella term; its internal tables are implementation details users rarely interact with directly.
 
 ### Label-Based Indexing
 
@@ -68,8 +80,8 @@ None of this grammar is parsed today. The reserved characters are rejected now t
 ### Storage Format (Internal)
 
 The **label_id** is the fully qualified storage key `<catalog>:<label>`. This is an internal representation used only in:
-- Qdrant payload fields (`active_label_ids`, `label_id`)
-- UUID derivation for label-metadata points
+- Database row fields (`active_label_ids`, `label_id`)
+- Primary key for label metadata rows
 - Internal log/debug output
 
 Users never type or see the qualified form directly. The CLI accepts `--catalog` and `--label` as two separate flags.
@@ -103,30 +115,56 @@ Identical file content may require re-crawl when contextual identity changes:
 
 We optimize for switching between Git branches with overlap, NOT for generalized pattern matching or data compression. Path renames that affect breadcrumb context will create new chunks.
 
-### Qdrant as Authoritative State
+### The Database Directory is Authoritative State
 
-Qdrant is the only authoritative state store:
-- Label metadata lives in Qdrant
-- File completion state lives in Qdrant
-- Label membership lives in Qdrant
+The database directory is the only authoritative state store:
+- Label metadata lives in the `label_metadata` table
+- File completion state lives in the `chunks` table
+- Label membership lives in the `chunks` table
 
 No Git refs, JSON sidecars, or SQLite in this phase.
 
 ---
 
+## Database Directory Layout
+
+The database is stored at `~/.monodex/default-db/` by default (configurable via `database.path`):
+
+```
+default-db/
+├── monodex-meta.json      # Schema version and creation metadata
+├── chunks.lance/          # LanceDB table for code chunks
+└── label_metadata.lance/  # LanceDB table for label metadata
+```
+
+**Note:** Each `.lance/` directory is a fully self-contained LanceDB table with its own data files, transaction log, and version history. The `.lance` suffix is self-identifying — anything matching `*.lance/` is a LanceDB table.
+
+**`monodex-meta.json`** contains:
+```json
+{
+  "monodex_schema_version": 1,
+  "created_at": "2024-01-15T10:30:00Z",
+  "created_by_binary_version": "0.4.0",
+  "lance_format_version": "0.27"
+}
+```
+
+This file is checked on every database open to verify schema compatibility. If `monodex_schema_version` does not match the expected version, an error is returned.
+
+---
+
 ## Schema
 
-### Point Payload (Code Chunks)
+### Chunk Table (Code Chunks)
 
 ```rust
-pub struct PointPayload {
+pub struct ChunkRow {
+    pub point_id: String,            // Primary key: "{file_id}:{chunk_ordinal}"
     pub text: String,
-    pub source_type: String,          // "code"
     
     // Label membership
     pub catalog: String,
-    pub label_id: String,             // Transitional: the initiating label. Prefer active_label_ids.
-    pub active_label_ids: Vec<String>, // All labels this chunk belongs to (authoritative)
+    pub active_label_ids: Vec<String>, // All labels this chunk belongs to
     
     // Implementation identity
     pub embedder_id: String,          // e.g., "jina-embeddings-v2-base-code:v1"
@@ -145,16 +183,20 @@ pub struct PointPayload {
     pub source_uri: String,           // Useful for locating in Git/GitHub, but NOT a key
     
     // Chunk metadata
-    pub chunk_ordinal: usize,         // 1-indexed position in file
-    pub chunk_count: usize,
-    pub start_line: usize,
-    pub end_line: usize,
+    pub chunk_ordinal: i32,           // 1-indexed position in file
+    pub chunk_count: i32,
+    pub start_line: i32,
+    pub end_line: i32,
     
     // Semantic context
     pub symbol_name: Option<String>,
     pub chunk_type: String,           // AST node type: function, class, method, etc.
     pub chunk_kind: String,           // content, imports, changelog, config
     pub breadcrumb: Option<String>,   // Human-readable: package:File.ts:Symbol
+    
+    // Split metadata (for oversized chunks split into parts)
+    pub split_part_ordinal: Option<i32>,
+    pub split_part_count: Option<i32>,
     
     // Sentinel for incremental crawl
     pub file_complete: bool,          // Only true on chunk_ordinal=1
@@ -165,43 +207,31 @@ pub struct PointPayload {
 - `source_uri`: Best-effort display/debug locator for Git/GitHub links. Not guaranteed stable or canonical. Not a key.
 - `chunk_ordinal`: Renamed from `chunk_number` for clarity. Always use `chunk_ordinal`.
 - `file_id`: Semantic file identity for grouping chunks. Used for sentinel checks and file-level operations.
-- `label_id`: Transitional field. Prefer `active_label_ids` for label membership queries.
+- `split_part_ordinal` / `split_part_count`: Present only when an oversized function was split into multiple parts at statement boundaries.
 
 ### Label Metadata
 
-Label metadata is stored as special points in the main Qdrant collection:
+Label metadata is stored in a separate `label_metadata` table within the LanceDB database:
 
 ```rust
 pub struct LabelMetadata {
-    pub source_type: String,          // "label-metadata"
     pub catalog: String,
     pub label_id: String,             // e.g., "rushstack:main" (internal storage form)
     pub label: String,                // e.g., "main" (bare label name)
     pub commit_oid: String,           // Resolved commit SHA
-    pub source_kind: String,          // "git-commit"
+    pub source_kind: String,          // "git-commit" or "working-directory"
     pub crawl_complete: bool,
-    pub updated_at_unix_secs: u64,
+    pub updated_at_unix_secs: i64,
 }
 ```
 
-**Point ID:** The `label_id` string is converted to a UUID via `string_to_uuid()` for Qdrant compatibility, allowing deterministic lookup. Both `upsert_label_metadata()` and `get_label_metadata()` use this same conversion.
+**Primary key:** The `label_id` string is the primary key for the table.
 
-**Vector:** Metadata points store a zero-vector of exactly 768 dimensions (matching the collection's vector size): `[0.0; 768]`. Qdrant requires vectors for all points, but these points are never used in similarity search. The dimension MUST match the collection's configured vector size to avoid insertion errors.
+**Why separate table:** LanceDB does not require vectors on all tables, so label metadata lives in its own table. This cleanly separates the two logical entities (chunks and label metadata).
 
-**Why single collection:** Using the main collection (rather than a separate metadata collection) avoids managing multiple Qdrant collections and keeps all state in one place. The tradeoff is mixing vector-bearing chunk records with metadata-only records. This is acceptable because:
-- The `source_type` discriminator clearly separates them
-- Metadata points are few (one per label) compared to millions of chunks
-- Query code filters by `source_type` when needed
+### Point IDs for Chunks
 
-**ID semantics note:** Both chunks and labels use UUID-shaped strings derived deterministically from their content:
-- Chunks: `string_to_uuid(format!("{}:{}", file_id, chunk_ordinal))`
-- Labels: `string_to_uuid(label_id)`
-
-This provides uniformity in point ID format while maintaining deterministic lookup for both types.
-
-### Qdrant Point IDs
-
-Point IDs for code chunks use deterministic hashes:
+Point IDs for code chunks are deterministic strings:
 
 ```rust
 pub fn compute_file_id(
@@ -216,7 +246,7 @@ The **file ID** represents a semantic version of a file. Individual chunks are i
 
 **Point ID formula:**
 ```rust
-point_id = string_to_uuid(format!("{}:{}", file_id, chunk_ordinal))
+point_id = format!("{}:{}", file_id, chunk_ordinal)
 ```
 
 This allows upsert-by-ID semantics: if the same file content at the same path is crawled under multiple labels, we update `active_label_ids` rather than creating duplicates.
@@ -269,7 +299,7 @@ Useful for provenance, diagnostics, and future optimization opportunities. But n
 ### Sentinel-Based Incremental Check
 
 The **sentinel** is chunk 1 of a file:
-- Point ID = hash of (file_id, chunk_ordinal=1)
+- Point ID = `format!("{}:{}", file_id, 1)` (the chunk_ordinal is 1)
 - `file_complete = true` only on chunk 1
 - Existence check = direct lookup of sentinel point ID
 
@@ -336,16 +366,16 @@ For each file:
 For each file:
 1. Compute `file_id`
 2. **Lookup sentinel point by (file_id, chunk_ordinal=1)**:
-   - Point ID = `string_to_uuid(format!("{}:{}", file_id, 1))`
-   - Query Qdrant for chunk with `file_id` AND `chunk_ordinal = 1` AND `source_type = "code"`
+   - Point ID = `format!("{}:{}", file_id, 1)`
+   - Query database for chunk with `point_id`
 3. If sentinel exists and `file_complete = true`:
    - Skip re-embedding
-   - **Retrieve all chunks for file by filtering on `file_id`** (with `source_type = "code"`)
+   - **Retrieve all chunks for file by filtering on `file_id`**
    - Add label to `active_label_ids` for each chunk (if not present)
 4. If sentinel does not exist or not complete:
    - Read content from Git blob
    - Chunk and embed all chunks
-   - Compute point ID for each chunk: `hash(file_id + chunk_ordinal)`
+   - Compute point ID for each chunk: `format!("{}:{}", file_id, chunk_ordinal)`
    - Upsert all chunks
    - Mark sentinel `file_complete = true`
    - Add label to `active_label_ids` for each chunk
@@ -356,7 +386,6 @@ For each file:
 
 1. Track all file IDs touched during crawl (in a HashSet)
 2. Scan all chunks where `active_label_ids` contains the label
-   - Filter: `source_type = "code"` (exclude metadata points)
 3. For each chunk:
    - Extract the `file_id` field from the payload
    - If file_id NOT in touched set:
@@ -474,14 +503,11 @@ monodex search --text "query"
 monodex search --catalog rushstack --label main --text "how does package lookup work?"
 ```
 
-Qdrant filter:
+Filter:
 ```
-source_type == "code"
-AND catalog == "rushstack"
+catalog == "rushstack"
 AND active_label_ids CONTAINS "rushstack:main"
 ```
-
-**Important:** All search queries must filter `source_type = "code"` to exclude label metadata points from results.
 
 ### View
 
@@ -498,7 +524,7 @@ Chunks are filtered by `active_label_ids` and sorted by `chunk_ordinal`.
 
 **File reconstruction:** To reconstruct an entire file, view all chunks using the file_id without a selector. Order chunks by `chunk_ordinal` to reconstruct the original file content.
 
-**Filtering:** View queries must filter `source_type = "code"` to exclude label metadata points.
+**Filtering:** View queries filter by `active_label_ids` to return only chunks belonging to the specified label.
 
 **Note:** Path-based view (querying by `--path` instead of `--id`) is intentionally deferred to a later phase. The primary workflow is search → view using file IDs from search results.
 
@@ -569,6 +595,12 @@ Divide a file into chunks that fit the embedding budget (6000 chars), splitting 
 
 ---
 
+## Error-Handling Discipline
+
+Config-load failures and database-open failures both go through central paths. User-facing failure messages are uniform across commands. Future `monodex init` and `monodex init-db` resolve the failures these messages point at, rather than tailoring per-command error wording.
+
+---
+
 ## Backlog Issues
 
 ### Early Exit on Embedding Error Skips Flush
@@ -581,11 +613,11 @@ The `try_for_each(...)?` pattern exits early without flushing remaining chunks. 
 
 ### Upload Failures Treated as Success
 
-`upload_batch()` errors are only logged, not propagated. Need retry or abort logic.
+[OBSOLETE — was Qdrant-specific] `upload_batch()` errors are only logged, not propagated. Need retry or abort logic.
 
 ### Unbounded Write Batching
 
-Crawl accumulates points for 60 seconds with no size limit. Need batch constraints.
+[OBSOLETE — was Qdrant-specific] Crawl accumulates points for 60 seconds with no size limit. Need batch constraints.
 
 ### Files Deleted Before Replacement Indexing Succeeds
 
@@ -637,10 +669,6 @@ monodex gc --catalog rushstack
 
 ```json
 {
-  "qdrant": {
-    "url": "http://localhost:6333",
-    "collection": "monodex"
-  },
   "catalogs": {
     "sparo": {
       "type": "monorepo",
@@ -723,11 +751,11 @@ Commit-based labels are **immutable** (for a given commit):
 monodex crawl --catalog rushstack --label working --working-dir
 
 # Search working directory content
-monodex search --text "uncommitted feature" --label rushstack:working
+monodex search --text "uncommitted feature" --catalog rushstack --label working
 
 # Compare with committed code
-monodex search --text "same query" --label rushstack:main
-monodex search --text "same query" --label rushstack:working
+monodex search --text "same query" --catalog rushstack --label main
+monodex search --text "same query" --catalog rushstack --label working
 ```
 
 ---
@@ -868,10 +896,6 @@ Given config:
 - GitHub Issues
 - Zulip Discussions
 - Meeting Notes
-
-### SQLite for Operational State
-
-Long-term architecture: `Qdrant + SQLite`, but not required for this phase.
 
 ### Path-Based View
 

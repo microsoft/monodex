@@ -1,11 +1,12 @@
 //! monodex: Semantic search indexer for Rush monorepos
 //!
-//! Uses Qdrant vector database with jina-embeddings-v2-base-code embeddings
+//! Semantic search indexer for Rush monorepos using LanceDB vector database
 //! Intelligently chunks code and documentation for high-quality semantic search
 
 use clap::Parser;
+use monodex::app::commands::run_use;
 use monodex::app::{Cli, Commands};
-use monodex::app::{load_config, resolve_label_context, run_use};
+use monodex::app::{load_config, resolve_label_context};
 
 fn main() -> anyhow::Result<()> {
     // Warn if old tool home files exist
@@ -24,6 +25,9 @@ fn main() -> anyhow::Result<()> {
         Commands::Use { catalog, label } => {
             run_use(catalog.as_deref(), label, &config)?;
         }
+        Commands::InitDb => {
+            monodex::app::commands::run_init_db(&config)?;
+        }
         Commands::Crawl {
             catalog,
             label,
@@ -31,8 +35,7 @@ fn main() -> anyhow::Result<()> {
             incremental_warnings,
         } => {
             // Resolve label context from explicit flags or default context
-            let (_label_id, catalog_name, label) =
-                resolve_label_context(Some(&label), catalog.as_deref())?;
+            let (_, catalog_name, label) = resolve_label_context(Some(&label), catalog.as_deref())?;
 
             if source.working_dir {
                 monodex::app::commands::run_crawl_working_dir(

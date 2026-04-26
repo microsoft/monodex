@@ -1,4 +1,4 @@
-//! Purpose: Resolve filesystem paths for monodex tool state (config, context, crawl config).
+//! Purpose: Resolve filesystem paths for monodex tool state (config, context, crawl config, warning state).
 //!
 //! Edit here when: Changing where tool state lives on disk, adding MONODEX_HOME-style overrides,
 //!   or adding accessors for new files under the tool home.
@@ -7,10 +7,20 @@
 
 use anyhow::{Result, anyhow};
 use std::path::PathBuf;
+
+#[cfg(not(test))]
 use std::sync::OnceLock;
 
-/// Cached tool home path. Once resolved, it stays consistent for the process lifetime.
+/// Cached tool home path.
+/// - In production: Once resolved, it stays consistent for the process lifetime.
+/// - In tests: We re-resolve each time so each test can set its own MONODEX_HOME.
+#[cfg(not(test))]
 static TOOL_HOME: OnceLock<PathBuf> = OnceLock::new();
+
+#[cfg(test)]
+thread_local! {
+    static TOOL_HOME: std::cell::RefCell<Option<PathBuf>> = const { std::cell::RefCell::new(None) };
+}
 
 /// Resolve the monodex tool home.
 ///
@@ -19,6 +29,7 @@ static TOOL_HOME: OnceLock<PathBuf> = OnceLock::new();
 /// - Errors if neither is available.
 ///
 /// The result is cached for the process lifetime to ensure consistency.
+#[cfg(not(test))]
 pub fn tool_home() -> Result<PathBuf> {
     if let Some(cached) = TOOL_HOME.get() {
         return Ok(cached.clone());
@@ -29,6 +40,28 @@ pub fn tool_home() -> Result<PathBuf> {
     // Cache the result. If another thread beat us, use their value.
     let actual = TOOL_HOME.get_or_init(|| resolved);
     Ok(actual.clone())
+}
+
+/// Test version: re-resolve each time so each test can set its own MONODEX_HOME.
+#[cfg(test)]
+pub fn tool_home() -> Result<PathBuf> {
+    TOOL_HOME.with(|cell| {
+        if let Some(cached) = cell.borrow().as_ref() {
+            return Ok(cached.clone());
+        }
+
+        let resolved = resolve_tool_home_inner()?;
+        *cell.borrow_mut() = Some(resolved.clone());
+        Ok(resolved)
+    })
+}
+
+/// Clear the cached tool home (test-only).
+#[cfg(test)]
+pub fn clear_tool_home_cache() {
+    TOOL_HOME.with(|cell| {
+        *cell.borrow_mut() = None;
+    });
 }
 
 /// Inner resolution logic, uncached.

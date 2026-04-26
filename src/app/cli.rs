@@ -7,7 +7,7 @@
 use clap::{Args, Parser, Subcommand};
 use std::path::PathBuf;
 
-/// Rush semantic search crawler for Qdrant
+/// Fast, accurate code search for large Rush monorepos
 /// https://www.rushstack.io
 #[derive(Parser)]
 #[command(name = "monodex", version, about)]
@@ -16,7 +16,7 @@ pub struct Cli {
     #[arg(long)]
     pub config: Option<PathBuf>,
 
-    /// Enable verbose debug logging for network requests and other operations
+    /// Enable verbose debug logging for storage operations
     #[arg(long, global = true)]
     pub debug: bool,
 
@@ -38,7 +38,12 @@ pub enum Commands {
         label: Option<String>,
     },
 
-    /// Crawl source and index into Qdrant (incremental sync).
+    /// Initialize a new monodex database at the configured path.
+    /// Creates database tables for chunks and label metadata.
+    /// Idempotent: safe to run on an existing database.
+    InitDb,
+
+    /// Crawl source and index chunks (incremental sync).
     /// Reports warnings when AST chunking fails and fallback is used.
     /// These warnings indicate partitioner defects to investigate.
     Crawl {
@@ -59,13 +64,13 @@ pub enum Commands {
         incremental_warnings: bool,
     },
 
-    /// Purge all chunks from a catalog or entire collection
+    /// Purge all chunks from a catalog, or the entire database
     Purge {
-        /// Catalog name to purge (if not specified, purges entire collection)
+        /// Catalog name to purge (if not specified, purges the entire database)
         #[arg(long)]
         catalog: Option<String>,
 
-        /// Purge all catalogs (entire collection)
+        /// Purge the entire database (all catalogs)
         #[arg(long)]
         all: bool,
     },

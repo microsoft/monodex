@@ -1,4 +1,4 @@
-//! Repository-specific configuration for Qdrant indexer
+//! Repository-specific configuration for the indexer
 //!
 //! This module provides backward-compatible functions that delegate to the
 //! new `crawl_config` module. The actual configuration is now loaded from
