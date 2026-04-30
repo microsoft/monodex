@@ -4,12 +4,12 @@ Rules for where code lives and how files are structured. Scan this before adding
 
 ## File size limits
 
-| Category | Target | Hard max |
-|---|---|---|
-| Command handler | 150–350 lines | 500 |
-| Algorithm / engine module | 250–500 lines | 700 |
-| Types-only file | any | 300 |
-| Test-only file | any | 800 |
+| Category                  | Target        | Hard max |
+| ------------------------- | ------------- | -------- |
+| Command handler           | 150–350 lines | 500      |
+| Algorithm / engine module | 250–500 lines | 700      |
+| Types-only file           | any           | 300      |
+| Test-only file            | any           | 800      |
 
 Lines = production code excluding `#[cfg(test)]` blocks. Hard maxes are triggers for review, not automatic fragmentation. A coherent file at 710 lines is better than two incoherent files at 350.
 

@@ -21,6 +21,8 @@
 //! - patternsToKeep only overrides exclusion
 //! - patternsToKeep does NOT force unsupported file types to be crawled
 
+// Field shape is mirrored in schemas/crawl.schema.json. When adding or renaming fields here, update the JSON Schema in the same change.
+
 use anyhow::{Result, anyhow};
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use serde::Deserialize;

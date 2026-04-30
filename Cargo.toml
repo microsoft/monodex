@@ -1,6 +1,6 @@
 [package]
 name = "monodex"
-version = "0.5.0"
+version = "0.5.1"
 edition = "2024"
 rust-version = "1.93"
 description = "Fast, accurate code search for large Rush monorepos"

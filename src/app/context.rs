@@ -4,6 +4,8 @@
 //! Edit here when: Changing how default context is stored, validated, or resolved.
 //! Do not edit here for: CLI flags (see cli.rs), command handlers (see commands/).
 
+// Field shape is mirrored in schemas/context.schema.json. When adding or renaming fields here, update the JSON Schema in the same change.
+
 use anyhow::anyhow;
 
 use crate::app::util::chrono_timestamp;

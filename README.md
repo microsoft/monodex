@@ -15,19 +15,17 @@
 
 ## Overview
 
-`monodex` is a CLI tool that indexes Rush monorepo source code and documentation into a local LanceDB database for fast semantic search. It supports **label-based indexing**, allowing you to maintain multiple queryable snapshots (branches, commits) within a single catalog.
+Monodex is a CLI tool that indexes Rush monorepo source code and documentation into a local LanceDB database for fast semantic search. It supports **label-based indexing**, allowing you to maintain multiple queryable snapshots (Git branches, commits) within a single catalog.
 
-See [CHANGELOG.md](./CHANGELOG.md) for release history.
+See [CHANGELOG.md](./CHANGELOG.md) to see what's new.
 
 ### Features
 
-- **Label-based indexing**: Maintain multiple queryable filesets (branches, commits) within a catalog
+- **Label-based indexing**: Maintain multiple queryable filesets (Git branches, commits) within a catalog
 - **Commit-based crawling**: Reads directly from Git objects, not working tree (deterministic, reproducible)
 - **AST-based chunking**: Tree-sitter powered intelligent splitting for TypeScript/TSX files
 - **Breadcrumb context**: Full symbol paths like `@rushstack/node-core-library:JsonFile.ts:JsonFile.load`
-- **Oversized chunk handling**: Functions split at natural AST boundaries (statement blocks, if/else, try/catch)
-- **Local embeddings**: Uses jina-embeddings-v2-base-code with ONNX Runtime (no external APIs)
-- **LanceDB integration**: Embedded vector database (no external services required)
+- **Local code-aware embeddings**: Uses jina-embeddings-v2-base-code with ONNX Runtime — runs on commodity developer hardware, no external APIs or services required
 - **Incremental sync**: Content-hash based change detection for fast re-indexing
 - **Intelligent deduplication**: Identical content at same path across labels shares chunks
 - **Rush-optimized**: Smart exclusion rules for Rush monorepo patterns
@@ -96,7 +94,7 @@ This tool is designed for AI assistants. The indexed database provides a complet
 
   Verify with `protoc --version` (any recent 3.x or 4.x/20+ release works). If `protoc` is installed in a non-standard location, set the `PROTOC` environment variable to its full path before building.
 
-- **Model**: jina-embeddings-v2-base-code (auto-downloaded from HuggingFace to `models/` on first use)
+- **Model**: jina-embeddings-v2-base-code (auto-downloaded from Hugging Face on first use; cached locally by the `hf_hub` library, typically under `~/.cache/huggingface/`)
 
 ## Installation
 
@@ -120,7 +118,7 @@ cargo build --release
 
 Create `~/.monodex/config.json`:
 
-```json
+```js
 {
   // Database configuration (optional, defaults to ~/.monodex/default-db)
   // "database": {
@@ -137,7 +135,7 @@ Create `~/.monodex/config.json`:
       "type": "monorepo",
       "path": "/path/to/rushstack"
     }
-  },
+  }
 
   // Embedding model configuration (optional, defaults shown)
   // "embeddingModel": {
@@ -151,13 +149,17 @@ Create `~/.monodex/config.json`:
 
 **Fields:**
 
+<!-- prettier-ignore-start -->
+
 | Field                               | Required | Description                                                                         |
 | ----------------------------------- | -------- | ----------------------------------------------------------------------------------- |
 | `catalogs.<name>.type`              | Yes      | Catalog type: `"monorepo"`                                                          |
 | `catalogs.<name>.path`              | Yes      | Absolute path to the repository root                                                |
-| `database.path`                     | No       | Custom database path (default: `~/.monodex/default-db`). If set, it must be an absolute path. Tilde (`~`), environment variables (`$VAR`), and relative paths are not supported. |
+| `database.path`                     | No       | Custom database path (default: `~/.monodex/default-db`). If set, it must be an absolute path. Tilde (`~`), environment variables (`$VAR`), and relative paths are not supported. The path must point to a local filesystem; network filesystems (NFS, SMB) and synced cloud folders (Dropbox, OneDrive, iCloud, Google Drive) are not supported. |
 | `embeddingModel.modelInstances`     | No       | Number of ONNX model instances (default: `"auto"`). Primary driver of memory usage. |
 | `embeddingModel.threadsPerInstance` | No       | Threads per model instance (default: `"auto"`). CPU tuning only.                    |
+
+<!-- prettier-ignore-end -->
 
 **Embedding model configuration:**
 
@@ -170,10 +172,9 @@ The `embeddingModel` section controls memory and CPU usage for embedding generat
 
 - **`monorepo`**: Walks upward to find the nearest `package.json` for package name resolution. Breadcrumbs show `@scope/package-name:File.ts:Symbol`.
 
-
 ## First-Time Setup
 
-Before using monodex, initialize the database:
+Before using Monodex, initialize the database:
 
 ```bash
 monodex init-db
@@ -393,91 +394,11 @@ cargo build --release
 RUST_LOG=debug ./target/release/monodex crawl --catalog sparo --label main --commit HEAD
 ```
 
-## Architecture
-
-```
-monodex/
-├── src/
-│   ├── lib.rs                    # Crate root module exports
-│   ├── main.rs                   # CLI entry point and command dispatch
-│   ├── app/                      # Application layer (CLI-specific)
-│   │   ├── mod.rs                # Module exports
-│   │   ├── cli.rs                # Clap CLI definitions
-│   │   ├── config.rs             # App configuration loading
-│   │   ├── context.rs            # Default catalog/label persistence
-│   │   ├── util.rs               # Formatting and display utilities
-│   │   ├── commands/             # CLI command handlers
-│   │   │   ├── mod.rs            # Module exports
-│   │   │   ├── use_cmd.rs        # `use` command
-│   │   │   ├── crawl.rs          # `crawl` command
-│   │   │   ├── search.rs         # `search` command
-│   │   │   ├── view.rs           # `view` command
-│   │   │   ├── purge.rs          # `purge` command
-│   │   │   ├── dump_chunks.rs    # `dump-chunks` command
-│   │   │   └── audit_chunks.rs   # `audit-chunks` command
-│   │   └── crawl/                # Crawl pipeline implementation
-│   │       ├── mod.rs            # Module exports
-│   │       ├── types.rs          # Crawl-specific types
-│   │       └── pipeline.rs       # Embed/upload orchestration
-│   └── engine/                   # Reusable indexing engine
-│       ├── mod.rs                # Module exports
-│       ├── breadcrumb.rs         # Breadcrumb context generation
-│       ├── chunker.rs            # File chunking dispatcher
-│       ├── config.rs             # Engine configuration types
-│       ├── crawl_config.rs       # Crawl filtering rules
-│       ├── git_ops.rs            # Git tree enumeration and blob reading
-│       ├── identifier.rs         # Catalog/label identifier validation
-│       ├── markdown_partitioner.rs # Markdown heading-based chunking
-│       ├── package_lookup.rs     # Package name resolution
-│       ├── parallel_embedder.rs  # Parallel embedding with ONNX sessions
-│       ├── schema.rs             # LanceDB schema definitions
-│       ├── system_info.rs        # Memory and CPU detection
-│       ├── util.rs               # Hash utilities for chunk IDs
-│       ├── partitioner/          # TypeScript/TSX AST-based chunking
-│       │   ├── mod.rs            # Module exports
-│       │   ├── types.rs          # Partitioner types and config
-│       │   ├── partition.rs      # Main entry point
-│       │   ├── split_search.rs   # Split-point search algorithm
-│       │   ├── node_analysis.rs  # AST node analysis helpers
-│       │   ├── scoring.rs        # Chunk quality scoring
-│       │   └── debug.rs          # Debug output types
-│       └── storage/              # LanceDB storage layer
-│           ├── mod.rs            # Module exports
-│           ├── database.rs       # Database open and validation
-│           ├── chunks.rs         # Chunk storage operations
-│           ├── labels.rs         # Label metadata operations
-│           └── rows.rs           # Row type definitions
-├── Cargo.toml                    # Dependencies
-├── DESIGN.md                     # Design documentation
-└── README.md                     # This file
-```
-
-### Chunking Strategy
-
-**TypeScript/TSX files** are chunked using AST-aware partitioning:
-
-- Splits at semantic boundaries (functions, classes, methods, enums)
-- Includes preceding JSDoc/TSDoc comments with each symbol
-- Handles oversized functions by splitting at statement blocks
-- Full breadcrumb context: `package:file:Class.method`
-
-**Quality indicators in breadcrumbs:**
-
-- No marker: Successful AST split with good chunk geometry
-- `:[degraded-ast-split]`: AST split with poor geometry (tiny chunks)
-- `:[fallback-split]`: No AST split found, used line-based recovery (failure mode)
-
-**Markdown files** are split by heading hierarchy.
-
-**JSON files** are skipped (low value for semantic search).
-
-**Exclusions:** Folders like `node_modules` and files like `*.test.ts` are automatically skipped. Exclusion rules can be customized via `monodex-crawl.json` (see [Crawl Configuration](#crawl-configuration)).
-
-### Crawl Configuration
+## Crawl Configuration
 
 The crawl behavior (which files to index and how to chunk them) can be customized via configuration files.
 
-#### Config Discovery
+### Config Discovery
 
 Configs are loaded in this precedence order:
 
@@ -487,9 +408,9 @@ Configs are loaded in this precedence order:
 
 No merging occurs — exactly one config is used.
 
-#### Config Schema
+### Config Schema
 
-JSON schemas are available in the `schemas/` directory for IDE autocomplete and validation. Copy the appropriate schema file to your project or reference it locally:
+JSON schemas are available in the `schemas/` directory for IDE autocomplete and validation. Reference the appropriate schema in your config file via the `$schema` field:
 
 | Config File          | Schema File                   |
 | -------------------- | ----------------------------- |
@@ -552,31 +473,29 @@ shouldCrawl = matchesFileType && (matchesPatternsToKeep || !matchesPatternsToExc
 - Directory patterns end with `/` (e.g., `node_modules/`)
 - Example: `**/*.test.ts` matches test files at any depth
 
-### Chunk Size Target
-
-- **Target**: 6000 characters (text only)
-- **Fits**: 8192-token embedding model limit (jina-embeddings-v2-base-code)
-- **Breadcrumb**: Extra overhead for navigation context
-
 ## Status
 
-This project is under active development. The crate is published to reserve the name. Expect breaking changes between versions.
+This project is under active development. Expect breaking changes between versions.
+
+## Documentation
+
+For contributors and curious users:
+
+- [`docs/design/architecture.md`](./docs/design/architecture.md) — Five-minute crash course for working on the codebase: vocabulary, data model, crawl pipeline overview, chunker dispatch, source tree.
+- [`docs/design/label_ids.md`](./docs/design/label_ids.md) — Identifier and reference syntax: catalogs, labels, breadcrumbs, path encoding, planned typed-label and cross-catalog reference grammar.
+- [`docs/design/crawl.md`](./docs/design/crawl.md) — Crawl pipeline in detail: package index, working-directory identity model, label reassignment, partial-crawl semantics.
+- [`docs/design/chunker.md`](./docs/design/chunker.md) — Chunking algorithms: embedding model, TypeScript AST partitioning (the "two worlds model"), markdown splitting, quality scoring, empirical findings on alternative runtimes.
+- [`docs/design/monodex_files.md`](./docs/design/monodex_files.md) — Inventory of files Monodex reads or writes: tool-home state, database directory, repo-local config, shipped artifacts.
+- [`docs/code_organization_policy.md`](./docs/code_organization_policy.md) — File size targets, where new code goes, banned patterns. Required reading for contributors.
+- [`docs/backlog.md`](./docs/backlog.md) — Maintainer scratch pad for what might come next.
+- [`docs/smoke_test.md`](./docs/smoke_test.md) — End-to-end verification procedure to run after any change.
 
 ## License
 
 MIT
 
-## Links
+---
 
-In this repo:
+This project was primarily developed using the Linux Foundation's [Goose](https://goose-docs.ai) AI agent with an open source LLM.
 
-- [CODE_ORGANIZATION_POLICY.md](./CODE_ORGANIZATION_POLICY.md) - guidelines for where to add new code
-- [DESIGN.md](./DESIGN.md) - more detailed architectural notes
-
-Online references:
-
-- [LanceDB](https://lancedb.github.io/lancedb/) - Serverless vector database
-- [ONNX Runtime](https://onnxruntime.ai/) - Cross-platform ML inference
-- [Rush Stack](https://rushstack.io/) - Monorepo toolkit for JavaScript/TypeScript
-
-_This project was primarily developed using the Linux Foundation's [Goose](https://goose-docs.ai) AI agent with an open source LLM._
+Monodex is part of the [Rush Stack](https://rushstack.io/) family of projects.
