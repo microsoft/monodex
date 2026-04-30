@@ -17,7 +17,7 @@
 
 Monodex is a CLI tool that indexes Rush monorepo source code and documentation into a local LanceDB database for fast semantic search. It supports **label-based indexing**, allowing you to maintain multiple queryable snapshots (Git branches, commits) within a single catalog.
 
-See [CHANGELOG.md](./CHANGELOG.md) for release history.
+See [CHANGELOG.md](./CHANGELOG.md) to see what's new.
 
 ### Features
 
@@ -496,6 +496,6 @@ MIT
 
 ---
 
-_This project was primarily developed using the Linux Foundation's [Goose](https://goose-docs.ai) AI agent with an open source LLM._
+This project was primarily developed using the Linux Foundation's [Goose](https://goose-docs.ai) AI agent with an open source LLM.
 
 Monodex is part of the [Rush Stack](https://rushstack.io/) family of projects.

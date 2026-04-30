@@ -5,6 +5,8 @@
 //! or modifying how config is discovered and loaded.
 //! Do not edit here for: CLI flags (see cli.rs), command handlers (see commands/).
 
+// Field shape is mirrored in schemas/config.schema.json. When adding or renaming fields here, update the JSON Schema in the same change.
+
 use std::collections::HashMap;
 use std::path::PathBuf;
 
