@@ -15,13 +15,17 @@ PUBLISHING PROCEDURE:
    - MAJOR: Breaking changes that require user action
    - MINOR: New features, backwards compatible
    - PATCH: Bug fixes, backwards compatible
-
 2. Update `version` in Cargo.toml
-
-3. Rename "## Unreleased" to "## X.Y.Z" and add the timestamp (UTC)
-
-4. After publishing, the next PR author will add a new "## Unreleased" section
+3. Get the current UTC date with: `date -u +"%Y-%m-%d"`
+4. Rename "## Unreleased" to "## X.Y.Z" and add the date from step 3
+5. After publishing, the next PR author will add a new "## Unreleased" section
 -->
+
+## 0.5.1 (2026-04-30)
+
+### Changed
+
+- Improved the project documentation.
 
 ## 0.5.0 (2026-04-26)
 
