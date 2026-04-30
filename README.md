@@ -118,7 +118,7 @@ cargo build --release
 
 Create `~/.monodex/config.json`:
 
-```json
+```js
 {
   // Database configuration (optional, defaults to ~/.monodex/default-db)
   // "database": {
