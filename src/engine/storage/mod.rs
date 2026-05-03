@@ -10,6 +10,7 @@
 mod chunks;
 mod database;
 mod labels;
+mod predicate;
 mod rows;
 
 pub use chunks::ChunkStorage;

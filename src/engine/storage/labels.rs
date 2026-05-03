@@ -16,6 +16,7 @@ use lancedb::query::{ExecutableQuery, QueryBase};
 use std::sync::Arc;
 
 use crate::engine::storage::LabelMetadataRow;
+use crate::engine::storage::predicate::eq_str;
 
 /// Convert an iterator of LabelMetadataRows to a RecordBatch.
 fn label_metadata_rows_to_record_batch<'a>(
@@ -160,7 +161,7 @@ impl LabelStorage {
     ///
     /// Returns None if the label doesn't exist.
     pub async fn get_by_label_id(&self, label_id: &str) -> Result<Option<LabelMetadataRow>> {
-        let predicate = format!("label_id = '{}'", label_id);
+        let predicate = eq_str("label_id", label_id);
 
         let results = self
             .table
@@ -189,7 +190,7 @@ impl LabelStorage {
     ///
     /// Used by label-reassignment discovery.
     pub async fn list_for_catalog(&self, catalog: &str) -> Result<Vec<LabelMetadataRow>> {
-        let predicate = format!("catalog = '{}'", catalog);
+        let predicate = eq_str("catalog", catalog);
 
         let results = self
             .table
@@ -216,7 +217,7 @@ impl LabelStorage {
 
     /// Delete a single label metadata row by label_id.
     pub async fn delete_by_label_id(&self, label_id: &str) -> Result<()> {
-        let predicate = format!("label_id = '{}'", label_id);
+        let predicate = eq_str("label_id", label_id);
 
         self.table
             .delete(&predicate)
@@ -228,7 +229,7 @@ impl LabelStorage {
 
     /// Delete all label metadata rows for a given catalog, returning the count deleted.
     pub async fn delete_by_catalog(&self, catalog: &str) -> Result<u64> {
-        let predicate = format!("catalog = '{}'", catalog);
+        let predicate = eq_str("catalog", catalog);
 
         let count_before = self
             .table

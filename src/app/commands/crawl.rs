@@ -21,10 +21,7 @@ use crate::engine::{
         resolve_commit_oid,
     },
     identifier::LabelId,
-    storage::{
-        ChunkStorage, Database, LabelMetadataRow, SOURCE_KIND_GIT_COMMIT,
-        SOURCE_KIND_WORKING_DIRECTORY,
-    },
+    storage::{Database, LabelMetadataRow, SOURCE_KIND_GIT_COMMIT, SOURCE_KIND_WORKING_DIRECTORY},
 };
 
 /// Run crawl for a git commit label
@@ -389,7 +386,10 @@ async fn run_crawl_label_async(
         let all_touched: HashSet<String> =
             existing_files.union(&touched_file_ids).cloned().collect();
 
-        match remove_label_from_chunks(&chunk_storage, label_id.as_str(), &all_touched).await {
+        match chunk_storage
+            .remove_label_from_chunks(label_id.as_str(), &all_touched)
+            .await
+        {
             Ok(processed) => {
                 println!("  Processed {} chunks for label cleanup", processed);
             }
@@ -500,48 +500,6 @@ async fn run_crawl_label_async(
     }
 
     Ok(())
-}
-
-/// Remove a label from chunks where it's in active_label_ids, excluding specified files.
-///
-/// This scans all chunks with the label and removes the label from active_label_ids.
-/// If active_label_ids becomes empty, the chunk is deleted.
-async fn remove_label_from_chunks(
-    chunk_storage: &ChunkStorage,
-    label_id: &str,
-    exclude_file_ids: &HashSet<String>,
-) -> Result<u64> {
-    let mut processed: u64 = 0;
-
-    // Get all chunks with this label
-    let chunks = chunk_storage.get_chunks_for_label(label_id, None).await?;
-
-    for chunk in chunks {
-        // Skip if this file was touched in the current crawl
-        if exclude_file_ids.contains(&chunk.file_id) {
-            continue;
-        }
-
-        // Remove label from active_label_ids
-        let mut new_labels = chunk.active_label_ids.clone();
-        new_labels.retain(|l| l != label_id);
-
-        if new_labels.is_empty() {
-            // Delete the chunk
-            chunk_storage
-                .delete_by_point_ids(std::slice::from_ref(&chunk.point_id))
-                .await?;
-        } else {
-            // Update active_label_ids
-            chunk_storage
-                .update_active_labels(&chunk.point_id, &new_labels)
-                .await?;
-        }
-
-        processed += 1;
-    }
-
-    Ok(processed)
 }
 
 /// Run crawl for working directory (indexes uncommitted changes)
@@ -895,7 +853,10 @@ async fn run_crawl_working_dir_async(
         let all_touched: HashSet<String> =
             existing_files.union(&touched_file_ids).cloned().collect();
 
-        match remove_label_from_chunks(&chunk_storage, label_id.as_str(), &all_touched).await {
+        match chunk_storage
+            .remove_label_from_chunks(label_id.as_str(), &all_touched)
+            .await
+        {
             Ok(processed) => println!("  Processed {} chunks for label cleanup", processed),
             Err(e) => {
                 eprintln!("  ❌ Label cleanup failed: {}", e);

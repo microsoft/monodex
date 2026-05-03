@@ -55,6 +55,32 @@ pub fn sanitize_for_terminal(s: &str) -> String {
         .collect()
 }
 
+/// Format a chunk's breadcrumb, split-part metadata, and chunk-kind decoration.
+///
+/// Used by search and view commands to produce consistent chunk report headers.
+///
+/// - `breadcrumb: None` renders as `"unknown"`
+/// - The breadcrumb is sanitized internally for terminal safety
+/// - `split_part: Some((ordinal, count))` appends ` (part {ordinal}/{count})`
+/// - `chunk_kind != "content"` appends ` [{chunk_kind}]`
+pub fn format_chunk_report(
+    breadcrumb: Option<&str>,
+    split_part: Option<(i32, i32)>,
+    chunk_kind: &str,
+) -> String {
+    let breadcrumb = sanitize_for_terminal(breadcrumb.unwrap_or("unknown"));
+
+    let mut report = breadcrumb;
+    if let (Some(ordinal), Some(count)) = (split_part.map(|(o, _)| o), split_part.map(|(_, c)| c)) {
+        report = format!("{} (part {}/{})", report, ordinal, count);
+    }
+    if chunk_kind != "content" {
+        report = format!("{} [{}]", report, chunk_kind);
+    }
+
+    report
+}
+
 // ============================================================================
 // Chunking Warning State Persistence
 // ============================================================================

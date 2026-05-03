@@ -17,9 +17,11 @@ use arrow_schema::{DataType, Field, SchemaRef};
 use futures::TryStreamExt;
 use lancedb::DistanceType;
 use lancedb::query::{ExecutableQuery, QueryBase};
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use crate::engine::schema::VECTOR_DIMENSION;
+use crate::engine::storage::predicate::{array_contains_str, eq_str, in_quoted_strs};
 use crate::engine::storage::{ChunkRow, ScoredChunkRow};
 
 /// Batch size for upsert operations. Storage-layer internal detail.
@@ -534,7 +536,7 @@ impl ChunkStorage {
     ///
     /// Returns None if the chunk doesn't exist.
     pub async fn get_by_point_id(&self, point_id: &str) -> Result<Option<ChunkRow>> {
-        let predicate = format!("point_id = '{}'", point_id);
+        let predicate = eq_str("point_id", point_id);
 
         let results = self
             .table
@@ -569,8 +571,9 @@ impl ChunkStorage {
         label_id: &str,
     ) -> Result<Vec<ChunkRow>> {
         let predicate = format!(
-            "file_id = '{}' AND array_contains(active_label_ids, '{}')",
-            file_id, label_id
+            "{} AND {}",
+            eq_str("file_id", file_id),
+            array_contains_str("active_label_ids", label_id)
         );
 
         let results = self
@@ -604,7 +607,7 @@ impl ChunkStorage {
     /// Does not filter by label; used for label-add operations.
     /// Validates each row.
     pub async fn get_chunks_by_file_id(&self, file_id: &str) -> Result<Vec<ChunkRow>> {
-        let predicate = format!("file_id = '{}'", file_id);
+        let predicate = eq_str("file_id", file_id);
 
         let results = self
             .table
@@ -642,7 +645,7 @@ impl ChunkStorage {
         label_id: &str,
         limit: usize,
     ) -> Result<Vec<ScoredChunkRow>> {
-        let predicate = format!("array_contains(active_label_ids, '{}')", label_id);
+        let predicate = array_contains_str("active_label_ids", label_id);
 
         let results = self
             .table
@@ -684,10 +687,11 @@ impl ChunkStorage {
     ) -> Result<Vec<ChunkRow>> {
         let predicate = match chunk_ordinal {
             Some(ordinal) => format!(
-                "array_contains(active_label_ids, '{}') AND chunk_ordinal = {}",
-                label_id, ordinal
+                "{} AND chunk_ordinal = {}",
+                array_contains_str("active_label_ids", label_id),
+                ordinal
             ),
-            None => format!("array_contains(active_label_ids, '{}')", label_id),
+            None => array_contains_str("active_label_ids", label_id),
         };
 
         let results = self
@@ -729,7 +733,7 @@ impl ChunkStorage {
         let quoted: Vec<String> = new_labels.iter().map(|l| format!("'{}'", l)).collect();
         let labels_sql = format!("[{}]", quoted.join(", "));
 
-        let predicate = format!("point_id = '{}'", point_id);
+        let predicate = eq_str("point_id", point_id);
 
         self.table
             .update()
@@ -746,7 +750,7 @@ impl ChunkStorage {
     ///
     /// Uses LanceDB's update() with SQL boolean literal (true/false).
     pub async fn update_file_complete(&self, point_id: &str, complete: bool) -> Result<()> {
-        let predicate = format!("point_id = '{}'", point_id);
+        let predicate = eq_str("point_id", point_id);
         let value = if complete { "true" } else { "false" };
 
         self.table
@@ -766,9 +770,8 @@ impl ChunkStorage {
             return Ok(());
         }
 
-        // Build IN clause predicate
-        let quoted: Vec<String> = point_ids.iter().map(|id| format!("'{}'", id)).collect();
-        let predicate = format!("point_id IN ({})", quoted.join(", "));
+        let vals: Vec<&str> = point_ids.iter().map(|s| s.as_str()).collect();
+        let predicate = in_quoted_strs("point_id", &vals);
 
         self.table
             .delete(&predicate)
@@ -780,7 +783,7 @@ impl ChunkStorage {
 
     /// Delete all chunks matching a given catalog, returning the count deleted.
     pub async fn delete_by_catalog(&self, catalog: &str) -> Result<u64> {
-        let predicate = format!("catalog = '{}'", catalog);
+        let predicate = eq_str("catalog", catalog);
 
         let count_before = self
             .table
@@ -800,6 +803,48 @@ impl ChunkStorage {
             .map_err(|e| anyhow!("Failed to count rows after delete: {}", e))?;
 
         Ok(count_before.saturating_sub(count_after) as u64)
+    }
+
+    /// Remove a label from chunks where it's in active_label_ids, excluding specified files.
+    ///
+    /// This scans all chunks with the label and removes the label from active_label_ids.
+    /// If active_label_ids becomes empty, the chunk is deleted.
+    ///
+    /// Returns the count of chunks processed.
+    pub async fn remove_label_from_chunks(
+        &self,
+        label_id: &str,
+        exclude_file_ids: &HashSet<String>,
+    ) -> Result<u64> {
+        let mut processed: u64 = 0;
+
+        // Get all chunks with this label
+        let chunks = self.get_chunks_for_label(label_id, None).await?;
+
+        for chunk in chunks {
+            // Skip if this file was touched in the current crawl
+            if exclude_file_ids.contains(&chunk.file_id) {
+                continue;
+            }
+
+            // Remove label from active_label_ids
+            let mut new_labels = chunk.active_label_ids.clone();
+            new_labels.retain(|l| l != label_id);
+
+            if new_labels.is_empty() {
+                // Delete the chunk
+                self.delete_by_point_ids(std::slice::from_ref(&chunk.point_id))
+                    .await?;
+            } else {
+                // Update active_label_ids
+                self.update_active_labels(&chunk.point_id, &new_labels)
+                    .await?;
+            }
+
+            processed += 1;
+        }
+
+        Ok(processed)
     }
 
     /// Truncate the table (empty all rows, preserve schema).
