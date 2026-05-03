@@ -22,7 +22,7 @@ Each file should have **one dominant reason to be edited**. Not "one subsystem" 
 - **New CLI command** → new file in `app/commands/`, named after the subcommand. Add variant to `Commands` in `cli.rs`. Add dispatch arm in `main.rs`.
 - **New storage operation** → pick the `engine/storage/` submodule by operation family: `database.rs` for connection/open, `chunks.rs` for chunk operations, `labels.rs` for label metadata operations.
 - **New partitioner heuristic** → `split_search.rs` for split-point logic, `node_analysis.rs` for AST node properties, `scoring.rs` for quality measurement.
-- **New config field** → `app/config.rs` for app-level config, `engine/config.rs` for engine-level chunking config, `engine/crawl_config.rs` for crawl filtering rules.
+- **New config field** → `app/config.rs` for app-level config, `engine/crawl_config.rs` for crawl filtering rules.
 - **Shared utility** → `engine/util.rs` for engine-wide, `app/util.rs` for app-wide formatting/display.
 
 ## Module header comments

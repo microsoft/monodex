@@ -38,6 +38,12 @@ pub fn run_search(
     println!("Label: {}", label);
     println!();
 
+    if results.is_empty() {
+        println!("No results.");
+        println!();
+        return Ok(());
+    }
+
     // Display results as blurbs
     for result in &results {
         let chunk = &result.chunk;

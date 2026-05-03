@@ -1,4 +1,16 @@
-//! Shared utility functions
+//! Purpose: Identity constants and hash utilities for chunk and file identification.
+//! Edit here when: Adding new identity constants (e.g., FTS_SCHEMA_ID) or changing hash algorithms.
+//! Do not edit here for: Chunking logic (use chunker.rs), storage operations (use storage/), general utilities (use appropriate module).
+//!
+//! ## Identity Constants
+//!
+//! This module holds constants whose values have downstream invalidation consequences:
+//!
+//! - `EMBEDDER_ID` / `CHUNKER_ID`: Participate in `row_id` computation. Changing these
+//!   invalidates chunk identity and forces re-vectorizing all content.
+//!
+//! - Future FTS constants (`FTS_SCHEMA_ID`, `FTS_TOKENIZER_ID`): Will NOT participate
+//!   in `row_id`. Changing them invalidates only FTS state, leaving vector state untouched.
 
 use sha2::{Digest, Sha256};
 use std::hash::{Hash, Hasher};

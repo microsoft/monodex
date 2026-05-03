@@ -15,7 +15,10 @@ mod rows;
 pub use chunks::ChunkStorage;
 pub use database::{Database, META_FILE, MetaFile, err_schema_mismatch};
 pub use labels::LabelStorage;
-pub use rows::{ChunkRow, LabelMetadataRow, ScoredChunkRow};
+pub use rows::{
+    ChunkRow, LabelMetadataRow, SOURCE_KIND_GIT_COMMIT, SOURCE_KIND_WORKING_DIRECTORY,
+    ScoredChunkRow,
+};
 
 /// LanceDB crate version. Keep in sync with Cargo.toml `lancedb` dependency.
 pub const LANCEDB_CRATE_VERSION: &str = "0.27";

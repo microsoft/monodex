@@ -117,8 +117,7 @@ Reusable indexing engine. Does not depend on `src/app/`.
 
 - `breadcrumb.rs` — Percent-encode reserved characters (`:`, `@`, `=`, `+`, `#`, `%`, whitespace) in breadcrumb path components. Slugify markdown headings GitHub-style.
 - `chunker.rs` — Strategy dispatcher: pick a chunking strategy by file extension and produce `Chunk` records. Computes `file_id` and `point_id` for each chunk.
-- `config.rs` — Backwards-compatible thin wrapper that delegates to `crawl_config.rs`. Existed for compatibility during the externalize-crawl-policy refactor; new callers should use `crawl_config` directly.
-- `crawl_config.rs` — Load and compile `monodex-crawl.json` (file types, exclude/keep patterns) with `globset`. Implements the `should_crawl()` and `get_strategy()` evaluation rules. Holds the embedded default config.
+- `crawl_config.rs` — Load and compile `monodex-crawl.json` (file types, exclude/keep patterns) with `globset`. Implements the `should_crawl()` and `get_strategy()` evaluation rules. Holds the embedded default config and the `ChunkingStrategy` enum.
 - `git_ops.rs` — Enumerate Git commit trees, read blob content, build the package index, walk the working directory. Working-dir mode shells out to `git ls-files`/`git status`/`git hash-object` so blob IDs match commit-mode IDs.
 - `identifier.rs` — Validate catalog and label syntax. Owns the `LabelId` type and the qualified-form composer; will host the parser for typed labels and cross-catalog references when those land.
 - `markdown_partitioner.rs` — Custom markdown parser that splits at headings, fenced code blocks, block quotes, and paragraphs. Generates breadcrumbs from heading hierarchy.

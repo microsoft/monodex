@@ -7,7 +7,6 @@
 
 pub mod breadcrumb;
 pub mod chunker;
-pub mod config;
 pub mod crawl_config;
 pub mod git_ops;
 pub mod identifier;
@@ -22,6 +21,7 @@ pub mod util;
 
 // Re-export commonly used types for convenience
 pub use chunker::Chunk;
+pub use crawl_config::ChunkingStrategy;
 pub use parallel_embedder::ParallelConfig;
 pub use parallel_embedder::ParallelEmbedder;
 pub use partitioner::SMALL_CHUNK_CHARS;

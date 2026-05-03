@@ -10,6 +10,16 @@ use anyhow::{Result, anyhow};
 
 use crate::engine::identifier::{LabelId, validate_catalog};
 
+// =============================================================================
+// Source kind constants
+// =============================================================================
+
+/// Source kind for commit-based crawls.
+pub const SOURCE_KIND_GIT_COMMIT: &str = "git-commit";
+
+/// Source kind for working-directory crawls.
+pub const SOURCE_KIND_WORKING_DIRECTORY: &str = "working-directory";
+
 /// A row in the `chunks` table.
 ///
 /// This struct represents the Rust view of a chunk row. The `vector` column is stored
@@ -234,7 +244,7 @@ mod tests {
             catalog: "my-catalog".to_string(),
             label: "main".to_string(),
             commit_oid: "abc123def456".to_string(),
-            source_kind: "git-commit".to_string(),
+            source_kind: SOURCE_KIND_GIT_COMMIT.to_string(),
             crawl_complete: true,
             updated_at_unix_secs: 1700000000,
         }

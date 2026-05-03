@@ -1,8 +1,6 @@
-//! Git operations for commit-based and working directory crawling
-//!
-//! This module provides functions to read file content and metadata
-//! from Git commits without touching the working tree, as well as
-//! enumerating files from the working directory for indexing uncommitted changes.
+//! Purpose: Git operations for commit-based and working-directory crawling.
+//! Edit here when: Changing how files are enumerated from Git trees, blob ID computation, or package index building.
+//! Do not edit here for: Chunking logic (use chunker.rs), storage operations (use storage/), crawl config (use crawl_config.rs).
 
 use anyhow::{Result, anyhow};
 use gix::ObjectId;

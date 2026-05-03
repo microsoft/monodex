@@ -26,17 +26,7 @@ use crate::engine::{Chunk, ParallelEmbedder};
 ///
 /// Returns an error immediately on any storage failure (disk full, corruption, etc.).
 /// Embedding failures are tracked per-chunk and returned in CrawlFailures.
-///
-/// This is the async version that must be called from within a tokio runtime.
 pub async fn run_embed_upload_pipeline(
-    all_chunks: Vec<Chunk>,
-    chunk_storage: Arc<ChunkStorage>,
-    embedding_config: &EmbeddingModelConfig,
-) -> Result<(HashSet<String>, CrawlFailures)> {
-    run_embed_upload_pipeline_async(all_chunks, chunk_storage, embedding_config).await
-}
-
-async fn run_embed_upload_pipeline_async(
     all_chunks: Vec<Chunk>,
     chunk_storage: Arc<ChunkStorage>,
     embedding_config: &EmbeddingModelConfig,
@@ -154,97 +144,28 @@ async fn run_embed_upload_pipeline_async(
             }
 
             if should_upload && !accumulated.is_empty() {
-                let count = accumulated.len();
-                println!(
-                    "[{}] Uploading checkpoint ({} chunks)...",
-                    chrono_timestamp(),
-                    count
-                );
-
-                // Convert chunks to ChunkRows and upsert
-                let rows: Vec<ChunkRow> = accumulated
-                    .iter()
-                    .map(|(chunk, _)| chunk_to_row(chunk))
-                    .collect();
-                let vectors: Vec<Vec<f32>> = accumulated
-                    .iter()
-                    .map(|(_, vector)| vector.clone())
-                    .collect();
-
-                // Upsert chunks with vectors (storage handles batching internally)
-                upsert_chunks_with_vectors(&chunk_storage_clone, &rows, &vectors).await?;
-
-                // Track uploaded counts and mark files complete
-                // Count chunks per file in this batch
-                let mut files_in_batch: std::collections::HashMap<String, usize> =
-                    std::collections::HashMap::new();
-                for (chunk, _) in &accumulated {
-                    *files_in_batch.entry(chunk.file_id.clone()).or_insert(0) += 1;
-                }
-                for (file_id, count) in &files_in_batch {
-                    *uploaded_count.entry(file_id.clone()).or_insert(0) += count;
-                }
-
-                // Mark completed files
-                for file_id in files_in_batch.keys() {
-                    let uploaded = uploaded_count.get(file_id).copied().unwrap_or(0);
-                    let expected = expected_count.get(file_id).copied().unwrap_or(0);
-                    if uploaded == expected && expected > 0 {
-                        // Find the sentinel chunk (ordinal 1) and mark it complete
-                        let point_id = format!("{}:{}", file_id, 1);
-                        chunk_storage_clone
-                            .update_file_complete(&point_id, true)
-                            .await?;
-                    }
-                }
-
+                upload_and_mark_complete(
+                    &accumulated,
+                    &chunk_storage_clone,
+                    &mut expected_count,
+                    &mut uploaded_count,
+                    "Uploading checkpoint",
+                )
+                .await?;
                 accumulated.clear();
             }
 
             if stop_writer.load(Ordering::Relaxed) && embed_rx.is_empty() {
                 // Final upload
                 if !accumulated.is_empty() {
-                    let count = accumulated.len();
-                    eprintln!(
-                        "[{}] Final upload ({} chunks)...",
-                        chrono_timestamp(),
-                        count
-                    );
-
-                    let rows: Vec<ChunkRow> = accumulated
-                        .iter()
-                        .map(|(chunk, _)| chunk_to_row(chunk))
-                        .collect();
-                    let vectors: Vec<Vec<f32>> = accumulated
-                        .iter()
-                        .map(|(_, vector)| vector.clone())
-                        .collect();
-
-                    // Upsert chunks with vectors (storage handles batching internally)
-                    upsert_chunks_with_vectors(&chunk_storage_clone, &rows, &vectors).await?;
-
-                    // Mark all files complete
-                    // Count chunks per file in this batch
-                    let mut files_in_batch: std::collections::HashMap<String, usize> =
-                        std::collections::HashMap::new();
-                    for (chunk, _) in &accumulated {
-                        *files_in_batch.entry(chunk.file_id.clone()).or_insert(0) += 1;
-                    }
-                    for (file_id, count) in &files_in_batch {
-                        *uploaded_count.entry(file_id.clone()).or_insert(0) += count;
-                    }
-
-                    // Mark completed files
-                    for file_id in files_in_batch.keys() {
-                        let uploaded = uploaded_count.get(file_id).copied().unwrap_or(0);
-                        let expected = expected_count.get(file_id).copied().unwrap_or(0);
-                        if uploaded == expected && expected > 0 {
-                            let point_id = format!("{}:{}", file_id, 1);
-                            chunk_storage_clone
-                                .update_file_complete(&point_id, true)
-                                .await?;
-                        }
-                    }
+                    upload_and_mark_complete(
+                        &accumulated,
+                        &chunk_storage_clone,
+                        &mut expected_count,
+                        &mut uploaded_count,
+                        "Final upload",
+                    )
+                    .await?;
                 }
                 break;
             }
@@ -318,6 +239,63 @@ async fn run_embed_upload_pipeline_async(
     println!();
 
     Ok((touched_file_ids, failures))
+}
+
+/// Upload accumulated chunks and mark completed files.
+///
+/// This helper extracts the common upload logic used for both periodic checkpoints
+/// and final flush.
+async fn upload_and_mark_complete(
+    accumulated: &[(Chunk, Vec<f32>)],
+    chunk_storage: &ChunkStorage,
+    expected_count: &mut std::collections::HashMap<String, usize>,
+    uploaded_count: &mut std::collections::HashMap<String, usize>,
+    log_message: &str,
+) -> Result<()> {
+    let count = accumulated.len();
+    println!(
+        "[{}] {} ({} chunks)...",
+        chrono_timestamp(),
+        log_message,
+        count
+    );
+
+    // Convert chunks to ChunkRows and upsert
+    let rows: Vec<ChunkRow> = accumulated
+        .iter()
+        .map(|(chunk, _)| chunk_to_row(chunk))
+        .collect();
+    let vectors: Vec<Vec<f32>> = accumulated
+        .iter()
+        .map(|(_, vector)| vector.clone())
+        .collect();
+
+    // Upsert chunks with vectors (storage handles batching internally)
+    upsert_chunks_with_vectors(chunk_storage, &rows, &vectors).await?;
+
+    // Track uploaded counts and mark files complete
+    // Count chunks per file in this batch
+    let mut files_in_batch: std::collections::HashMap<String, usize> =
+        std::collections::HashMap::new();
+    for (chunk, _) in accumulated {
+        *files_in_batch.entry(chunk.file_id.clone()).or_insert(0) += 1;
+    }
+    for (file_id, cnt) in &files_in_batch {
+        *uploaded_count.entry(file_id.clone()).or_insert(0) += cnt;
+    }
+
+    // Mark completed files
+    for file_id in files_in_batch.keys() {
+        let uploaded = uploaded_count.get(file_id).copied().unwrap_or(0);
+        let expected = expected_count.get(file_id).copied().unwrap_or(0);
+        if uploaded == expected && expected > 0 {
+            // Find the sentinel chunk (ordinal 1) and mark it complete
+            let point_id = format!("{}:{}", file_id, 1);
+            chunk_storage.update_file_complete(&point_id, true).await?;
+        }
+    }
+
+    Ok(())
 }
 
 /// Convert a Chunk to a ChunkRow for storage.

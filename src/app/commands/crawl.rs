@@ -21,7 +21,10 @@ use crate::engine::{
         resolve_commit_oid,
     },
     identifier::LabelId,
-    storage::{ChunkStorage, Database, LabelMetadataRow},
+    storage::{
+        ChunkStorage, Database, LabelMetadataRow, SOURCE_KIND_GIT_COMMIT,
+        SOURCE_KIND_WORKING_DIRECTORY,
+    },
 };
 
 /// Run crawl for a git commit label
@@ -127,7 +130,7 @@ async fn run_crawl_label_async(
         catalog: catalog_name.to_string(),
         label: label.to_string(),
         commit_oid: commit_oid.clone(),
-        source_kind: "git-commit".to_string(),
+        source_kind: SOURCE_KIND_GIT_COMMIT.to_string(),
         crawl_complete: false,
         updated_at_unix_secs: std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -406,7 +409,7 @@ async fn run_crawl_label_async(
         catalog: catalog_name.to_string(),
         label: label.to_string(),
         commit_oid: commit_oid.clone(),
-        source_kind: "git-commit".to_string(),
+        source_kind: SOURCE_KIND_GIT_COMMIT.to_string(),
         crawl_complete,
         updated_at_unix_secs: std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -636,7 +639,7 @@ async fn run_crawl_working_dir_async(
         catalog: catalog_name.to_string(),
         label: label.to_string(),
         commit_oid: "".to_string(), // No commit for working directory
-        source_kind: "working-directory".to_string(),
+        source_kind: SOURCE_KIND_WORKING_DIRECTORY.to_string(),
         crawl_complete: false,
         updated_at_unix_secs: std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -910,7 +913,7 @@ async fn run_crawl_working_dir_async(
         catalog: catalog_name.to_string(),
         label: label.to_string(),
         commit_oid: "".to_string(),
-        source_kind: "working-directory".to_string(),
+        source_kind: SOURCE_KIND_WORKING_DIRECTORY.to_string(),
         crawl_complete,
         updated_at_unix_secs: std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
