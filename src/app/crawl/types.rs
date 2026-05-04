@@ -4,6 +4,10 @@
 //! Edit here when: Adding new crawl source types or changing failure tracking fields.
 //! Do not edit here for: Pipeline logic (see pipeline.rs), CLI handlers (see commands/crawl.rs).
 
+use std::collections::HashSet;
+
+use crate::engine::git_ops::FileEntry;
+
 /// Metadata about the crawl source that travels alongside a `BlobSource`.
 ///
 /// This struct carries source identity (source_kind, commit_oid) as pure data.
@@ -38,4 +42,40 @@ impl CrawlFailures {
     pub fn has_failures(&self) -> bool {
         self.total() > 0
     }
+}
+
+// ============================================================================
+// Phase output types
+// ============================================================================
+
+/// Output from classifying files against existing chunks.
+pub struct ClassifyOutput {
+    /// Files that need to be chunked and indexed.
+    pub new_files: Vec<FileEntry>,
+    /// File IDs for files that already have chunks and need label added.
+    pub existing_file_ids: HashSet<String>,
+    /// Count of new files (for display).
+    pub new_count: usize,
+    /// Count of existing files (for display).
+    pub existing_count: usize,
+}
+
+/// Output from adding labels to existing files.
+pub struct LabelAddOutput {
+    /// File IDs that were successfully updated.
+    pub success_file_ids: HashSet<String>,
+    /// Error messages for files that failed.
+    pub failures: Vec<String>,
+}
+
+/// Output from the chunking phase.
+pub struct ChunkingOutput {
+    /// All chunks produced.
+    pub chunks: Vec<crate::engine::Chunk>,
+    /// File IDs that were touched during chunking.
+    pub touched_file_ids: HashSet<String>,
+    /// Files that had chunking warnings.
+    pub warning_files: HashSet<String>,
+    /// Total warning count.
+    pub warning_count: usize,
 }

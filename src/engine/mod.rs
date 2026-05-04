@@ -24,4 +24,4 @@ pub use chunker::Chunk;
 pub use crawl_config::ChunkingStrategy;
 pub use parallel_embedder::ParallelConfig;
 pub use parallel_embedder::ParallelEmbedder;
-pub use partitioner::SMALL_CHUNK_CHARS;
+pub use partitioner::{SMALL_CHUNK_CHARS, TARGET_CHARS};
