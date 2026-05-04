@@ -78,7 +78,7 @@ pub struct Chunk {
 }
 
 impl Chunk {
-    /// Compute the point ID for this chunk
+    /// Compute the row ID for this chunk
     pub fn row_id(&self) -> String {
         compute_row_id(&self.file_id, self.chunk_ordinal)
     }

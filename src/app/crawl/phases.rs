@@ -2,13 +2,12 @@
 //!
 //! Purpose: Individual phases of the crawl pipeline, extracted for clarity and maintainability.
 //! Edit here when: Modifying phase logic, adding new phases (e.g., FTS indexing), or changing phase ordering.
-//! Do not edit here for: Crawl orchestration (see ../commands/crawl.rs), embed/upload pipeline (see pipeline.rs), phase output types (see types.rs).
+//! Do not edit here for: Crawl orchestration (see ../commands/crawl.rs), embed/upload pipeline (see pipeline.rs).
 
 use anyhow::Result;
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use crate::app::crawl::types::{ChunkingOutput, ClassifyOutput, LabelAddOutput};
 use crate::app::format_duration;
 use crate::engine::{
     TARGET_CHARS,
@@ -95,6 +94,22 @@ pub fn filter_files(files: Vec<FileEntry>, crawl_config: &CompiledCrawlConfig) -
     filtered
 }
 
+// ============================================================================
+// Phase 1: Classify files
+// ============================================================================
+
+/// Output from classifying files against existing chunks.
+pub struct ClassifyOutput {
+    /// Files that need to be chunked and indexed.
+    pub new_files: Vec<FileEntry>,
+    /// File IDs for files that already have chunks and need label added.
+    pub existing_file_ids: HashSet<String>,
+    /// Count of new files (for display).
+    pub new_count: usize,
+    /// Count of existing files (for display).
+    pub existing_count: usize,
+}
+
 /// Classifies files as new or existing based on chunk presence.
 pub async fn classify_files(
     files: &[FileEntry],
@@ -173,6 +188,18 @@ pub async fn classify_files(
     })
 }
 
+// ============================================================================
+// Phase 2: Add label to existing files
+// ============================================================================
+
+/// Output from adding labels to existing files.
+pub struct LabelAddOutput {
+    /// File IDs that were successfully updated.
+    pub success_file_ids: HashSet<String>,
+    /// Error messages for files that failed.
+    pub failures: Vec<String>,
+}
+
 /// Adds the current label to existing files' chunks.
 pub async fn add_label_to_existing_files(
     existing_file_ids: &HashSet<String>,
@@ -240,6 +267,22 @@ pub async fn add_label_to_existing_files(
         success_file_ids,
         failures,
     })
+}
+
+// ============================================================================
+// Phase 3: Chunk new files
+// ============================================================================
+
+/// Output from the chunking phase.
+pub struct ChunkingOutput {
+    /// All chunks produced.
+    pub chunks: Vec<crate::engine::Chunk>,
+    /// File IDs that were touched during chunking.
+    pub touched_file_ids: HashSet<String>,
+    /// Files that had chunking warnings.
+    pub warning_files: HashSet<String>,
+    /// Total warning count.
+    pub warning_count: usize,
 }
 
 /// Chunks new files and produces chunks for embedding.

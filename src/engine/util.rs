@@ -56,9 +56,9 @@ pub fn compute_file_id(
     format!("{:016x}", hash)
 }
 
-/// Compute point ID for a specific chunk within a file.
+/// Compute row ID for a specific chunk within a file.
 ///
-/// The point ID uniquely identifies a chunk by combining the file ID
+/// The row ID uniquely identifies a chunk by combining the file ID
 /// with the chunk's ordinal position.
 ///
 /// # Arguments
