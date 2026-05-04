@@ -71,7 +71,7 @@ pub fn format_chunk_report(
     let breadcrumb = sanitize_for_terminal(breadcrumb.unwrap_or("unknown"));
 
     let mut report = breadcrumb;
-    if let (Some(ordinal), Some(count)) = (split_part.map(|(o, _)| o), split_part.map(|(_, c)| c)) {
+    if let Some((ordinal, count)) = split_part {
         report = format!("{} (part {}/{})", report, ordinal, count);
     }
     if chunk_kind != "content" {
