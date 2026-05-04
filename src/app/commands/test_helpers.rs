@@ -97,9 +97,9 @@ pub async fn create_test_db_with_chunks(
 }
 
 /// Create a test chunk row with default catalog.
-pub fn test_chunk_row(point_id: &str, file_id: &str, ordinal: i32, label_id: &str) -> ChunkRow {
+pub fn test_chunk_row(row_id: &str, file_id: &str, ordinal: i32, label_id: &str) -> ChunkRow {
     ChunkRow {
-        point_id: point_id.to_string(),
+        row_id: row_id.to_string(),
         text: format!("Test content for chunk {} in file {}", ordinal, file_id),
         catalog: label_id
             .split(':')
@@ -134,14 +134,14 @@ pub fn test_chunk_row(point_id: &str, file_id: &str, ordinal: i32, label_id: &st
 
 /// Create a test chunk row with explicit catalog.
 pub fn test_chunk_row_with_catalog(
-    point_id: &str,
+    row_id: &str,
     file_id: &str,
     ordinal: i32,
     catalog: &str,
     label_id: &str,
 ) -> ChunkRow {
     ChunkRow {
-        point_id: point_id.to_string(),
+        row_id: row_id.to_string(),
         text: format!("Test content for chunk {}", ordinal),
         catalog: catalog.to_string(),
         active_label_ids: vec![label_id.to_string()],

@@ -25,7 +25,7 @@ use arrow_schema::{DataType, Field, Schema, SchemaRef};
 use std::sync::Arc;
 
 /// Current schema version. Increment on breaking schema changes.
-pub const MONODEX_SCHEMA_VERSION: u32 = 1;
+pub const MONODEX_SCHEMA_VERSION: u32 = 2;
 
 /// Vector dimension for the embedding model (jina-embeddings-v2-base-code).
 pub const VECTOR_DIMENSION: usize = 768;
@@ -39,7 +39,7 @@ pub const LABEL_METADATA_TABLE: &str = "label_metadata";
 /// Returns the Arrow schema for the `chunks` table.
 ///
 /// Column ordering follows a logical grouping:
-/// 1. Primary key (point_id)
+/// 1. Primary key (row_id)
 /// 2. Content (text, vector)
 /// 3. Label membership (catalog, active_label_ids)
 /// 4. Implementation identity
@@ -53,7 +53,7 @@ pub const LABEL_METADATA_TABLE: &str = "label_metadata";
 pub fn chunks_schema() -> SchemaRef {
     Arc::new(Schema::new(vec![
         // Primary key
-        Field::new("point_id", DataType::Utf8, false),
+        Field::new("row_id", DataType::Utf8, false),
         // Content
         Field::new("text", DataType::Utf8, false),
         Field::new(
@@ -137,9 +137,9 @@ mod tests {
         );
 
         // Verify primary key column exists and is non-nullable
-        let point_id_field = schema.field_with_name("point_id").unwrap();
-        assert_eq!(point_id_field.data_type(), &DataType::Utf8);
-        assert!(!point_id_field.is_nullable());
+        let row_id_field = schema.field_with_name("row_id").unwrap();
+        assert_eq!(row_id_field.data_type(), &DataType::Utf8);
+        assert!(!row_id_field.is_nullable());
 
         // Verify vector column has correct dimension
         let vector_field = schema.field_with_name("vector").unwrap();
@@ -181,10 +181,10 @@ mod tests {
     }
 
     #[test]
-    fn test_schema_version_is_one() {
-        // This test documents the initial version. It will need updating
+    fn test_schema_version_constant() {
+        // This test documents the current schema version. It will need updating
         // when the schema evolves.
-        assert_eq!(MONODEX_SCHEMA_VERSION, 1);
+        assert_eq!(MONODEX_SCHEMA_VERSION, 2);
     }
 
     #[test]

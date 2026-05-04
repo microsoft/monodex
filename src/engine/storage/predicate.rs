@@ -8,7 +8,7 @@
 //!
 //! Validation contract: Callers must pass already-validated values. Catalog names
 //! are validated by `validate_catalog`, label IDs by `LabelId::parse`, and
-//! `point_id`/`file_id` are derived from internal computation. The functions here
+//! `row_id`/`file_id` are derived from internal computation. The functions here
 //! add a single defense-in-depth check: `debug_assert!` that values contain no
 //! single quote (`'`). The `col` argument is trusted-by-construction (all call
 //! sites pass hard-coded literals); this expectation is named here, so the assertion
@@ -58,7 +58,7 @@ mod tests {
 
     #[test]
     fn test_eq_str() {
-        assert_eq!(eq_str("point_id", "abc123"), "point_id = 'abc123'");
+        assert_eq!(eq_str("row_id", "abc123"), "row_id = 'abc123'");
         assert_eq!(eq_str("catalog", "my-catalog"), "catalog = 'my-catalog'");
     }
 
@@ -73,19 +73,19 @@ mod tests {
     #[test]
     fn test_in_quoted_strs() {
         assert_eq!(
-            in_quoted_strs("point_id", &["abc", "def"]),
-            "point_id IN ('abc', 'def')"
+            in_quoted_strs("row_id", &["abc", "def"]),
+            "row_id IN ('abc', 'def')"
         );
         assert_eq!(
-            in_quoted_strs("point_id", &["single"]),
-            "point_id IN ('single')"
+            in_quoted_strs("row_id", &["single"]),
+            "row_id IN ('single')"
         );
     }
 
     #[test]
     fn test_in_quoted_strs_empty() {
         // Empty slice returns a no-match predicate
-        assert_eq!(in_quoted_strs("point_id", &[]), "1 = 0");
+        assert_eq!(in_quoted_strs("row_id", &[]), "1 = 0");
     }
 
     #[test]

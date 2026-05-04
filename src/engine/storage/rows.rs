@@ -27,7 +27,7 @@ pub const SOURCE_KIND_WORKING_DIRECTORY: &str = "working-directory";
 #[derive(Debug, Clone, PartialEq)]
 pub struct ChunkRow {
     // Primary key
-    pub point_id: String,
+    pub row_id: String,
 
     // Content
     pub text: String,
@@ -112,14 +112,14 @@ impl ChunkRow {
             ));
         }
 
-        // Validate point_id matches computed value from file_id and chunk_ordinal
-        let expected_point_id =
-            crate::engine::util::compute_point_id(&self.file_id, self.chunk_ordinal as usize);
-        if self.point_id != expected_point_id {
+        // Validate row_id matches computed value from file_id and chunk_ordinal
+        let expected_row_id =
+            crate::engine::util::compute_row_id(&self.file_id, self.chunk_ordinal as usize);
+        if self.row_id != expected_row_id {
             return Err(anyhow!(
-                "ChunkRow point_id '{}' does not match expected '{}' for file_id '{}' and chunk_ordinal {}",
-                self.point_id,
-                expected_point_id,
+                "ChunkRow row_id '{}' does not match expected '{}' for file_id '{}' and chunk_ordinal {}",
+                self.row_id,
+                expected_row_id,
                 self.file_id,
                 self.chunk_ordinal
             ));
@@ -185,7 +185,7 @@ mod tests {
 
     fn valid_chunk_row() -> ChunkRow {
         ChunkRow {
-            point_id: "abc123:1".to_string(),
+            row_id: "abc123:1".to_string(),
             text: "some code".to_string(),
             catalog: "my-catalog".to_string(),
             active_label_ids: vec!["my-catalog:main".to_string()],

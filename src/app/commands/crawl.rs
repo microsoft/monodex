@@ -189,8 +189,8 @@ async fn run_crawl_label_async(
         }
 
         // Check if sentinel exists and is complete
-        let sentinel_point_id = format!("{}:1", file_id);
-        match chunk_storage.get_by_point_id(&sentinel_point_id).await {
+        let sentinel_row_id = format!("{}:1", file_id);
+        match chunk_storage.get_by_row_id(&sentinel_row_id).await {
             Ok(Some(chunk)) => {
                 // Check if file crawl was completed (file_complete == true)
                 if !chunk.file_complete {
@@ -249,13 +249,10 @@ async fn run_crawl_label_async(
                             labels
                         };
                         if let Err(e) = chunk_storage
-                            .update_active_labels(&chunk.point_id, &new_labels)
+                            .update_active_labels(&chunk.row_id, &new_labels)
                             .await
                         {
-                            eprintln!(
-                                "  ❌ Failed to add label to chunk {}: {}",
-                                chunk.point_id, e
-                            );
+                            eprintln!("  ❌ Failed to add label to chunk {}: {}", chunk.row_id, e);
                             existing_file_label_add_failures.push(format!("{}: {}", file_id, e));
                             file_had_failures = true;
                         }
@@ -661,8 +658,8 @@ async fn run_crawl_working_dir_async(
             continue;
         }
 
-        let sentinel_point_id = format!("{}:1", file_id);
-        match chunk_storage.get_by_point_id(&sentinel_point_id).await {
+        let sentinel_row_id = format!("{}:1", file_id);
+        match chunk_storage.get_by_row_id(&sentinel_row_id).await {
             Ok(Some(chunk)) => {
                 // Check if file crawl was completed (file_complete == true)
                 if !chunk.file_complete {
@@ -721,13 +718,10 @@ async fn run_crawl_working_dir_async(
                             labels
                         };
                         if let Err(e) = chunk_storage
-                            .update_active_labels(&chunk.point_id, &new_labels)
+                            .update_active_labels(&chunk.row_id, &new_labels)
                             .await
                         {
-                            eprintln!(
-                                "  ❌ Failed to add label to chunk {}: {}",
-                                chunk.point_id, e
-                            );
+                            eprintln!("  ❌ Failed to add label to chunk {}: {}", chunk.row_id, e);
                             existing_file_label_add_failures.push(format!("{}: {}", file_id, e));
                             file_had_failures = true;
                         }

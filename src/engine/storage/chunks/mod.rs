@@ -38,10 +38,7 @@ fn chunk_rows_to_record_batch_with_vectors<'a>(
     let rows: Vec<(&ChunkRow, &[f32])> = rows.into_iter().collect();
     let n = rows.len();
 
-    let point_id: StringArray = rows
-        .iter()
-        .map(|(r, _)| Some(r.point_id.as_str()))
-        .collect();
+    let row_id: StringArray = rows.iter().map(|(r, _)| Some(r.row_id.as_str())).collect();
     let text: StringArray = rows.iter().map(|(r, _)| Some(r.text.as_str())).collect();
 
     // Vector column with actual embedding values
@@ -126,7 +123,7 @@ fn chunk_rows_to_record_batch_with_vectors<'a>(
     let file_complete: BooleanArray = rows.iter().map(|(r, _)| Some(r.file_complete)).collect();
 
     let columns: Vec<ArrayRef> = vec![
-        Arc::new(point_id),
+        Arc::new(row_id),
         Arc::new(text),
         vector,
         Arc::new(catalog),
@@ -187,12 +184,12 @@ fn build_string_list_array(values: &[&[String]]) -> ArrayRef {
 ///
 /// Validates all identifier fields.
 fn parse_chunk_row(batch: &RecordBatch, row_idx: usize) -> Result<ChunkRow> {
-    let point_id = batch
-        .column_by_name("point_id")
-        .ok_or_else(|| anyhow!("point_id column not found"))?
+    let row_id = batch
+        .column_by_name("row_id")
+        .ok_or_else(|| anyhow!("row_id column not found"))?
         .as_any()
         .downcast_ref::<StringArray>()
-        .ok_or_else(|| anyhow!("point_id column is not a StringArray"))?
+        .ok_or_else(|| anyhow!("row_id column is not a StringArray"))?
         .value(row_idx)
         .to_string();
 
@@ -422,7 +419,7 @@ fn parse_chunk_row(batch: &RecordBatch, row_idx: usize) -> Result<ChunkRow> {
         .value(row_idx);
 
     let row = ChunkRow {
-        point_id,
+        row_id,
         text,
         catalog,
         active_label_ids,
@@ -476,12 +473,12 @@ impl ChunkStorage {
     pub fn new(table: Arc<lancedb::table::Table>) -> Self {
         Self { table }
     }
-    /// Upsert a batch of chunk rows with their embedding vectors by point_id.
+    /// Upsert a batch of chunk rows with their embedding vectors by row_id.
     ///
     /// This is the primary method for writing chunks during crawl, where we have
     /// both the row data and the computed embedding vectors.
     ///
-    /// Matched rows are updated in place (same point_id implies same content
+    /// Matched rows are updated in place (same row_id implies same content
     /// by construction, since file_id already incorporates blob_id + path +
     /// embedder + chunker).
     ///
@@ -522,7 +519,7 @@ impl ChunkStorage {
 
             // Use merge_insert for proper upsert semantics
             let reader = RecordBatchIterator::new(std::iter::once(Ok(batch)), schema.clone());
-            let mut builder = self.table.merge_insert(&["point_id"]);
+            let mut builder = self.table.merge_insert(&["row_id"]);
             builder
                 .when_matched_update_all(None)
                 .when_not_matched_insert_all();
@@ -532,11 +529,11 @@ impl ChunkStorage {
         Ok(())
     }
 
-    /// Look up a single chunk by point_id.
+    /// Look up a single chunk by row_id.
     ///
     /// Returns None if the chunk doesn't exist.
-    pub async fn get_by_point_id(&self, point_id: &str) -> Result<Option<ChunkRow>> {
-        let predicate = eq_str("point_id", point_id);
+    pub async fn get_by_row_id(&self, row_id: &str) -> Result<Option<ChunkRow>> {
+        let predicate = eq_str("row_id", row_id);
 
         let results = self
             .table
@@ -544,7 +541,7 @@ impl ChunkStorage {
             .only_if(&predicate)
             .execute()
             .await
-            .map_err(|e| anyhow!("Failed to query chunk by point_id: {}", e))?;
+            .map_err(|e| anyhow!("Failed to query chunk by row_id: {}", e))?;
 
         let batches = results
             .try_collect::<Vec<_>>()
@@ -720,9 +717,9 @@ impl ChunkStorage {
     /// Update the active_label_ids array of a single chunk.
     ///
     /// Uses LanceDB's update() with SQL expression for in-place modification.
-    pub async fn update_active_labels(&self, point_id: &str, new_labels: &[String]) -> Result<()> {
+    pub async fn update_active_labels(&self, row_id: &str, new_labels: &[String]) -> Result<()> {
         // Reject empty label list - a chunk must belong to at least one label.
-        // Callers should use delete_by_point_ids to remove chunks, not clear their labels.
+        // Callers should use delete_by_row_ids to remove chunks, not clear their labels.
         if new_labels.is_empty() {
             return Err(anyhow!(
                 "Cannot update active_label_ids to empty list - a chunk must belong to at least one label"
@@ -733,7 +730,7 @@ impl ChunkStorage {
         let quoted: Vec<String> = new_labels.iter().map(|l| format!("'{}'", l)).collect();
         let labels_sql = format!("[{}]", quoted.join(", "));
 
-        let predicate = eq_str("point_id", point_id);
+        let predicate = eq_str("row_id", row_id);
 
         self.table
             .update()
@@ -749,8 +746,8 @@ impl ChunkStorage {
     /// Update the file_complete boolean of a single chunk (sentinel marker).
     ///
     /// Uses LanceDB's update() with SQL boolean literal (true/false).
-    pub async fn update_file_complete(&self, point_id: &str, complete: bool) -> Result<()> {
-        let predicate = eq_str("point_id", point_id);
+    pub async fn update_file_complete(&self, row_id: &str, complete: bool) -> Result<()> {
+        let predicate = eq_str("row_id", row_id);
         let value = if complete { "true" } else { "false" };
 
         self.table
@@ -764,14 +761,14 @@ impl ChunkStorage {
         Ok(())
     }
 
-    /// Batch-delete chunks by a list of point_ids.
-    pub async fn delete_by_point_ids(&self, point_ids: &[String]) -> Result<()> {
-        if point_ids.is_empty() {
+    /// Batch-delete chunks by a list of row_ids.
+    pub async fn delete_by_row_ids(&self, row_ids: &[String]) -> Result<()> {
+        if row_ids.is_empty() {
             return Ok(());
         }
 
-        let vals: Vec<&str> = point_ids.iter().map(|s| s.as_str()).collect();
-        let predicate = in_quoted_strs("point_id", &vals);
+        let vals: Vec<&str> = row_ids.iter().map(|s| s.as_str()).collect();
+        let predicate = in_quoted_strs("row_id", &vals);
 
         self.table
             .delete(&predicate)
@@ -833,11 +830,11 @@ impl ChunkStorage {
 
             if new_labels.is_empty() {
                 // Delete the chunk
-                self.delete_by_point_ids(std::slice::from_ref(&chunk.point_id))
+                self.delete_by_row_ids(std::slice::from_ref(&chunk.row_id))
                     .await?;
             } else {
                 // Update active_label_ids
-                self.update_active_labels(&chunk.point_id, &new_labels)
+                self.update_active_labels(&chunk.row_id, &new_labels)
                     .await?;
             }
 

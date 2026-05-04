@@ -130,7 +130,7 @@ async fn test_label_add_makes_chunks_searchable() {
 
     // Insert chunk with label A
     let rows = vec![ChunkRow {
-        point_id: chunk.point_id(),
+        row_id: chunk.row_id(),
         text: chunk.text.clone(),
         catalog: chunk.catalog.clone(),
         active_label_ids: chunk.active_label_ids.clone(),
@@ -187,7 +187,7 @@ async fn test_label_add_makes_chunks_searchable() {
             new_labels.push(label_b_id.to_string());
         }
         chunk_storage
-            .update_active_labels(&chunk.point_id, &new_labels)
+            .update_active_labels(&chunk.row_id, &new_labels)
             .await
             .unwrap();
     }
@@ -248,7 +248,7 @@ async fn test_incomplete_file_is_recrawled() {
     vector[0] = 1.0;
 
     let row = ChunkRow {
-        point_id: chunk.point_id(),
+        row_id: chunk.row_id(),
         text: chunk.text.clone(),
         catalog: chunk.catalog.clone(),
         active_label_ids: chunk.active_label_ids.clone(),
@@ -280,7 +280,7 @@ async fn test_incomplete_file_is_recrawled() {
 
     // Retrieve the sentinel and verify file_complete is false
     let sentinel = chunk_storage
-        .get_by_point_id(&format!("{}:1", chunk.file_id))
+        .get_by_row_id(&format!("{}:1", chunk.file_id))
         .await
         .unwrap();
     assert!(sentinel.is_some(), "Sentinel should exist");

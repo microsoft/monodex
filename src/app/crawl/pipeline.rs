@@ -290,8 +290,8 @@ async fn upload_and_mark_complete(
         let expected = expected_count.get(file_id).copied().unwrap_or(0);
         if uploaded == expected && expected > 0 {
             // Find the sentinel chunk (ordinal 1) and mark it complete
-            let point_id = format!("{}:{}", file_id, 1);
-            chunk_storage.update_file_complete(&point_id, true).await?;
+            let row_id = format!("{}:{}", file_id, 1);
+            chunk_storage.update_file_complete(&row_id, true).await?;
         }
     }
 
@@ -301,7 +301,7 @@ async fn upload_and_mark_complete(
 /// Convert a Chunk to a ChunkRow for storage.
 fn chunk_to_row(chunk: &Chunk) -> ChunkRow {
     ChunkRow {
-        point_id: chunk.point_id(),
+        row_id: chunk.row_id(),
         text: chunk.text.clone(),
         catalog: chunk.catalog.clone(),
         active_label_ids: chunk.active_label_ids.clone(),

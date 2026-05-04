@@ -5,7 +5,7 @@
 use super::crawl_config::ChunkingStrategy;
 use super::markdown_partitioner::partition_markdown;
 use super::partitioner::{PartitionConfig, PartitionedChunk, partition_typescript};
-use super::util::{CHUNKER_ID, EMBEDDER_ID, compute_file_id, compute_hash, compute_point_id};
+use super::util::{CHUNKER_ID, EMBEDDER_ID, compute_file_id, compute_hash, compute_row_id};
 use anyhow::Result;
 
 /// Represents a chunk of code or documentation
@@ -79,8 +79,8 @@ pub struct Chunk {
 
 impl Chunk {
     /// Compute the point ID for this chunk
-    pub fn point_id(&self) -> String {
-        compute_point_id(&self.file_id, self.chunk_ordinal)
+    pub fn row_id(&self) -> String {
+        compute_row_id(&self.file_id, self.chunk_ordinal)
     }
 }
 
@@ -354,9 +354,9 @@ export function hello() {
                 "Same content+path should produce same file_id"
             );
             assert_eq!(
-                c1.point_id(),
-                c2.point_id(),
-                "Same content+path should produce same point_id"
+                c1.row_id(),
+                c2.row_id(),
+                "Same content+path should produce same row_id"
             );
         }
     }
@@ -384,9 +384,9 @@ export function hello() {
             "Different paths should produce different file_id"
         );
         assert_ne!(
-            chunks1[0].point_id(),
-            chunks2[0].point_id(),
-            "Different paths should produce different point_id"
+            chunks1[0].row_id(),
+            chunks2[0].row_id(),
+            "Different paths should produce different row_id"
         );
     }
 
@@ -416,8 +416,8 @@ export class JsonFile {
         // File IDs should be different (path is part of identity)
         assert_ne!(chunks1[0].file_id, chunks2[0].file_id);
 
-        // Point IDs should be different
-        assert_ne!(chunks1[0].point_id(), chunks2[0].point_id());
+        // Row IDs should be different
+        assert_ne!(chunks1[0].row_id(), chunks2[0].row_id());
 
         // Breadcrumbs should reflect the different package context (percent-encoded @scope)
         assert!(
