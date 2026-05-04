@@ -1,7 +1,6 @@
-//! Types for partition-based code chunking.
-//!
+//! Purpose: Types and constants for partition-based code chunking — `PartitionedChunk`, `PartitionConfig`, `SplitResult`, `TARGET_CHARS`, `SMALL_CHUNK_CHARS`.
 //! Edit here when: Adding or modifying chunk types, configuration, or result structures.
-//! Do not edit here for: Debug logging (debug.rs), scoring (scoring.rs), split logic (split_search.rs).
+//! Do not edit here for: Debug logging (see `debug.rs`), scoring (see `scoring.rs`), split logic (see `split_search.rs`).
 
 use super::debug::PartitionDebug;
 

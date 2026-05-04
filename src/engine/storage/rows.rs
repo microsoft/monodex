@@ -1,10 +1,6 @@
-//! Typed row structs for LanceDB tables.
-//!
-//! Purpose: Define plain-Rust row types that the rest of the engine deals in.
-//! The storage module handles conversion to/from Arrow RecordBatches internally.
-//!
+//! Purpose: Define plain-Rust row types that the rest of the engine deals in. The storage module handles conversion to/from Arrow RecordBatches internally.
 //! Edit here when: Adding/removing/modifying fields in ChunkRow or LabelMetadataRow.
-//! Do not edit here for: Arrow schema definitions (see schema.rs), storage operations (see chunks.rs, labels.rs).
+//! Do not edit here for: Arrow schema definitions (see schema.rs), storage operations (see chunks/mod.rs, labels.rs).
 
 use anyhow::{Result, anyhow};
 

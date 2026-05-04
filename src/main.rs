@@ -1,7 +1,6 @@
-//! monodex: Semantic search indexer for Rush monorepos
-//!
-//! Semantic search indexer for Rush monorepos using LanceDB vector database
-//! Intelligently chunks code and documentation for high-quality semantic search
+//! Purpose: Binary entry point — parse CLI args, run process-level setup, dispatch to command handlers.
+//! Edit here when: Wiring a new command into top-level dispatch or changing process-level setup (warnings, exit codes).
+//! Do not edit here for: CLI argument definitions (see `app/cli.rs`), command handler logic (see `app/commands/`).
 
 use clap::Parser;
 use monodex::app::commands::run_use;

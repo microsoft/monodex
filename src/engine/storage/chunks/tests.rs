@@ -1,6 +1,6 @@
 //! Purpose: Test suite for chunks storage operations.
 //! Edit here when: Adding or modifying ChunkStorage tests.
-//! Do not edit here for: Production storage code — edit chunks.rs.
+//! Do not edit here for: Production storage code — edit chunks/mod.rs.
 
 use super::*;
 use crate::engine::schema::chunks_schema;

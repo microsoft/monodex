@@ -1,11 +1,6 @@
-//! Breadcrumb sanitization for hierarchical locators.
-//!
-//! Breadcrumbs are hierarchical locators of the form `package:file:symbol_or_heading`.
-//! They answer "where am I and what's near me" for Jina semantic neighboring and
-//! query-selector prefix matching.
-//!
-//! ## Encoding Rules
-//!
+//! Purpose: Percent-encode reserved characters in breadcrumb path components and slugify markdown headings GitHub-style.
+//! Edit here when: Changing the reserved-character set, percent-encoding rules, or heading slugification.
+//! Do not edit here for: Identifier validation (see `identifier.rs`), breadcrumb composition by chunkers (see `chunker.rs`, `markdown_partitioner.rs`, `partitioner/`).
 //! Reserved characters (`:`, `@`, `=`, `+`, `#`, `%`, whitespace, control characters)
 //! are percent-encoded in path components. The `/` character is NOT encoded as it
 //! serves as a path separator within file names.

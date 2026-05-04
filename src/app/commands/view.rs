@@ -1,7 +1,6 @@
-//! Handler for the `view` command.
-//!
-//! Edit here when: Modifying view output or chunk selector parsing.
-//! Do not edit here for: Chunk retrieval (see `engine/storage/chunks.rs`).
+//! Purpose: Handler for the `view` command — retrieve chunks by `file_id` with selector syntax and reconstruct file content.
+//! Edit here when: Modifying view output, chunk selector parsing, or file reconstruction logic.
+//! Do not edit here for: Chunk retrieval primitives (see `engine/storage/chunks/mod.rs`).
 
 use std::collections::HashSet;
 

@@ -1,7 +1,6 @@
-//! Debug logging for partitioning decisions.
-//!
+//! Purpose: Debug logging hooks for partitioning decisions — the `PartitionDebug` flag struct and verbose-output controls.
 //! Edit here when: Adding or modifying debug output for chunking decisions.
-//! Do not edit here for: Types (types.rs), scoring (scoring.rs), split logic (split_search.rs).
+//! Do not edit here for: Types (see `types.rs`), scoring (see `scoring.rs`), split logic (see `split_search.rs`).
 
 /// Debug logging for partitioning decisions
 #[derive(Debug, Clone, Copy, Default)]

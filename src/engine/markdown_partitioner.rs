@@ -1,10 +1,6 @@
-//! Markdown partition-based chunking
-//!
-//! Simple markdown partitioner that splits at natural boundaries:
-//! - Headings (#, ##, ###)
-//! - Fenced code blocks (```)
-//! - Block quotes (>>>)
-//! - Paragraphs
+//! Purpose: Heading-based markdown chunking with breadcrumb generation from heading hierarchy.
+//! Edit here when: Changing markdown split boundaries (headings, fenced code blocks, block quotes, paragraphs) or heading-slug behavior.
+//! Do not edit here for: TypeScript chunking (see `partitioner/`), breadcrumb-encoding primitives (see `breadcrumb.rs`), strategy dispatch (see `chunker.rs`).
 
 #![allow(dead_code)]
 

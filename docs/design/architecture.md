@@ -118,7 +118,13 @@ Reusable indexing engine. Does not depend on `src/app/`.
 - `breadcrumb.rs` — Percent-encode reserved characters (`:`, `@`, `=`, `+`, `#`, `%`, whitespace) in breadcrumb path components. Slugify markdown headings GitHub-style.
 - `chunker.rs` — Strategy dispatcher: pick a chunking strategy by file extension and produce `Chunk` records. Computes `file_id` and `row_id` for each chunk.
 - `crawl_config.rs` — Load and compile `monodex-crawl.json` (file types, exclude/keep patterns) with `globset`. Implements the `should_crawl()` and `get_strategy()` evaluation rules. Holds the embedded default config and the `ChunkingStrategy` enum.
-- `git_ops.rs` — Enumerate Git commit trees, read blob content, build the package index, walk the working directory. Working-dir mode shells out to `git ls-files`/`git status`/`git hash-object` so blob IDs match commit-mode IDs.
+### src/engine/git_ops/
+
+Git-aware enumeration and blob reading. The `BlobSource` trait abstracts over commit and working-directory crawl sources so the crawl pipeline can stay free of mode-branching.
+
+- `mod.rs` — Public `BlobSource` trait, `FileEntry`, `PackageIndex`, the two `BlobSource` implementations, and `package.json` name extraction.
+- `commit.rs` — gix-based commit-tree enumeration, blob reading, and per-commit package-index construction.
+- `working_dir.rs` — Subprocess-based working-tree reading. Shells out to `git ls-files` / `git status` / `git hash-object` (Git ≥ 2.35.0) so blob IDs match commit-mode IDs after `.gitattributes` and clean filters apply.
 - `identifier.rs` — Validate catalog and label syntax. Owns the `LabelId` type and the qualified-form composer; will host the parser for typed labels and cross-catalog references when those land.
 - `markdown_partitioner.rs` — Custom markdown parser that splits at headings, fenced code blocks, block quotes, and paragraphs. Generates breadcrumbs from heading hierarchy.
 - `package_lookup.rs` — Filesystem-only fallback that walks up to find the nearest `package.json` and extracts its `name`. Used only by `dump-chunks`; the main crawl path resolves packages from the package index.

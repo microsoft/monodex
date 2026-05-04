@@ -1,7 +1,6 @@
-//! Handler for the `dump-chunks` command.
-//!
-//! Edit here when: Modifying chunk visualization or quality reporting.
-//! Do not edit here for: Chunking algorithm (see `engine/partitioner/`).
+//! Purpose: Handler for the `dump-chunks` command — visualize partitioner output for a single file.
+//! Edit here when: Modifying chunk visualization, debug/visualize/with-fallback modes, or quality reporting in the command.
+//! Do not edit here for: Chunking algorithm (see `engine/partitioner/`), package-name fallback (see `engine/package_lookup.rs`).
 
 use std::path::PathBuf;
 

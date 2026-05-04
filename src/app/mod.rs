@@ -1,7 +1,5 @@
-//! Application-level concerns: CLI, config, commands, crawl pipeline.
-//!
-//! Edit here when: Adding or modifying CLI commands, user-facing config,
-//! or the high-level crawl orchestration.
+//! Purpose: Application layer — CLI, config, commands, and crawl orchestration.
+//! Edit here when: Adding or modifying CLI commands, user-facing config, or the high-level crawl orchestration.
 //! Do not edit here for: Engine internals (see `engine/`).
 
 pub mod cli;

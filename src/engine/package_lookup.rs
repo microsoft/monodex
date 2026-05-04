@@ -1,11 +1,6 @@
-//! Simple package name lookup by finding nearest package.json
-//!
-//! Walks upwards from a file path to find the governing package.json,
-//! then extracts the "name" field. If no package.json is found,
-//! uses a simple relative folder path as a fallback identifier.
-//!
-//! This is a filesystem-only convenience for the `dump-chunks` command.
-//! The main crawl path uses `git_ops::extract_package_name_from_bytes()`
+//! Purpose: Filesystem-only package-name lookup that walks up to find the nearest `package.json`. Used only by `dump-chunks`.
+//! Edit here when: Changing the dump-chunks fallback for resolving package names from a working tree.
+//! Do not edit here for: Main-crawl package resolution (see `git_ops/`), JSON name extraction (see `git_ops/mod.rs`).
 //! directly on Git blob data.
 
 use std::path::Path;

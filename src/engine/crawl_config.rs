@@ -1,11 +1,6 @@
-//! Crawl configuration for externalized crawl policy.
-//!
-//! This module defines the schema and loading logic for `monodex-crawl.json`,
-//! which controls which files are crawled and how they are chunked.
-//!
-//! ## Config Discovery
-//!
-//! Configs are loaded in this precedence order:
+//! Purpose: Load and compile `monodex-crawl.json` (file types, exclude/keep patterns) and evaluate `should_crawl` / `get_strategy`.
+//! Edit here when: Adding crawl-config fields, changing pattern evaluation, updating the embedded default, or adding `ChunkingStrategy` variants.
+//! Do not edit here for: Chunking algorithms (see `chunker.rs` and submodules), app-level config (see `app/config.rs`).
 //! 1. `<repo-root>/monodex-crawl.json` (repo-local)
 //! 2. `~/.monodex/crawl.json` (user-global)
 //! 3. Embedded default (compiled into binary)

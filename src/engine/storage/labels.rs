@@ -1,10 +1,6 @@
-//! Label metadata table operations for LanceDB storage.
-//!
 //! Purpose: Provide typed operations on the `label_metadata` table.
-//!
 //! Edit here when: Adding/modifying label metadata storage operations.
-//! Do not edit here for: Row types (see rows.rs), chunk operations (see chunks.rs),
-//!   database open logic (see database.rs).
+//! Do not edit here for: Row types (see rows.rs), chunk operations (see chunks/mod.rs), database open logic (see database.rs).
 
 use anyhow::{Result, anyhow};
 use arrow_array::{

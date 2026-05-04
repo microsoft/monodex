@@ -1,7 +1,6 @@
-//! Handler for the `purge` command.
-//!
-//! Edit here when: Modifying purge behavior (delete catalog or entire database).
-//! Do not edit here for: Storage delete operations (see `engine/storage/chunks.rs`, `engine/storage/labels.rs`).
+//! Purpose: Handler for the `purge` command — delete all chunks for a catalog or for the entire database.
+//! Edit here when: Modifying purge behavior, scope, or confirmation flow.
+//! Do not edit here for: Storage delete operations (see `engine/storage/chunks/mod.rs`, `engine/storage/labels.rs`).
 
 use crate::app::{Config, resolve_database_path};
 use crate::engine::storage::Database;
