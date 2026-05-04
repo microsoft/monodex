@@ -26,10 +26,10 @@ async fn create_test_storage() -> (TempDir, ChunkStorage) {
     (tmp_dir, ChunkStorage::new(Arc::new(table)))
 }
 
-fn test_chunk_row(point_id: &str, file_id: &str, ordinal: i32) -> ChunkRow {
+fn test_chunk_row(row_id: &str, file_id: &str, ordinal: i32) -> ChunkRow {
     ChunkRow {
-        point_id: point_id.to_string(),
-        text: format!("Test content for {}", point_id),
+        row_id: row_id.to_string(),
+        text: format!("Test content for {}", row_id),
         catalog: "test-catalog".to_string(),
         active_label_ids: vec!["test-catalog:main".to_string()],
         embedder_id: "test-embedder:v1".to_string(),
@@ -69,10 +69,10 @@ async fn test_upsert_and_get() {
         .await
         .unwrap();
 
-    let retrieved = storage.get_by_point_id("file1:1").await.unwrap();
+    let retrieved = storage.get_by_row_id("file1:1").await.unwrap();
     assert!(retrieved.is_some());
     let retrieved = retrieved.unwrap();
-    assert_eq!(retrieved.point_id, "file1:1");
+    assert_eq!(retrieved.row_id, "file1:1");
     assert_eq!(retrieved.text, row.text);
 }
 
@@ -80,7 +80,7 @@ async fn test_upsert_and_get() {
 async fn test_get_nonexistent() {
     let (_tmp_dir, storage) = create_test_storage().await;
 
-    let retrieved = storage.get_by_point_id("nonexistent:1").await.unwrap();
+    let retrieved = storage.get_by_row_id("nonexistent:1").await.unwrap();
     assert!(retrieved.is_none());
 }
 
@@ -184,7 +184,7 @@ async fn test_update_active_labels() {
         .await
         .unwrap();
 
-    let retrieved = storage.get_by_point_id("file1:1").await.unwrap().unwrap();
+    let retrieved = storage.get_by_row_id("file1:1").await.unwrap().unwrap();
     assert_eq!(retrieved.active_label_ids.len(), 2);
     assert!(
         retrieved
@@ -199,7 +199,7 @@ async fn test_update_active_labels() {
 }
 
 #[tokio::test]
-async fn test_delete_by_point_ids() {
+async fn test_delete_by_row_ids() {
     let (_tmp_dir, storage) = create_test_storage().await;
 
     storage
@@ -212,12 +212,12 @@ async fn test_delete_by_point_ids() {
         .unwrap();
 
     storage
-        .delete_by_point_ids(&["file1:1".to_string()])
+        .delete_by_row_ids(&["file1:1".to_string()])
         .await
         .unwrap();
 
-    let retrieved1 = storage.get_by_point_id("file1:1").await.unwrap();
-    let retrieved2 = storage.get_by_point_id("file1:2").await.unwrap();
+    let retrieved1 = storage.get_by_row_id("file1:1").await.unwrap();
+    let retrieved2 = storage.get_by_row_id("file1:2").await.unwrap();
 
     assert!(retrieved1.is_none());
     assert!(retrieved2.is_some());
@@ -284,10 +284,10 @@ async fn test_upsert_overwrites() {
         .await
         .unwrap();
 
-    let retrieved = storage.get_by_point_id("file1:1").await.unwrap().unwrap();
+    let retrieved = storage.get_by_row_id("file1:1").await.unwrap().unwrap();
     assert_eq!(retrieved.text, "Updated text");
 
-    // Verify only one row exists for this point_id
+    // Verify only one row exists for this row_id
     let chunks = storage
         .get_chunks_for_label("test-catalog:main", Some(1))
         .await
@@ -297,9 +297,9 @@ async fn test_upsert_overwrites() {
 
 /// Helper to create a test chunk row with custom label.
 fn test_chunk_row_with_label(file_id: &str, ordinal: i32, label_id: &str) -> ChunkRow {
-    let point_id = format!("{}:{}", file_id, ordinal);
+    let row_id = format!("{}:{}", file_id, ordinal);
     ChunkRow {
-        point_id,
+        row_id,
         text: format!("Test content for {}", file_id),
         catalog: label_id
             .split(':')
@@ -379,7 +379,7 @@ async fn test_vector_search_with_filter() {
         .unwrap();
 
     assert_eq!(results.len(), 1, "Should find 1 result for label-a");
-    assert_eq!(results[0].chunk.point_id, "file1:1");
+    assert_eq!(results[0].chunk.row_id, "file1:1");
 
     // Search with query vector matching v1, filtered to label-b
     // Should return p2 (has label-b, even though vector doesn't match as well)
@@ -391,7 +391,7 @@ async fn test_vector_search_with_filter() {
     // This proves the filter works: we searched with v1 but got p2 because
     // the filter restricted us to label-b, which only p2 has
     assert_eq!(results.len(), 1, "Should find 1 result for label-b");
-    assert_eq!(results[0].chunk.point_id, "file2:1");
+    assert_eq!(results[0].chunk.row_id, "file2:1");
 
     // Search with a non-existent label should return nothing
     let results = storage
@@ -476,14 +476,14 @@ async fn test_vector_search_correctness() {
 
     // file0:1 should be first (distance ~0, cosine similarity = 1)
     assert_eq!(
-        results.first().map(|r| r.chunk.point_id.as_str()),
+        results.first().map(|r| r.chunk.row_id.as_str()),
         Some("file0:1"),
         "file0:1 should be ranked first for query [1,0,0,0]"
     );
 
     // file4:1 should be last (distance ~2, cosine similarity = -1)
     assert_eq!(
-        results.last().map(|r| r.chunk.point_id.as_str()),
+        results.last().map(|r| r.chunk.row_id.as_str()),
         Some("file4:1"),
         "file4:1 should be ranked last for query [1,0,0,0]"
     );
@@ -500,7 +500,7 @@ async fn test_vector_search_correctness() {
 
     // file8:1 should be first (exact match, cosine = 1)
     assert_eq!(
-        results.first().map(|r| r.chunk.point_id.as_str()),
+        results.first().map(|r| r.chunk.row_id.as_str()),
         Some("file8:1"),
         "file8:1 should be ranked first for query at 45° between axes 0 and 1"
     );
@@ -509,7 +509,7 @@ async fn test_vector_search_correctness() {
     let top_4: Vec<&str> = results
         .iter()
         .take(4)
-        .map(|r| r.chunk.point_id.as_str())
+        .map(|r| r.chunk.row_id.as_str())
         .collect();
     assert!(
         top_4.contains(&"file0:1") && top_4.contains(&"file1:1"),
@@ -530,7 +530,7 @@ async fn test_vector_search_correctness() {
 
     // file9:1 should be first (all components equal, normalized)
     assert_eq!(
-        results.first().map(|r| r.chunk.point_id.as_str()),
+        results.first().map(|r| r.chunk.row_id.as_str()),
         Some("file9:1"),
         "file9:1 should be ranked first for query [1,1,1,1] (equal components)"
     );

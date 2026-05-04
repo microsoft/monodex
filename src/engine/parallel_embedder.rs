@@ -1,13 +1,6 @@
-//! Parallel embedding generation using multiple ONNX sessions
-//!
-//! This module implements a pool of ONNX sessions for parallel embedding generation.
-//! Each session runs with limited intra-op threads, allowing multiple sessions to
-//! run concurrently without oversubscribing CPU cores.
-//!
-//! Based on benchmark findings:
-//! - 4 parallel sessions × 3 intra-op threads = 12 cores utilized
-//! - ~12ms per embedding (3.5x faster than single session)
-//! - Individual processing (no batching) is faster on CPU
+//! Purpose: Parallel embedding generation using a pool of ONNX sessions.
+//! Edit here when: Changing embedding model, optimizing parallelism, or adjusting session pool sizing.
+//! Do not edit here for: Chunking logic (use chunker.rs), which files to crawl (use crawl_config.rs), storage operations (use storage/).
 
 use anyhow::Result;
 use hf_hub::{Repo, RepoType, api::sync::Api};

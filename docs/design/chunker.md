@@ -45,7 +45,7 @@ Several runtime alternatives have been investigated. The findings are platform-c
 
 ## Dispatcher
 
-`src/engine/chunker.rs` is the entry point. It looks up the chunking strategy for a file's extension in the loaded crawl config and routes to one of three partitioners. Each partitioner takes the file content, a `PartitionConfig` (target size, file name, package name for breadcrumbs), and the catalog name, and returns a sequence of `PartitionedChunk` records. The dispatcher then wraps each chunk with shared metadata: `file_id` (computed from `embedder_id + chunker_id + blob_id + relative_path`), `point_id`, content hash, breadcrumb prefix, and the active label list.
+`src/engine/chunker.rs` is the entry point. It looks up the chunking strategy for a file's extension in the loaded crawl config and routes to one of three partitioners. Each partitioner takes the file content, a `PartitionConfig` (target size, file name, package name for breadcrumbs), and the catalog name, and returns a sequence of `PartitionedChunk` records. The dispatcher then wraps each chunk with shared metadata: `file_id` (computed from `embedder_id + chunker_id + blob_id + relative_path`), `row_id`, content hash, breadcrumb prefix, and the active label list.
 
 | Strategy     | File extensions                             | Source                               |
 | ------------ | ------------------------------------------- | ------------------------------------ |

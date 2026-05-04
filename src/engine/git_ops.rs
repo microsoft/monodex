@@ -1,8 +1,11 @@
-//! Git operations for commit-based and working directory crawling
+//! Purpose: Git operations for commit-based and working-directory crawling.
+//! Edit here when: Changing how files are enumerated from Git trees, blob ID computation, or package index building.
+//! Do not edit here for: Chunking logic (use chunker.rs), storage operations (use storage/), crawl config (use crawl_config.rs).
 //!
-//! This module provides functions to read file content and metadata
-//! from Git commits without touching the working tree, as well as
-//! enumerating files from the working directory for indexing uncommitted changes.
+//! This module defines the `BlobSource` trait for abstracting over commit-based
+//! and working-directory crawl sources. The trait provides behavior-only methods
+//! (enumerate files, read content, build package index) without exposing source
+//! identity, which travels separately as `CrawlSourceMetadata`.
 
 use anyhow::{Result, anyhow};
 use gix::ObjectId;
@@ -64,16 +67,96 @@ fn version_at_least(actual: &str, required: &str) -> bool {
     true
 }
 
+/// A file entry with its relative path and Git blob ID.
+///
+/// This unified struct is used by both commit-based and working-directory
+/// enumeration, replacing the former separate `FileEntry` and `WorkingDirEntry`.
 #[derive(Debug, Clone)]
 pub struct FileEntry {
     pub relative_path: String,
     pub blob_id: String,
 }
 
-#[derive(Debug, Clone)]
-pub struct WorkingDirEntry {
-    pub relative_path: String,
-    pub blob_id: String,
+/// Trait for abstracting over crawl sources (commit tree vs working directory).
+///
+/// This trait provides behavior-only methods for the three operations that
+/// differ between commit-based and working-directory crawling:
+/// - enumerating files
+/// - reading file content
+/// - building the package index
+///
+/// Source identity (`source_kind`, `commit_oid`) is NOT on the trait.
+/// Those values travel as `CrawlSourceMetadata` alongside the trait object,
+/// keeping the trait focused on behavior and preventing mode-branching patterns.
+pub trait BlobSource {
+    /// Enumerate all files in this source.
+    fn enumerate(&self) -> Result<Vec<FileEntry>>;
+
+    /// Read the content of a file from this source.
+    fn read_content(&self, file: &FileEntry) -> Result<Vec<u8>>;
+
+    /// Build the package index for this source.
+    fn build_package_index(&self) -> Result<PackageIndex>;
+}
+
+/// Blob source for a specific Git commit.
+///
+/// Reads file content and blob IDs directly from Git objects,
+/// ensuring deterministic, reproducible indexing.
+pub struct CommitBlobSource {
+    repo_path: std::path::PathBuf,
+    commit_oid: String,
+}
+
+impl CommitBlobSource {
+    pub fn new(repo_path: std::path::PathBuf, commit_oid: String) -> Self {
+        Self {
+            repo_path,
+            commit_oid,
+        }
+    }
+}
+
+impl BlobSource for CommitBlobSource {
+    fn enumerate(&self) -> Result<Vec<FileEntry>> {
+        enumerate_commit_tree(&self.repo_path, &self.commit_oid)
+    }
+
+    fn read_content(&self, file: &FileEntry) -> Result<Vec<u8>> {
+        read_blob_content(&self.repo_path, &file.blob_id)
+    }
+
+    fn build_package_index(&self) -> Result<PackageIndex> {
+        build_package_index_for_commit(&self.repo_path, &self.commit_oid)
+    }
+}
+
+/// Blob source for the working directory.
+///
+/// Reads files directly from the filesystem and computes Git-compatible
+/// blob IDs that respect .gitattributes and clean filters.
+pub struct WorkingDirBlobSource {
+    repo_path: std::path::PathBuf,
+}
+
+impl WorkingDirBlobSource {
+    pub fn new(repo_path: std::path::PathBuf) -> Self {
+        Self { repo_path }
+    }
+}
+
+impl BlobSource for WorkingDirBlobSource {
+    fn enumerate(&self) -> Result<Vec<FileEntry>> {
+        enumerate_working_directory(&self.repo_path)
+    }
+
+    fn read_content(&self, file: &FileEntry) -> Result<Vec<u8>> {
+        read_working_file_content(&self.repo_path, &file.relative_path)
+    }
+
+    fn build_package_index(&self) -> Result<PackageIndex> {
+        build_package_index_for_working_dir(&self.repo_path)
+    }
 }
 
 pub fn resolve_commit_oid(repo_path: &Path, commit: &str) -> Result<String> {
@@ -548,11 +631,11 @@ fn git_hash_object_batch(repo_root: &Path, paths: &[String]) -> Result<Vec<(Stri
 /// This function builds a complete blob map using Git CLI batch commands,
 /// then walks the filesystem to filter by crawl config. The blob IDs
 /// correctly respect .gitattributes, clean filters, and other repo-specific settings.
-pub fn enumerate_working_directory(repo_path: &Path) -> Result<Vec<WorkingDirEntry>> {
+pub fn enumerate_working_directory(repo_path: &Path) -> Result<Vec<FileEntry>> {
     // Build the Git-aware blob map
     let blob_map = build_working_tree_blob_map(repo_path)?;
 
-    let mut entries: Vec<WorkingDirEntry> = Vec::new();
+    let mut entries: Vec<FileEntry> = Vec::new();
 
     for entry in walkdir::WalkDir::new(repo_path)
         .follow_links(false)
@@ -594,7 +677,7 @@ pub fn enumerate_working_directory(repo_path: &Path) -> Result<Vec<WorkingDirEnt
         // and won't be found by walkdir() anyway since they don't exist on disk.
         // This ensures deleted files are never processed as candidates.
         if let Some(blob_id) = blob_map.blobs_by_path.get(&relative_path) {
-            entries.push(WorkingDirEntry {
+            entries.push(FileEntry {
                 relative_path,
                 blob_id: blob_id.clone(),
             });
@@ -609,7 +692,6 @@ pub fn enumerate_working_directory(repo_path: &Path) -> Result<Vec<WorkingDirEnt
 }
 
 /// Build package index from the working directory.
-///
 /// This function walks the filesystem to find all package.json files and extracts
 /// their package names. All hidden directories (dot-prefixed) are excluded.
 pub fn build_package_index_for_working_dir(repo_path: &Path) -> Result<PackageIndex> {

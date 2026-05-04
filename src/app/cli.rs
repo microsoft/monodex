@@ -7,6 +7,8 @@
 use clap::{Args, Parser, Subcommand};
 use std::path::PathBuf;
 
+use crate::engine::TARGET_CHARS;
+
 /// Fast, accurate code search for large Rush monorepos
 /// https://www.rushstack.io
 #[derive(Parser)]
@@ -84,7 +86,7 @@ pub enum Commands {
         file: PathBuf,
 
         /// Target chunk size in chars
-        #[arg(long, default_value = "6000")]
+        #[arg(long, default_value_t = TARGET_CHARS)]
         target_size: usize,
 
         /// Show visualization mode (full chunk contents)

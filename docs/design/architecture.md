@@ -28,10 +28,10 @@ Designed scale: around 200K files and 600K chunks per catalog. Full crawls take 
 
 ```
 file_id  = hash(embedder_id + chunker_id + blob_id + relative_path)
-point_id = "{file_id}:{chunk_ordinal}"
+row_id = "{file_id}:{chunk_ordinal}"
 ```
 
-The `file_id` is a 16-char hex string identifying a semantic version of a file. The `point_id` is the row's primary key. `chunk_ordinal` is 1-indexed.
+The `file_id` is a 16-char hex string identifying a semantic version of a file. The `row_id` is the row's primary key. `chunk_ordinal` is 1-indexed.
 
 The fact that `relative_path` is part of `file_id` matters: identical content at different paths produces different `file_id` values. Path renames create new chunks. This is intentional — breadcrumb context is part of what gets indexed, so different paths mean different indexed artifacts.
 
@@ -39,7 +39,7 @@ The `embedder_id` and `chunker_id` constants live in `src/engine/util.rs`. Bumpi
 
 ### Sentinel-based incremental crawl
 
-Chunk 1 of each file is the sentinel: the row with `chunk_ordinal = 1` is also the only row with `file_complete = true` once the file finishes indexing. The crawl checks for the sentinel row by `point_id` lookup; if it exists and is complete, the file is skipped, and only `active_label_ids` is updated to add the current label. This is what makes re-crawling cheap.
+Chunk 1 of each file is the sentinel: the row with `chunk_ordinal = 1` is also the only row with `file_complete = true` once the file finishes indexing. The crawl checks for the sentinel row by `row_id` lookup; if it exists and is complete, the file is skipped, and only `active_label_ids` is updated to add the current label. This is what makes re-crawling cheap.
 
 ## Crawl pipeline
 
@@ -116,9 +116,8 @@ Crawl-pipeline orchestration shared between command handlers.
 Reusable indexing engine. Does not depend on `src/app/`.
 
 - `breadcrumb.rs` — Percent-encode reserved characters (`:`, `@`, `=`, `+`, `#`, `%`, whitespace) in breadcrumb path components. Slugify markdown headings GitHub-style.
-- `chunker.rs` — Strategy dispatcher: pick a chunking strategy by file extension and produce `Chunk` records. Computes `file_id` and `point_id` for each chunk.
-- `config.rs` — Backwards-compatible thin wrapper that delegates to `crawl_config.rs`. Existed for compatibility during the externalize-crawl-policy refactor; new callers should use `crawl_config` directly.
-- `crawl_config.rs` — Load and compile `monodex-crawl.json` (file types, exclude/keep patterns) with `globset`. Implements the `should_crawl()` and `get_strategy()` evaluation rules. Holds the embedded default config.
+- `chunker.rs` — Strategy dispatcher: pick a chunking strategy by file extension and produce `Chunk` records. Computes `file_id` and `row_id` for each chunk.
+- `crawl_config.rs` — Load and compile `monodex-crawl.json` (file types, exclude/keep patterns) with `globset`. Implements the `should_crawl()` and `get_strategy()` evaluation rules. Holds the embedded default config and the `ChunkingStrategy` enum.
 - `git_ops.rs` — Enumerate Git commit trees, read blob content, build the package index, walk the working directory. Working-dir mode shells out to `git ls-files`/`git status`/`git hash-object` so blob IDs match commit-mode IDs.
 - `identifier.rs` — Validate catalog and label syntax. Owns the `LabelId` type and the qualified-form composer; will host the parser for typed labels and cross-catalog references when those land.
 - `markdown_partitioner.rs` — Custom markdown parser that splits at headings, fenced code blocks, block quotes, and paragraphs. Generates breadcrumbs from heading hierarchy.
@@ -126,7 +125,7 @@ Reusable indexing engine. Does not depend on `src/app/`.
 - `parallel_embedder.rs` — Pool of ONNX sessions for parallel embedding generation. Each session uses limited intra-op threads; pool size and threads are auto-tuned from RAM and core count via `system_info`.
 - `schema.rs` — Arrow schema definitions for the `chunks` and `label_metadata` LanceDB tables. Holds `MONODEX_SCHEMA_VERSION`, which must be bumped on any change to column shape; see [monodex_files.md](./monodex_files.md) for the rationale.
 - `system_info.rs` — Detect total RAM, cgroup limits, CPU cores. Implements the `"auto"` heuristic for embedding-model `modelInstances` and `threadsPerInstance`. Cgroup-aware so containerized installs warn correctly.
-- `util.rs` — Hash utilities: `compute_file_id` (xxhash of embedder/chunker/blob/path), `compute_point_id`, `compute_hash`. Holds the `EMBEDDER_ID` and `CHUNKER_ID` constants.
+- `util.rs` — Hash utilities: `compute_file_id` (xxhash of embedder/chunker/blob/path), `compute_row_id`, `compute_hash`. Holds the `EMBEDDER_ID` and `CHUNKER_ID` constants.
 
 ### src/engine/partitioner/
 

@@ -1,0 +1,530 @@
+//! Crawl pipeline phases.
+//!
+//! Purpose: Individual phases of the crawl pipeline, extracted for clarity and maintainability.
+//! Edit here when: Modifying phase logic, adding new phases (e.g., FTS indexing), or changing phase ordering.
+//! Do not edit here for: Crawl orchestration (see ../commands/crawl.rs), embed/upload pipeline (see pipeline.rs).
+
+use anyhow::Result;
+use std::collections::HashSet;
+use std::sync::Arc;
+
+use crate::app::format_duration;
+use crate::engine::{
+    TARGET_CHARS,
+    chunker::{ChunkContext, chunk_content},
+    crawl_config::CompiledCrawlConfig,
+    git_ops::{BlobSource, FileEntry},
+    identifier::LabelId,
+    storage::{ChunkStorage, LabelMetadataRow, LabelStorage},
+};
+
+/// Opens the database and returns storage handles.
+pub async fn open_storage(
+    db_path: &std::path::Path,
+    debug: bool,
+) -> Result<(Arc<ChunkStorage>, Arc<LabelStorage>)> {
+    let db = crate::engine::storage::Database::open(db_path).await?;
+    if debug {
+        println!("[DEBUG] Opened database at: {}", db_path.display());
+    }
+    let chunk_storage = Arc::new(db.chunks_storage().await?);
+    let label_storage = Arc::new(db.label_storage().await?);
+    if debug {
+        println!("[DEBUG] Opened chunks and label_metadata tables");
+    }
+    Ok((chunk_storage, label_storage))
+}
+
+/// Writes in-progress label metadata before any work begins.
+pub async fn write_in_progress_metadata(
+    label_storage: &LabelStorage,
+    label_id: &LabelId,
+    catalog_name: &str,
+    label: &str,
+    commit_oid: &str,
+    source_kind: &str,
+    debug: bool,
+) -> Result<()> {
+    let metadata = LabelMetadataRow {
+        label_id: label_id.to_string(),
+        catalog: catalog_name.to_string(),
+        label: label.to_string(),
+        commit_oid: commit_oid.to_string(),
+        source_kind: source_kind.to_string(),
+        crawl_complete: false,
+        updated_at_unix_secs: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64,
+    };
+    label_storage.upsert(&metadata).await?;
+    if debug {
+        println!("[DEBUG] Wrote in-progress label metadata: {}", label_id);
+    }
+    Ok(())
+}
+
+/// Enumerates files from the blob source.
+pub fn enumerate_files(blob_source: &dyn BlobSource) -> Result<Vec<FileEntry>> {
+    let files = blob_source.enumerate()?;
+    println!("Found {} files", files.len());
+    Ok(files)
+}
+
+/// Builds the package index from the blob source.
+pub fn build_package_index(
+    blob_source: &dyn BlobSource,
+) -> Result<crate::engine::git_ops::PackageIndex> {
+    println!("📦 Building package index...");
+    let package_index = blob_source.build_package_index()?;
+    println!("Package index built successfully");
+    println!();
+    Ok(package_index)
+}
+
+/// Filters files using the crawl configuration.
+pub fn filter_files(files: Vec<FileEntry>, crawl_config: &CompiledCrawlConfig) -> Vec<FileEntry> {
+    println!("📂 Filtering files...");
+    let filtered: Vec<FileEntry> = files
+        .into_iter()
+        .filter(|f| crawl_config.should_crawl(&f.relative_path))
+        .collect();
+    println!("{} files to process after filtering", filtered.len());
+    println!();
+    filtered
+}
+
+// ============================================================================
+// Phase 1: Classify files
+// ============================================================================
+
+/// Output from classifying files against existing chunks.
+pub struct ClassifyOutput {
+    /// Files that need to be chunked and indexed.
+    pub new_files: Vec<FileEntry>,
+    /// File IDs for files that already have chunks and need label added.
+    pub existing_file_ids: HashSet<String>,
+    /// Count of new files (for display).
+    pub new_count: usize,
+    /// Count of existing files (for display).
+    pub existing_count: usize,
+}
+
+/// Classifies files as new or existing based on chunk presence.
+pub async fn classify_files(
+    files: &[FileEntry],
+    chunk_storage: &ChunkStorage,
+    prior_warning_files: &HashSet<String>,
+    incremental_warnings: bool,
+) -> Result<ClassifyOutput> {
+    println!("⚡ Phase 1: Checking existing chunks and collecting new files...");
+
+    let mut new_files: Vec<FileEntry> = Vec::new();
+    let mut existing_file_ids: HashSet<String> = HashSet::new();
+    let mut new_count = 0;
+    let mut existing_count = 0;
+
+    for file_entry in files {
+        // When incremental_warnings is false and file had prior warning, force reprocessing
+        let force_reprocess =
+            !incremental_warnings && prior_warning_files.contains(&file_entry.relative_path);
+
+        let file_id = crate::engine::util::compute_file_id(
+            crate::engine::util::EMBEDDER_ID,
+            crate::engine::util::CHUNKER_ID,
+            &file_entry.blob_id,
+            &file_entry.relative_path,
+        );
+
+        if force_reprocess {
+            // Treat as new file to re-chunk and re-index
+            new_files.push(file_entry.clone());
+            new_count += 1;
+            continue;
+        }
+
+        // Check if sentinel exists and is complete
+        let sentinel_row_id = format!("{}:1", file_id);
+        match chunk_storage.get_by_row_id(&sentinel_row_id).await {
+            Ok(Some(chunk)) => {
+                // Check if file crawl was completed (file_complete == true)
+                if !chunk.file_complete {
+                    // Incomplete file - treat as new file to re-crawl
+                    new_files.push(file_entry.clone());
+                    new_count += 1;
+                    continue;
+                }
+                // File already indexed - add to existing files list.
+                // We do NOT short-circuit based on sentinel's active_label_ids because
+                // partial label coverage is possible (some chunks may be missing the label).
+                // The label-add phase will visit all chunks and update as needed.
+                existing_file_ids.insert(file_id);
+                existing_count += 1;
+            }
+            Ok(None) => {
+                new_files.push(file_entry.clone());
+                new_count += 1;
+            }
+            Err(e) => {
+                eprintln!(
+                    "  ⚠️  Error checking sentinel for {}: {}",
+                    file_entry.relative_path, e
+                );
+                new_files.push(file_entry.clone());
+                new_count += 1;
+            }
+        }
+    }
+
+    println!("  New files to index: {}", new_count);
+    println!("  Existing files (label update only): {}", existing_count);
+    println!();
+
+    Ok(ClassifyOutput {
+        new_files,
+        existing_file_ids,
+        new_count,
+        existing_count,
+    })
+}
+
+// ============================================================================
+// Phase 2: Add label to existing files
+// ============================================================================
+
+/// Output from adding labels to existing files.
+pub struct LabelAddOutput {
+    /// File IDs that were successfully updated.
+    pub success_file_ids: HashSet<String>,
+    /// Error messages for files that failed.
+    pub failures: Vec<String>,
+}
+
+/// Adds the current label to existing files' chunks.
+pub async fn add_label_to_existing_files(
+    existing_file_ids: &HashSet<String>,
+    chunk_storage: &ChunkStorage,
+    label_id: &LabelId,
+) -> Result<LabelAddOutput> {
+    let mut success_file_ids: HashSet<String> = HashSet::new();
+    let mut failures: Vec<String> = Vec::new();
+
+    if existing_file_ids.is_empty() {
+        return Ok(LabelAddOutput {
+            success_file_ids,
+            failures,
+        });
+    }
+
+    println!(
+        "🏷️  Adding label to {} existing files...",
+        existing_file_ids.len()
+    );
+    for file_id in existing_file_ids {
+        // Get all chunks for this file and add the label
+        match chunk_storage.get_chunks_by_file_id(file_id).await {
+            Ok(chunks) => {
+                let mut file_had_failures = false;
+                for chunk in &chunks {
+                    // Skip chunks that already have this label
+                    if chunk.active_label_ids.contains(&label_id.to_string()) {
+                        continue;
+                    }
+                    let new_labels = {
+                        let mut labels = chunk.active_label_ids.clone();
+                        labels.push(label_id.to_string());
+                        labels
+                    };
+                    if let Err(e) = chunk_storage
+                        .update_active_labels(&chunk.row_id, &new_labels)
+                        .await
+                    {
+                        eprintln!("  ❌ Failed to add label to chunk {}: {}", chunk.row_id, e);
+                        failures.push(format!("{}: {}", file_id, e));
+                        file_had_failures = true;
+                    }
+                }
+                if !file_had_failures {
+                    success_file_ids.insert(file_id.clone());
+                }
+            }
+            Err(e) => {
+                eprintln!("  ❌ Failed to get chunks for file {}: {}", file_id, e);
+                failures.push(format!("{}: {}", file_id, e));
+            }
+        }
+    }
+    println!("  Done.");
+    if !failures.is_empty() {
+        println!(
+            "  ⚠️  Failed to add label to {} existing files",
+            failures.len()
+        );
+    }
+    println!();
+
+    Ok(LabelAddOutput {
+        success_file_ids,
+        failures,
+    })
+}
+
+// ============================================================================
+// Phase 3: Chunk new files
+// ============================================================================
+
+/// Output from the chunking phase.
+pub struct ChunkingOutput {
+    /// All chunks produced.
+    pub chunks: Vec<crate::engine::Chunk>,
+    /// File IDs that were touched during chunking.
+    pub touched_file_ids: HashSet<String>,
+    /// Files that had chunking warnings.
+    pub warning_files: HashSet<String>,
+    /// Total warning count.
+    pub warning_count: usize,
+}
+
+/// Chunks new files and produces chunks for embedding.
+#[allow(clippy::too_many_arguments)]
+pub fn chunk_new_files(
+    new_files: &[FileEntry],
+    blob_source: &dyn BlobSource,
+    package_index: &crate::engine::git_ops::PackageIndex,
+    crawl_config: &CompiledCrawlConfig,
+    catalog_name: &str,
+    label_id: &LabelId,
+    repo_path: &std::path::Path,
+    new_count: usize,
+) -> Result<ChunkingOutput> {
+    let mut chunks: Vec<crate::engine::Chunk> = Vec::new();
+    let mut touched_file_ids: HashSet<String> = HashSet::new();
+    let mut warning_files: HashSet<String> = HashSet::new();
+    let mut warning_count: usize = 0;
+
+    if new_files.is_empty() {
+        return Ok(ChunkingOutput {
+            chunks,
+            touched_file_ids,
+            warning_files,
+            warning_count,
+        });
+    }
+
+    println!("📦 Phase 2: Chunking {} new files...", new_count);
+
+    for (idx, file_entry) in new_files.iter().enumerate() {
+        print!(
+            "\r  Processing file {}/{} ({:.0}%) | warnings: {}   ",
+            idx + 1,
+            new_count,
+            ((idx + 1) as f64 / new_count as f64) * 100.0,
+            warning_count
+        );
+        std::io::Write::flush(&mut std::io::stdout())?;
+
+        let content = match blob_source.read_content(file_entry) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("\n  ⚠️  Failed to read {}: {}", file_entry.relative_path, e);
+                continue;
+            }
+        };
+
+        let content_str = match String::from_utf8(content) {
+            Ok(s) => s,
+            Err(_) => continue,
+        };
+
+        let package_name = package_index
+            .find_package_name(&file_entry.relative_path)
+            .unwrap_or(catalog_name)
+            .to_string();
+
+        let ctx = ChunkContext {
+            catalog: catalog_name.to_string(),
+            label_id: label_id.to_string(),
+            package_name,
+            relative_path: file_entry.relative_path.clone(),
+            blob_id: file_entry.blob_id.clone(),
+            source_uri: format!("{}/{}", repo_path.display(), file_entry.relative_path),
+        };
+
+        let strategy = crawl_config.get_strategy(&file_entry.relative_path);
+        match chunk_content(&content_str, &ctx, TARGET_CHARS, strategy) {
+            Ok(file_chunks) => {
+                // Detect fallback warning: chunk_kind == "fallback-split"
+                let had_warning = file_chunks.iter().any(|c| c.chunk_kind == "fallback-split");
+                if had_warning {
+                    warning_count += 1;
+                    warning_files.insert(file_entry.relative_path.clone());
+                    println!();
+                    println!(
+                        "Warning: Couldn't find a splitpoint for {}",
+                        file_entry.relative_path
+                    );
+                }
+
+                if !file_chunks.is_empty() {
+                    touched_file_ids.insert(file_chunks[0].file_id.clone());
+                }
+                chunks.extend(file_chunks);
+            }
+            Err(e) => {
+                eprintln!(
+                    "\n  ⚠️  Failed to chunk {}: {}",
+                    file_entry.relative_path, e
+                );
+            }
+        }
+    }
+
+    let total_chunks = chunks.len();
+    println!("\n  Found {} chunks to embed", total_chunks);
+    println!();
+
+    Ok(ChunkingOutput {
+        chunks,
+        touched_file_ids,
+        warning_files,
+        warning_count,
+    })
+}
+
+/// Runs label reassignment cleanup to remove stale chunks.
+pub async fn run_label_cleanup(
+    chunk_storage: &ChunkStorage,
+    label_id: &str,
+    all_touched_file_ids: &HashSet<String>,
+) -> Result<u64> {
+    println!("🧹 Phase 4: Label reassignment cleanup...");
+    let processed = chunk_storage
+        .remove_label_from_chunks(label_id, all_touched_file_ids)
+        .await?;
+    println!("  Processed {} chunks for label cleanup", processed);
+    Ok(processed)
+}
+
+/// Updates the final label metadata.
+pub async fn update_final_metadata(
+    label_storage: &LabelStorage,
+    label_id: &LabelId,
+    catalog_name: &str,
+    label: &str,
+    commit_oid: &str,
+    source_kind: &str,
+    crawl_complete: bool,
+) -> Result<()> {
+    println!("📝 Updating label metadata...");
+    let metadata = LabelMetadataRow {
+        label_id: label_id.to_string(),
+        catalog: catalog_name.to_string(),
+        label: label.to_string(),
+        commit_oid: commit_oid.to_string(),
+        source_kind: source_kind.to_string(),
+        crawl_complete,
+        updated_at_unix_secs: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64,
+    };
+
+    label_storage.upsert(&metadata).await?;
+    if crawl_complete {
+        println!("  Label metadata saved.");
+    } else {
+        println!("  Label metadata saved (crawl_complete=false due to failures).");
+    }
+    println!();
+    Ok(())
+}
+
+/// Prints the crawl summary.
+#[allow(clippy::too_many_arguments)]
+pub fn print_summary(
+    total_start: std::time::Instant,
+    new_count: usize,
+    existing_count: usize,
+    existing_success_count: usize,
+    had_failures: bool,
+    cleanup_failed: bool,
+    existing_file_failures_count: usize,
+    pipeline_failures_count: usize,
+) {
+    let total_elapsed = total_start.elapsed();
+    if had_failures || cleanup_failed {
+        println!("⚠️  Crawl completed with errors!");
+        println!(
+            "  Total time: {}",
+            format_duration(total_elapsed.as_secs_f64())
+        );
+        println!("  New files indexed: {}", new_count);
+        println!("  Existing files detected: {}", existing_count);
+        println!(
+            "  Existing files updated successfully: {}",
+            existing_success_count
+        );
+        let total_failures = pipeline_failures_count + existing_file_failures_count;
+        println!("  Total failures: {}", total_failures);
+        if existing_file_failures_count > 0 {
+            println!(
+                "  - Existing file label-add failures: {}",
+                existing_file_failures_count
+            );
+        }
+        if cleanup_failed {
+            println!("  - Label cleanup failed (crawl not marked complete)");
+        }
+        println!();
+        println!("  This crawl is marked as incomplete. Re-run to complete indexing.");
+    } else {
+        println!("✅ Crawl complete!");
+        println!(
+            "  Total time: {}",
+            format_duration(total_elapsed.as_secs_f64())
+        );
+        println!("  New files indexed: {}", new_count);
+        println!("  Existing files detected: {}", existing_count);
+        println!(
+            "  Existing files updated successfully: {}",
+            existing_success_count
+        );
+    }
+}
+
+/// Saves warning state to disk.
+pub fn save_warning_state(
+    db_path: &std::path::Path,
+    catalog_name: &str,
+    crawl_warning_files: &HashSet<String>,
+    prior_warning_files: &HashSet<String>,
+    incremental_warnings: bool,
+) -> Result<Vec<String>> {
+    let mut next_warning_files: HashSet<String> = HashSet::new();
+    next_warning_files.extend(crawl_warning_files.iter().cloned());
+    if incremental_warnings {
+        next_warning_files.extend(prior_warning_files.iter().cloned());
+    }
+    let mut sorted_warning_files: Vec<String> = next_warning_files.iter().cloned().collect();
+    sorted_warning_files.sort();
+    crate::app::save_warning_state(db_path, catalog_name, &sorted_warning_files)?;
+    Ok(sorted_warning_files)
+}
+
+/// Prints the warning summary.
+pub fn print_warning_summary(crawl_warning_files: &HashSet<String>) {
+    if crawl_warning_files.is_empty() {
+        return;
+    }
+    let mut sorted: Vec<&String> = crawl_warning_files.iter().collect();
+    sorted.sort();
+    let plural = if sorted.len() == 1 { "file" } else { "files" };
+    println!();
+    println!("Chunking warnings in {} {}:", sorted.len(), plural);
+    for file in sorted.iter().take(20) {
+        println!("  - {}", file);
+    }
+    if sorted.len() > 20 {
+        println!("  ... and {} more", sorted.len() - 20);
+    }
+}

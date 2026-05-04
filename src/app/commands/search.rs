@@ -3,7 +3,7 @@
 //! Edit here when: Modifying search output or result formatting.
 //! Do not edit here for: Vector search logic (see `engine/storage/chunks.rs`).
 
-use crate::app::{Config, resolve_database_path, resolve_label_context, sanitize_for_terminal};
+use crate::app::{Config, format_chunk_report, resolve_database_path, resolve_label_context};
 use crate::engine::{ParallelEmbedder, storage::Database};
 
 pub fn run_search(
@@ -38,22 +38,22 @@ pub fn run_search(
     println!("Label: {}", label);
     println!();
 
+    if results.is_empty() {
+        println!("No results.");
+        println!();
+        return Ok(());
+    }
+
     // Display results as blurbs
     for result in &results {
         let chunk = &result.chunk;
 
         // Line 1: file_id:chunk_ordinal  distance  breadcrumb [chunk_kind] (part N/M)
-        // E.1: Sanitize breadcrumb to prevent terminal injection
-        let breadcrumb = sanitize_for_terminal(chunk.breadcrumb.as_deref().unwrap_or("unknown"));
-
-        // Build the report form with chunk_kind and split metadata
-        let mut report = breadcrumb.clone();
-        if let (Some(ordinal), Some(count)) = (chunk.split_part_ordinal, chunk.split_part_count) {
-            report = format!("{} (part {}/{})", report, ordinal, count);
-        }
-        if chunk.chunk_kind != "content" {
-            report = format!("{} [{}]", report, chunk.chunk_kind);
-        }
+        let report = format_chunk_report(
+            chunk.breadcrumb.as_deref(),
+            chunk.split_part_ordinal.zip(chunk.split_part_count),
+            &chunk.chunk_kind,
+        );
 
         println!(
             "{}:{}  dist={:.3}  {}",

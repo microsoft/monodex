@@ -17,9 +17,11 @@ use arrow_schema::{DataType, Field, SchemaRef};
 use futures::TryStreamExt;
 use lancedb::DistanceType;
 use lancedb::query::{ExecutableQuery, QueryBase};
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use crate::engine::schema::VECTOR_DIMENSION;
+use crate::engine::storage::predicate::{array_contains_str, eq_str, in_quoted_strs};
 use crate::engine::storage::{ChunkRow, ScoredChunkRow};
 
 /// Batch size for upsert operations. Storage-layer internal detail.
@@ -36,10 +38,7 @@ fn chunk_rows_to_record_batch_with_vectors<'a>(
     let rows: Vec<(&ChunkRow, &[f32])> = rows.into_iter().collect();
     let n = rows.len();
 
-    let point_id: StringArray = rows
-        .iter()
-        .map(|(r, _)| Some(r.point_id.as_str()))
-        .collect();
+    let row_id: StringArray = rows.iter().map(|(r, _)| Some(r.row_id.as_str())).collect();
     let text: StringArray = rows.iter().map(|(r, _)| Some(r.text.as_str())).collect();
 
     // Vector column with actual embedding values
@@ -124,7 +123,7 @@ fn chunk_rows_to_record_batch_with_vectors<'a>(
     let file_complete: BooleanArray = rows.iter().map(|(r, _)| Some(r.file_complete)).collect();
 
     let columns: Vec<ArrayRef> = vec![
-        Arc::new(point_id),
+        Arc::new(row_id),
         Arc::new(text),
         vector,
         Arc::new(catalog),
@@ -185,26 +184,29 @@ fn build_string_list_array(values: &[&[String]]) -> ArrayRef {
 ///
 /// Validates all identifier fields.
 fn parse_chunk_row(batch: &RecordBatch, row_idx: usize) -> Result<ChunkRow> {
-    let point_id = batch
-        .column(0)
+    let row_id = batch
+        .column_by_name("row_id")
+        .ok_or_else(|| anyhow!("row_id column not found"))?
         .as_any()
         .downcast_ref::<StringArray>()
-        .ok_or_else(|| anyhow!("point_id column is not a StringArray"))?
+        .ok_or_else(|| anyhow!("row_id column is not a StringArray"))?
         .value(row_idx)
         .to_string();
 
     let text = batch
-        .column(1)
+        .column_by_name("text")
+        .ok_or_else(|| anyhow!("text column not found"))?
         .as_any()
         .downcast_ref::<StringArray>()
         .ok_or_else(|| anyhow!("text column is not a StringArray"))?
         .value(row_idx)
         .to_string();
 
-    // Skip vector column (column 2) - we don't need it for the row struct
+    // "vector" is intentionally not read here; ChunkRow does not carry the embedding.
 
     let catalog = batch
-        .column(3)
+        .column_by_name("catalog")
+        .ok_or_else(|| anyhow!("catalog column not found"))?
         .as_any()
         .downcast_ref::<StringArray>()
         .ok_or_else(|| anyhow!("catalog column is not a StringArray"))?
@@ -213,7 +215,8 @@ fn parse_chunk_row(batch: &RecordBatch, row_idx: usize) -> Result<ChunkRow> {
 
     let active_label_ids = {
         let list_array = batch
-            .column(4)
+            .column_by_name("active_label_ids")
+            .ok_or_else(|| anyhow!("active_label_ids column not found"))?
             .as_any()
             .downcast_ref::<ListArray>()
             .ok_or_else(|| anyhow!("active_label_ids column is not a ListArray"))?;
@@ -228,7 +231,8 @@ fn parse_chunk_row(batch: &RecordBatch, row_idx: usize) -> Result<ChunkRow> {
     };
 
     let embedder_id = batch
-        .column(5)
+        .column_by_name("embedder_id")
+        .ok_or_else(|| anyhow!("embedder_id column not found"))?
         .as_any()
         .downcast_ref::<StringArray>()
         .ok_or_else(|| anyhow!("embedder_id column is not a StringArray"))?
@@ -236,7 +240,8 @@ fn parse_chunk_row(batch: &RecordBatch, row_idx: usize) -> Result<ChunkRow> {
         .to_string();
 
     let chunker_id = batch
-        .column(6)
+        .column_by_name("chunker_id")
+        .ok_or_else(|| anyhow!("chunker_id column not found"))?
         .as_any()
         .downcast_ref::<StringArray>()
         .ok_or_else(|| anyhow!("chunker_id column is not a StringArray"))?
@@ -244,7 +249,8 @@ fn parse_chunk_row(batch: &RecordBatch, row_idx: usize) -> Result<ChunkRow> {
         .to_string();
 
     let blob_id = batch
-        .column(7)
+        .column_by_name("blob_id")
+        .ok_or_else(|| anyhow!("blob_id column not found"))?
         .as_any()
         .downcast_ref::<StringArray>()
         .ok_or_else(|| anyhow!("blob_id column is not a StringArray"))?
@@ -252,7 +258,8 @@ fn parse_chunk_row(batch: &RecordBatch, row_idx: usize) -> Result<ChunkRow> {
         .to_string();
 
     let content_hash = batch
-        .column(8)
+        .column_by_name("content_hash")
+        .ok_or_else(|| anyhow!("content_hash column not found"))?
         .as_any()
         .downcast_ref::<StringArray>()
         .ok_or_else(|| anyhow!("content_hash column is not a StringArray"))?
@@ -260,7 +267,8 @@ fn parse_chunk_row(batch: &RecordBatch, row_idx: usize) -> Result<ChunkRow> {
         .to_string();
 
     let file_id = batch
-        .column(9)
+        .column_by_name("file_id")
+        .ok_or_else(|| anyhow!("file_id column not found"))?
         .as_any()
         .downcast_ref::<StringArray>()
         .ok_or_else(|| anyhow!("file_id column is not a StringArray"))?
@@ -268,7 +276,8 @@ fn parse_chunk_row(batch: &RecordBatch, row_idx: usize) -> Result<ChunkRow> {
         .to_string();
 
     let relative_path = batch
-        .column(10)
+        .column_by_name("relative_path")
+        .ok_or_else(|| anyhow!("relative_path column not found"))?
         .as_any()
         .downcast_ref::<StringArray>()
         .ok_or_else(|| anyhow!("relative_path column is not a StringArray"))?
@@ -276,7 +285,8 @@ fn parse_chunk_row(batch: &RecordBatch, row_idx: usize) -> Result<ChunkRow> {
         .to_string();
 
     let package_name = batch
-        .column(11)
+        .column_by_name("package_name")
+        .ok_or_else(|| anyhow!("package_name column not found"))?
         .as_any()
         .downcast_ref::<StringArray>()
         .ok_or_else(|| anyhow!("package_name column is not a StringArray"))?
@@ -284,7 +294,8 @@ fn parse_chunk_row(batch: &RecordBatch, row_idx: usize) -> Result<ChunkRow> {
         .to_string();
 
     let source_uri = batch
-        .column(12)
+        .column_by_name("source_uri")
+        .ok_or_else(|| anyhow!("source_uri column not found"))?
         .as_any()
         .downcast_ref::<StringArray>()
         .ok_or_else(|| anyhow!("source_uri column is not a StringArray"))?
@@ -292,28 +303,32 @@ fn parse_chunk_row(batch: &RecordBatch, row_idx: usize) -> Result<ChunkRow> {
         .to_string();
 
     let chunk_ordinal = batch
-        .column(13)
+        .column_by_name("chunk_ordinal")
+        .ok_or_else(|| anyhow!("chunk_ordinal column not found"))?
         .as_any()
         .downcast_ref::<Int32Array>()
         .ok_or_else(|| anyhow!("chunk_ordinal column is not an Int32Array"))?
         .value(row_idx);
 
     let chunk_count = batch
-        .column(14)
+        .column_by_name("chunk_count")
+        .ok_or_else(|| anyhow!("chunk_count column not found"))?
         .as_any()
         .downcast_ref::<Int32Array>()
         .ok_or_else(|| anyhow!("chunk_count column is not an Int32Array"))?
         .value(row_idx);
 
     let start_line = batch
-        .column(15)
+        .column_by_name("start_line")
+        .ok_or_else(|| anyhow!("start_line column not found"))?
         .as_any()
         .downcast_ref::<Int32Array>()
         .ok_or_else(|| anyhow!("start_line column is not an Int32Array"))?
         .value(row_idx);
 
     let end_line = batch
-        .column(16)
+        .column_by_name("end_line")
+        .ok_or_else(|| anyhow!("end_line column not found"))?
         .as_any()
         .downcast_ref::<Int32Array>()
         .ok_or_else(|| anyhow!("end_line column is not an Int32Array"))?
@@ -322,7 +337,8 @@ fn parse_chunk_row(batch: &RecordBatch, row_idx: usize) -> Result<ChunkRow> {
     // Nullable string fields
     let symbol_name = {
         let arr = batch
-            .column(17)
+            .column_by_name("symbol_name")
+            .ok_or_else(|| anyhow!("symbol_name column not found"))?
             .as_any()
             .downcast_ref::<StringArray>()
             .ok_or_else(|| anyhow!("symbol_name column is not a StringArray"))?;
@@ -334,7 +350,8 @@ fn parse_chunk_row(batch: &RecordBatch, row_idx: usize) -> Result<ChunkRow> {
     };
 
     let chunk_type = batch
-        .column(18)
+        .column_by_name("chunk_type")
+        .ok_or_else(|| anyhow!("chunk_type column not found"))?
         .as_any()
         .downcast_ref::<StringArray>()
         .ok_or_else(|| anyhow!("chunk_type column is not a StringArray"))?
@@ -342,7 +359,8 @@ fn parse_chunk_row(batch: &RecordBatch, row_idx: usize) -> Result<ChunkRow> {
         .to_string();
 
     let chunk_kind = batch
-        .column(19)
+        .column_by_name("chunk_kind")
+        .ok_or_else(|| anyhow!("chunk_kind column not found"))?
         .as_any()
         .downcast_ref::<StringArray>()
         .ok_or_else(|| anyhow!("chunk_kind column is not a StringArray"))?
@@ -351,7 +369,8 @@ fn parse_chunk_row(batch: &RecordBatch, row_idx: usize) -> Result<ChunkRow> {
 
     let breadcrumb = {
         let arr = batch
-            .column(20)
+            .column_by_name("breadcrumb")
+            .ok_or_else(|| anyhow!("breadcrumb column not found"))?
             .as_any()
             .downcast_ref::<StringArray>()
             .ok_or_else(|| anyhow!("breadcrumb column is not a StringArray"))?;
@@ -365,7 +384,8 @@ fn parse_chunk_row(batch: &RecordBatch, row_idx: usize) -> Result<ChunkRow> {
     // Nullable int fields
     let split_part_ordinal = {
         let arr = batch
-            .column(21)
+            .column_by_name("split_part_ordinal")
+            .ok_or_else(|| anyhow!("split_part_ordinal column not found"))?
             .as_any()
             .downcast_ref::<Int32Array>()
             .ok_or_else(|| anyhow!("split_part_ordinal column is not an Int32Array"))?;
@@ -378,7 +398,8 @@ fn parse_chunk_row(batch: &RecordBatch, row_idx: usize) -> Result<ChunkRow> {
 
     let split_part_count = {
         let arr = batch
-            .column(22)
+            .column_by_name("split_part_count")
+            .ok_or_else(|| anyhow!("split_part_count column not found"))?
             .as_any()
             .downcast_ref::<Int32Array>()
             .ok_or_else(|| anyhow!("split_part_count column is not an Int32Array"))?;
@@ -390,14 +411,15 @@ fn parse_chunk_row(batch: &RecordBatch, row_idx: usize) -> Result<ChunkRow> {
     };
 
     let file_complete = batch
-        .column(23)
+        .column_by_name("file_complete")
+        .ok_or_else(|| anyhow!("file_complete column not found"))?
         .as_any()
         .downcast_ref::<BooleanArray>()
         .ok_or_else(|| anyhow!("file_complete column is not a BooleanArray"))?
         .value(row_idx);
 
     let row = ChunkRow {
-        point_id,
+        row_id,
         text,
         catalog,
         active_label_ids,
@@ -451,12 +473,12 @@ impl ChunkStorage {
     pub fn new(table: Arc<lancedb::table::Table>) -> Self {
         Self { table }
     }
-    /// Upsert a batch of chunk rows with their embedding vectors by point_id.
+    /// Upsert a batch of chunk rows with their embedding vectors by row_id.
     ///
     /// This is the primary method for writing chunks during crawl, where we have
     /// both the row data and the computed embedding vectors.
     ///
-    /// Matched rows are updated in place (same point_id implies same content
+    /// Matched rows are updated in place (same row_id implies same content
     /// by construction, since file_id already incorporates blob_id + path +
     /// embedder + chunker).
     ///
@@ -497,7 +519,7 @@ impl ChunkStorage {
 
             // Use merge_insert for proper upsert semantics
             let reader = RecordBatchIterator::new(std::iter::once(Ok(batch)), schema.clone());
-            let mut builder = self.table.merge_insert(&["point_id"]);
+            let mut builder = self.table.merge_insert(&["row_id"]);
             builder
                 .when_matched_update_all(None)
                 .when_not_matched_insert_all();
@@ -507,11 +529,11 @@ impl ChunkStorage {
         Ok(())
     }
 
-    /// Look up a single chunk by point_id.
+    /// Look up a single chunk by row_id.
     ///
     /// Returns None if the chunk doesn't exist.
-    pub async fn get_by_point_id(&self, point_id: &str) -> Result<Option<ChunkRow>> {
-        let predicate = format!("point_id = '{}'", point_id);
+    pub async fn get_by_row_id(&self, row_id: &str) -> Result<Option<ChunkRow>> {
+        let predicate = eq_str("row_id", row_id);
 
         let results = self
             .table
@@ -519,7 +541,7 @@ impl ChunkStorage {
             .only_if(&predicate)
             .execute()
             .await
-            .map_err(|e| anyhow!("Failed to query chunk by point_id: {}", e))?;
+            .map_err(|e| anyhow!("Failed to query chunk by row_id: {}", e))?;
 
         let batches = results
             .try_collect::<Vec<_>>()
@@ -546,8 +568,9 @@ impl ChunkStorage {
         label_id: &str,
     ) -> Result<Vec<ChunkRow>> {
         let predicate = format!(
-            "file_id = '{}' AND array_contains(active_label_ids, '{}')",
-            file_id, label_id
+            "{} AND {}",
+            eq_str("file_id", file_id),
+            array_contains_str("active_label_ids", label_id)
         );
 
         let results = self
@@ -581,7 +604,7 @@ impl ChunkStorage {
     /// Does not filter by label; used for label-add operations.
     /// Validates each row.
     pub async fn get_chunks_by_file_id(&self, file_id: &str) -> Result<Vec<ChunkRow>> {
-        let predicate = format!("file_id = '{}'", file_id);
+        let predicate = eq_str("file_id", file_id);
 
         let results = self
             .table
@@ -619,7 +642,7 @@ impl ChunkStorage {
         label_id: &str,
         limit: usize,
     ) -> Result<Vec<ScoredChunkRow>> {
-        let predicate = format!("array_contains(active_label_ids, '{}')", label_id);
+        let predicate = array_contains_str("active_label_ids", label_id);
 
         let results = self
             .table
@@ -661,10 +684,11 @@ impl ChunkStorage {
     ) -> Result<Vec<ChunkRow>> {
         let predicate = match chunk_ordinal {
             Some(ordinal) => format!(
-                "array_contains(active_label_ids, '{}') AND chunk_ordinal = {}",
-                label_id, ordinal
+                "{} AND chunk_ordinal = {}",
+                array_contains_str("active_label_ids", label_id),
+                ordinal
             ),
-            None => format!("array_contains(active_label_ids, '{}')", label_id),
+            None => array_contains_str("active_label_ids", label_id),
         };
 
         let results = self
@@ -693,9 +717,9 @@ impl ChunkStorage {
     /// Update the active_label_ids array of a single chunk.
     ///
     /// Uses LanceDB's update() with SQL expression for in-place modification.
-    pub async fn update_active_labels(&self, point_id: &str, new_labels: &[String]) -> Result<()> {
+    pub async fn update_active_labels(&self, row_id: &str, new_labels: &[String]) -> Result<()> {
         // Reject empty label list - a chunk must belong to at least one label.
-        // Callers should use delete_by_point_ids to remove chunks, not clear their labels.
+        // Callers should use delete_by_row_ids to remove chunks, not clear their labels.
         if new_labels.is_empty() {
             return Err(anyhow!(
                 "Cannot update active_label_ids to empty list - a chunk must belong to at least one label"
@@ -706,7 +730,7 @@ impl ChunkStorage {
         let quoted: Vec<String> = new_labels.iter().map(|l| format!("'{}'", l)).collect();
         let labels_sql = format!("[{}]", quoted.join(", "));
 
-        let predicate = format!("point_id = '{}'", point_id);
+        let predicate = eq_str("row_id", row_id);
 
         self.table
             .update()
@@ -722,8 +746,8 @@ impl ChunkStorage {
     /// Update the file_complete boolean of a single chunk (sentinel marker).
     ///
     /// Uses LanceDB's update() with SQL boolean literal (true/false).
-    pub async fn update_file_complete(&self, point_id: &str, complete: bool) -> Result<()> {
-        let predicate = format!("point_id = '{}'", point_id);
+    pub async fn update_file_complete(&self, row_id: &str, complete: bool) -> Result<()> {
+        let predicate = eq_str("row_id", row_id);
         let value = if complete { "true" } else { "false" };
 
         self.table
@@ -737,15 +761,14 @@ impl ChunkStorage {
         Ok(())
     }
 
-    /// Batch-delete chunks by a list of point_ids.
-    pub async fn delete_by_point_ids(&self, point_ids: &[String]) -> Result<()> {
-        if point_ids.is_empty() {
+    /// Batch-delete chunks by a list of row_ids.
+    pub async fn delete_by_row_ids(&self, row_ids: &[String]) -> Result<()> {
+        if row_ids.is_empty() {
             return Ok(());
         }
 
-        // Build IN clause predicate
-        let quoted: Vec<String> = point_ids.iter().map(|id| format!("'{}'", id)).collect();
-        let predicate = format!("point_id IN ({})", quoted.join(", "));
+        let vals: Vec<&str> = row_ids.iter().map(|s| s.as_str()).collect();
+        let predicate = in_quoted_strs("row_id", &vals);
 
         self.table
             .delete(&predicate)
@@ -757,7 +780,7 @@ impl ChunkStorage {
 
     /// Delete all chunks matching a given catalog, returning the count deleted.
     pub async fn delete_by_catalog(&self, catalog: &str) -> Result<u64> {
-        let predicate = format!("catalog = '{}'", catalog);
+        let predicate = eq_str("catalog", catalog);
 
         let count_before = self
             .table
@@ -777,6 +800,48 @@ impl ChunkStorage {
             .map_err(|e| anyhow!("Failed to count rows after delete: {}", e))?;
 
         Ok(count_before.saturating_sub(count_after) as u64)
+    }
+
+    /// Remove a label from chunks where it's in active_label_ids, excluding specified files.
+    ///
+    /// This scans all chunks with the label and removes the label from active_label_ids.
+    /// If active_label_ids becomes empty, the chunk is deleted.
+    ///
+    /// Returns the count of chunks processed.
+    pub async fn remove_label_from_chunks(
+        &self,
+        label_id: &str,
+        exclude_file_ids: &HashSet<String>,
+    ) -> Result<u64> {
+        let mut processed: u64 = 0;
+
+        // Get all chunks with this label
+        let chunks = self.get_chunks_for_label(label_id, None).await?;
+
+        for chunk in chunks {
+            // Skip if this file was touched in the current crawl
+            if exclude_file_ids.contains(&chunk.file_id) {
+                continue;
+            }
+
+            // Remove label from active_label_ids
+            let mut new_labels = chunk.active_label_ids.clone();
+            new_labels.retain(|l| l != label_id);
+
+            if new_labels.is_empty() {
+                // Delete the chunk
+                self.delete_by_row_ids(std::slice::from_ref(&chunk.row_id))
+                    .await?;
+            } else {
+                // Update active_label_ids
+                self.update_active_labels(&chunk.row_id, &new_labels)
+                    .await?;
+            }
+
+            processed += 1;
+        }
+
+        Ok(processed)
     }
 
     /// Truncate the table (empty all rows, preserve schema).

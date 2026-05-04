@@ -1,14 +1,12 @@
-//! File chunking logic for different file types
-//!
-//! This module handles splitting files into semantically meaningful chunks
-//! based on their file type and content structure.
+//! Purpose: Split files into semantically meaningful chunks for embedding.
+//! Edit here when: Adding new chunking strategies, modifying chunk structure, or changing how files are partitioned.
+//! Do not edit here for: Changing which files to crawl (use crawl_config.rs), embedding model changes (use parallel_embedder.rs).
 
-use super::config::{ChunkingStrategy, get_chunk_strategy};
+use super::crawl_config::ChunkingStrategy;
 use super::markdown_partitioner::partition_markdown;
 use super::partitioner::{PartitionConfig, PartitionedChunk, partition_typescript};
-use super::util::{CHUNKER_ID, EMBEDDER_ID, compute_file_id, compute_hash, compute_point_id};
+use super::util::{CHUNKER_ID, EMBEDDER_ID, compute_file_id, compute_hash, compute_row_id};
 use anyhow::Result;
-use std::fs;
 
 /// Represents a chunk of code or documentation
 #[derive(Debug, Clone)]
@@ -80,9 +78,9 @@ pub struct Chunk {
 }
 
 impl Chunk {
-    /// Compute the point ID for this chunk
-    pub fn point_id(&self) -> String {
-        compute_point_id(&self.file_id, self.chunk_ordinal)
+    /// Compute the row ID for this chunk
+    pub fn row_id(&self) -> String {
+        compute_row_id(&self.file_id, self.chunk_ordinal)
     }
 }
 
@@ -111,9 +109,7 @@ pub struct ChunkContext {
 /// * `content` - File content as string
 /// * `ctx` - Chunk context with identity information
 /// * `target_size` - Target chunk size in characters (default 6000)
-/// * `strategy_override` - Optional strategy name from discovered crawl config
-///   (e.g., "typescript", "markdown", "lineBased"). If None, falls back to
-///   embedded default config.
+/// * `strategy` - Chunking strategy to use
 ///
 /// # Returns
 ///
@@ -122,18 +118,8 @@ pub fn chunk_content(
     content: &str,
     ctx: &ChunkContext,
     target_size: usize,
-    strategy_override: Option<&str>,
+    strategy: ChunkingStrategy,
 ) -> Result<Vec<Chunk>> {
-    // B.1: Use strategy override if provided (from discovered crawl config),
-    // otherwise fall back to embedded default config
-    let strategy = match strategy_override {
-        Some("typescript") => ChunkingStrategy::TypeScript,
-        Some("markdown") => ChunkingStrategy::Markdown,
-        Some("lineBased") => ChunkingStrategy::LineBased,
-        Some(_) => ChunkingStrategy::Skip, // Unknown strategy
-        None => get_chunk_strategy(&ctx.relative_path), // Fallback to default config
-    };
-
     // Compute file ID from the new identity components
     let file_id = compute_file_id(EMBEDDER_ID, CHUNKER_ID, &ctx.blob_id, &ctx.relative_path);
 
@@ -243,37 +229,6 @@ impl Chunk {
     }
 }
 
-// Legacy support: Implement From<PartitionedChunk> for backwards compatibility
-// during migration. Most fields need to be filled in later.
-impl From<PartitionedChunk> for Chunk {
-    fn from(p: PartitionedChunk) -> Self {
-        Chunk {
-            text: p.text,
-            source_uri: p.source_uri,
-            catalog: p.catalog,
-            content_hash: p.content_hash,
-            start_line: p.start_line,
-            end_line: p.end_line,
-            symbol_name: p.symbol_name,
-            chunk_type: p.chunk_type,
-            chunk_kind: p.chunk_kind,
-            breadcrumb: p.breadcrumb,
-            // Phase 2 fields - must be filled in by caller
-            active_label_ids: Vec::new(),
-            embedder_id: EMBEDDER_ID.to_string(),
-            chunker_id: CHUNKER_ID.to_string(),
-            blob_id: String::new(),
-            package_name: String::new(),
-            file_id: String::new(),
-            relative_path: String::new(),
-            chunk_ordinal: 0,
-            chunk_count: 0,
-            split_part_ordinal: p.split_part_ordinal,
-            split_part_count: p.split_part_count,
-        }
-    }
-}
-
 /// Chunk by lines for simple text files
 fn chunk_by_lines(
     content: &str,
@@ -355,58 +310,10 @@ fn chunk_by_lines(
     Ok(chunks)
 }
 
-// ========================================
-// Legacy filesystem-based chunking API
-// ========================================
-
-/// Chunks a file based on its type and content (legacy filesystem API)
-///
-/// # Arguments
-///
-/// * `file_path` - Path to the file to chunk
-/// * `catalog` - Catalog name for this file
-/// * `catalog_base_path` - Base path of the catalog (for computing relative paths)
-/// * `package_name` - Package name for breadcrumb (e.g., "@rushstack/node-core-library")
-/// * `target_size` - Target chunk size in characters (default 6000)
-///
-/// # Returns
-///
-/// Vector of chunks or an error
-///
-/// Note: This legacy API produces chunks with empty label_id and blob_id.
-/// Use `chunk_content` for the new Phase 2 API.
-#[allow(dead_code)]
-pub fn chunk_file(
-    file_path: &str,
-    catalog: &str,
-    catalog_base_path: &str,
-    package_name: &str,
-    target_size: usize,
-) -> Result<Vec<Chunk>> {
-    let content = fs::read_to_string(file_path)?;
-
-    // Compute relative path from catalog base
-    let relative_path = file_path
-        .strip_prefix(catalog_base_path)
-        .unwrap_or(file_path)
-        .trim_start_matches('/')
-        .to_string();
-
-    let ctx = ChunkContext {
-        catalog: catalog.to_string(),
-        label_id: String::new(), // Legacy: no label
-        package_name: package_name.to_string(),
-        relative_path,
-        blob_id: String::new(), // Legacy: no blob_id
-        source_uri: file_path.to_string(),
-    };
-
-    chunk_content(&content, &ctx, target_size, None) // Use default strategy
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::engine::crawl_config::load_compiled_crawl_config;
 
     /// Helper to create a test chunk context
     fn test_context(blob_id: &str, relative_path: &str, package_name: &str) -> ChunkContext {
@@ -420,6 +327,12 @@ mod tests {
         }
     }
 
+    /// Helper to get default strategy for a path (for tests that want default behavior)
+    fn default_strategy(path: &str) -> ChunkingStrategy {
+        let config = load_compiled_crawl_config(None).expect("Embedded config should be valid");
+        config.get_strategy(path)
+    }
+
     /// Test that same content + path produces same file_id
     #[test]
     fn test_same_content_path_produces_same_file_id() {
@@ -429,9 +342,10 @@ export function hello() {
 }
 "#;
         let ctx = test_context("abc123", "src/index.ts", "@test/pkg");
+        let strategy = default_strategy(&ctx.relative_path);
 
-        let chunks1 = chunk_content(content, &ctx, 6000, None).unwrap();
-        let chunks2 = chunk_content(content, &ctx, 6000, None).unwrap();
+        let chunks1 = chunk_content(content, &ctx, 6000, strategy).unwrap();
+        let chunks2 = chunk_content(content, &ctx, 6000, strategy).unwrap();
 
         assert_eq!(chunks1.len(), chunks2.len());
         for (c1, c2) in chunks1.iter().zip(chunks2.iter()) {
@@ -440,9 +354,9 @@ export function hello() {
                 "Same content+path should produce same file_id"
             );
             assert_eq!(
-                c1.point_id(),
-                c2.point_id(),
-                "Same content+path should produce same point_id"
+                c1.row_id(),
+                c2.row_id(),
+                "Same content+path should produce same row_id"
             );
         }
     }
@@ -459,8 +373,10 @@ export function hello() {
         let ctx1 = test_context("abc123", "src/index.ts", "@test/pkg");
         let ctx2 = test_context("abc123", "lib/index.ts", "@test/pkg");
 
-        let chunks1 = chunk_content(content, &ctx1, 6000, None).unwrap();
-        let chunks2 = chunk_content(content, &ctx2, 6000, None).unwrap();
+        let chunks1 =
+            chunk_content(content, &ctx1, 6000, default_strategy(&ctx1.relative_path)).unwrap();
+        let chunks2 =
+            chunk_content(content, &ctx2, 6000, default_strategy(&ctx2.relative_path)).unwrap();
 
         assert!(!chunks1.is_empty() && !chunks2.is_empty());
         assert_ne!(
@@ -468,9 +384,9 @@ export function hello() {
             "Different paths should produce different file_id"
         );
         assert_ne!(
-            chunks1[0].point_id(),
-            chunks2[0].point_id(),
-            "Different paths should produce different point_id"
+            chunks1[0].row_id(),
+            chunks2[0].row_id(),
+            "Different paths should produce different row_id"
         );
     }
 
@@ -489,8 +405,10 @@ export class JsonFile {
         let ctx1 = test_context("abc123", "libraries/foo/src/JsonFile.ts", "@scope/foo");
         let ctx2 = test_context("abc123", "libraries/bar/src/JsonFile.ts", "@scope/bar");
 
-        let chunks1 = chunk_content(content, &ctx1, 6000, None).unwrap();
-        let chunks2 = chunk_content(content, &ctx2, 6000, None).unwrap();
+        let chunks1 =
+            chunk_content(content, &ctx1, 6000, default_strategy(&ctx1.relative_path)).unwrap();
+        let chunks2 =
+            chunk_content(content, &ctx2, 6000, default_strategy(&ctx2.relative_path)).unwrap();
 
         // Both should produce chunks
         assert!(!chunks1.is_empty() && !chunks2.is_empty());
@@ -498,8 +416,8 @@ export class JsonFile {
         // File IDs should be different (path is part of identity)
         assert_ne!(chunks1[0].file_id, chunks2[0].file_id);
 
-        // Point IDs should be different
-        assert_ne!(chunks1[0].point_id(), chunks2[0].point_id());
+        // Row IDs should be different
+        assert_ne!(chunks1[0].row_id(), chunks2[0].row_id());
 
         // Breadcrumbs should reflect the different package context (percent-encoded @scope)
         assert!(
@@ -526,8 +444,10 @@ export function hello() {
         let ctx1 = test_context("abc123", "src/index.ts", "@test/pkg");
         let ctx2 = test_context("def456", "src/index.ts", "@test/pkg");
 
-        let chunks1 = chunk_content(content, &ctx1, 6000, None).unwrap();
-        let chunks2 = chunk_content(content, &ctx2, 6000, None).unwrap();
+        let chunks1 =
+            chunk_content(content, &ctx1, 6000, default_strategy(&ctx1.relative_path)).unwrap();
+        let chunks2 =
+            chunk_content(content, &ctx2, 6000, default_strategy(&ctx2.relative_path)).unwrap();
 
         assert!(!chunks1.is_empty() && !chunks2.is_empty());
         assert_ne!(
@@ -563,7 +483,8 @@ export function function_{}() {{
         }
 
         let ctx = test_context("abc123", "src/large.ts", "@test/pkg");
-        let chunks = chunk_content(&content, &ctx, 1000, None).unwrap(); // Small target to force splits
+        let chunks =
+            chunk_content(&content, &ctx, 1000, default_strategy(&ctx.relative_path)).unwrap(); // Small target to force splits
 
         // Should have multiple chunks
         assert!(
@@ -626,10 +547,12 @@ Content for section two.
         let ctx = test_context("abc123", "docs/README.md", "@test/pkg");
 
         // Chunk with markdown strategy (default for .md files)
-        let markdown_chunks = chunk_content(content, &ctx, 6000, Some("markdown")).unwrap();
+        let markdown_chunks =
+            chunk_content(content, &ctx, 6000, ChunkingStrategy::Markdown).unwrap();
 
         // Chunk with lineBased strategy (override from crawl config)
-        let linebased_chunks = chunk_content(content, &ctx, 6000, Some("lineBased")).unwrap();
+        let linebased_chunks =
+            chunk_content(content, &ctx, 6000, ChunkingStrategy::LineBased).unwrap();
 
         // Both should produce chunks
         assert!(
@@ -705,7 +628,7 @@ Some text here.
         let ctx = test_context("abc123", "docs/README.md", "@test/pkg");
 
         // Chunk with typescript strategy (override from crawl config)
-        let ts_chunks = chunk_content(content, &ctx, 6000, Some("typescript")).unwrap();
+        let ts_chunks = chunk_content(content, &ctx, 6000, ChunkingStrategy::TypeScript).unwrap();
 
         // Should still produce chunks (fallback path since markdown isn't valid TS)
         assert!(

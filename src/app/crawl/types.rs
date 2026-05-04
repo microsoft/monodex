@@ -2,7 +2,22 @@
 //!
 //! Purpose: Define crawl source types and failure tracking.
 //! Edit here when: Adding new crawl source types or changing failure tracking fields.
-//! Do not edit here for: Pipeline logic (see pipeline.rs), CLI handlers (see commands/crawl.rs).
+//! Do not edit here for: Pipeline logic (see pipeline.rs), CLI handlers (see commands/crawl.rs), phase output types (see phases.rs).
+
+/// Metadata about the crawl source that travels alongside a `BlobSource`.
+///
+/// This struct carries source identity (source_kind, commit_oid) as pure data.
+/// It does NOT include behavior - that's what the `BlobSource` trait is for.
+/// The separation ensures the merged crawl flow doesn't branch on source identity.
+///
+/// Use `SOURCE_KIND_GIT_COMMIT` and `SOURCE_KIND_WORKING_DIRECTORY` from
+/// `crate::engine::storage` for the `source_kind` field.
+pub struct CrawlSourceMetadata {
+    /// The source kind string: `"git-commit"` or `"working-directory"`.
+    pub source_kind: &'static str,
+    /// The resolved commit SHA for commit mode, or empty string for working-directory mode.
+    pub commit_oid: String,
+}
 
 /// Failure tracking for crawl pipeline.
 ///

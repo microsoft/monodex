@@ -1,4 +1,16 @@
-//! Shared utility functions
+//! Purpose: Identity constants and hash utilities for chunk and file identification.
+//! Edit here when: Adding new identity constants (e.g., FTS_SCHEMA_ID) or changing hash algorithms.
+//! Do not edit here for: Chunking logic (use chunker.rs), storage operations (use storage/), general utilities (use appropriate module).
+//!
+//! ## Identity Constants
+//!
+//! This module holds constants whose values have downstream invalidation consequences:
+//!
+//! - `EMBEDDER_ID` / `CHUNKER_ID`: Participate in `row_id` computation. Changing these
+//!   invalidates chunk identity and forces re-vectorizing all content.
+//!
+//! - Future FTS constants (`FTS_SCHEMA_ID`, `FTS_TOKENIZER_ID`): Will NOT participate
+//!   in `row_id`. Changing them invalidates only FTS state, leaving vector state untouched.
 
 use sha2::{Digest, Sha256};
 use std::hash::{Hash, Hasher};
@@ -44,15 +56,15 @@ pub fn compute_file_id(
     format!("{:016x}", hash)
 }
 
-/// Compute point ID for a specific chunk within a file.
+/// Compute row ID for a specific chunk within a file.
 ///
-/// The point ID uniquely identifies a chunk by combining the file ID
+/// The row ID uniquely identifies a chunk by combining the file ID
 /// with the chunk's ordinal position.
 ///
 /// # Arguments
 /// * `file_id` - The file's semantic identity (16-char hex string)
 /// * `chunk_ordinal` - 1-indexed position of the chunk in the file
-pub fn compute_point_id(file_id: &str, chunk_ordinal: usize) -> String {
+pub fn compute_row_id(file_id: &str, chunk_ordinal: usize) -> String {
     format!("{}:{}", file_id, chunk_ordinal)
 }
 
@@ -112,15 +124,15 @@ mod tests {
     }
 
     #[test]
-    fn test_point_id_deterministic() {
+    fn test_row_id_deterministic() {
         let file_id = compute_file_id(EMBEDDER_ID, CHUNKER_ID, "abc123", "test.ts");
-        let point_id_1 = compute_point_id(&file_id, 1);
-        let point_id_2 = compute_point_id(&file_id, 2);
+        let row_id_1 = compute_row_id(&file_id, 1);
+        let row_id_2 = compute_row_id(&file_id, 2);
 
         // Different ordinals should produce different IDs
-        assert_ne!(point_id_1, point_id_2);
+        assert_ne!(row_id_1, row_id_2);
 
         // Same inputs should produce same output
-        assert_eq!(point_id_1, compute_point_id(&file_id, 1));
+        assert_eq!(row_id_1, compute_row_id(&file_id, 1));
     }
 }

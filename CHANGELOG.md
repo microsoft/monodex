@@ -21,6 +21,12 @@ PUBLISHING PROCEDURE:
 5. After publishing, the next PR author will add a new "## Unreleased" section
 -->
 
+## Unreleased
+
+### Fixed
+
+- **Empty search result sets now print a `No results.` line.** Previously, `monodex search` would print only the catalog/label header and then nothing if no chunks matched, which looked like a hang.
+
 ## 0.5.1 (2026-04-30)
 
 ### Changed

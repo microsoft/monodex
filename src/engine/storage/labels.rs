@@ -16,6 +16,7 @@ use lancedb::query::{ExecutableQuery, QueryBase};
 use std::sync::Arc;
 
 use crate::engine::storage::LabelMetadataRow;
+use crate::engine::storage::predicate::eq_str;
 
 /// Convert an iterator of LabelMetadataRows to a RecordBatch.
 fn label_metadata_rows_to_record_batch<'a>(
@@ -52,7 +53,8 @@ fn label_metadata_rows_to_record_batch<'a>(
 /// Validates all identifier fields.
 fn parse_label_metadata_row(batch: &RecordBatch, row_idx: usize) -> Result<LabelMetadataRow> {
     let label_id = batch
-        .column(0)
+        .column_by_name("label_id")
+        .ok_or_else(|| anyhow!("label_id column not found"))?
         .as_any()
         .downcast_ref::<StringArray>()
         .ok_or_else(|| anyhow!("label_id column is not a StringArray"))?
@@ -60,7 +62,8 @@ fn parse_label_metadata_row(batch: &RecordBatch, row_idx: usize) -> Result<Label
         .to_string();
 
     let catalog = batch
-        .column(1)
+        .column_by_name("catalog")
+        .ok_or_else(|| anyhow!("catalog column not found"))?
         .as_any()
         .downcast_ref::<StringArray>()
         .ok_or_else(|| anyhow!("catalog column is not a StringArray"))?
@@ -68,7 +71,8 @@ fn parse_label_metadata_row(batch: &RecordBatch, row_idx: usize) -> Result<Label
         .to_string();
 
     let label = batch
-        .column(2)
+        .column_by_name("label")
+        .ok_or_else(|| anyhow!("label column not found"))?
         .as_any()
         .downcast_ref::<StringArray>()
         .ok_or_else(|| anyhow!("label column is not a StringArray"))?
@@ -76,7 +80,8 @@ fn parse_label_metadata_row(batch: &RecordBatch, row_idx: usize) -> Result<Label
         .to_string();
 
     let commit_oid = batch
-        .column(3)
+        .column_by_name("commit_oid")
+        .ok_or_else(|| anyhow!("commit_oid column not found"))?
         .as_any()
         .downcast_ref::<StringArray>()
         .ok_or_else(|| anyhow!("commit_oid column is not a StringArray"))?
@@ -84,7 +89,8 @@ fn parse_label_metadata_row(batch: &RecordBatch, row_idx: usize) -> Result<Label
         .to_string();
 
     let source_kind = batch
-        .column(4)
+        .column_by_name("source_kind")
+        .ok_or_else(|| anyhow!("source_kind column not found"))?
         .as_any()
         .downcast_ref::<StringArray>()
         .ok_or_else(|| anyhow!("source_kind column is not a StringArray"))?
@@ -92,14 +98,16 @@ fn parse_label_metadata_row(batch: &RecordBatch, row_idx: usize) -> Result<Label
         .to_string();
 
     let crawl_complete = batch
-        .column(5)
+        .column_by_name("crawl_complete")
+        .ok_or_else(|| anyhow!("crawl_complete column not found"))?
         .as_any()
         .downcast_ref::<BooleanArray>()
         .ok_or_else(|| anyhow!("crawl_complete column is not a BooleanArray"))?
         .value(row_idx);
 
     let updated_at_unix_secs = batch
-        .column(6)
+        .column_by_name("updated_at_unix_secs")
+        .ok_or_else(|| anyhow!("updated_at_unix_secs column not found"))?
         .as_any()
         .downcast_ref::<Int64Array>()
         .ok_or_else(|| anyhow!("updated_at_unix_secs column is not an Int64Array"))?
@@ -153,7 +161,7 @@ impl LabelStorage {
     ///
     /// Returns None if the label doesn't exist.
     pub async fn get_by_label_id(&self, label_id: &str) -> Result<Option<LabelMetadataRow>> {
-        let predicate = format!("label_id = '{}'", label_id);
+        let predicate = eq_str("label_id", label_id);
 
         let results = self
             .table
@@ -182,7 +190,7 @@ impl LabelStorage {
     ///
     /// Used by label-reassignment discovery.
     pub async fn list_for_catalog(&self, catalog: &str) -> Result<Vec<LabelMetadataRow>> {
-        let predicate = format!("catalog = '{}'", catalog);
+        let predicate = eq_str("catalog", catalog);
 
         let results = self
             .table
@@ -209,7 +217,7 @@ impl LabelStorage {
 
     /// Delete a single label metadata row by label_id.
     pub async fn delete_by_label_id(&self, label_id: &str) -> Result<()> {
-        let predicate = format!("label_id = '{}'", label_id);
+        let predicate = eq_str("label_id", label_id);
 
         self.table
             .delete(&predicate)
@@ -221,7 +229,7 @@ impl LabelStorage {
 
     /// Delete all label metadata rows for a given catalog, returning the count deleted.
     pub async fn delete_by_catalog(&self, catalog: &str) -> Result<u64> {
-        let predicate = format!("catalog = '{}'", catalog);
+        let predicate = eq_str("catalog", catalog);
 
         let count_before = self
             .table
@@ -263,6 +271,7 @@ impl LabelStorage {
 mod tests {
     use super::*;
     use crate::engine::schema::label_metadata_schema;
+    use crate::engine::storage::SOURCE_KIND_GIT_COMMIT;
     use lancedb::connect;
     use tempfile::TempDir;
 
@@ -291,7 +300,7 @@ mod tests {
             catalog: "test-catalog".to_string(),
             label: label.to_string(),
             commit_oid: "abc123def456".to_string(),
-            source_kind: "git-commit".to_string(),
+            source_kind: SOURCE_KIND_GIT_COMMIT.to_string(),
             crawl_complete: true,
             updated_at_unix_secs: 1700000000,
         }
@@ -341,7 +350,7 @@ mod tests {
             catalog: "other-catalog".to_string(),
             label: "main".to_string(),
             commit_oid: "xyz".to_string(),
-            source_kind: "git-commit".to_string(),
+            source_kind: SOURCE_KIND_GIT_COMMIT.to_string(),
             crawl_complete: true,
             updated_at_unix_secs: 1700000000,
         };

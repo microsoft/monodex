@@ -5,7 +5,10 @@
 
 use std::collections::HashSet;
 
-use crate::app::{Config, resolve_database_path, resolve_label_context, sanitize_for_terminal};
+use crate::app::{
+    Config, format_chunk_report, resolve_database_path, resolve_label_context,
+    sanitize_for_terminal,
+};
 use crate::engine::storage::{ChunkRow, Database};
 
 /// Parsed selector for file-based chunk queries
@@ -221,24 +224,16 @@ pub fn run_view(
         }
 
         for result in results {
-            // E.1: Sanitize output fields to prevent terminal injection
-            let breadcrumb =
-                sanitize_for_terminal(result.breadcrumb.as_deref().unwrap_or("unknown"));
             let chunk_count = result.chunk_count;
             let chunk_ordinal = result.chunk_ordinal;
 
-            // Build the report form with chunk_kind and split metadata
-            let mut report = breadcrumb.clone();
-            if let (Some(ordinal), Some(count)) =
-                (result.split_part_ordinal, result.split_part_count)
-            {
-                report = format!("{} (part {}/{})", report, ordinal, count);
-            }
-            if result.chunk_kind != "content" {
-                report = format!("{} [{}]", report, result.chunk_kind);
-            }
-
             // Header line: <file_id>:<chunk_ordinal> (<n>/<total>) <breadcrumb> [kind] (part N/M)
+            let report = format_chunk_report(
+                result.breadcrumb.as_deref(),
+                result.split_part_ordinal.zip(result.split_part_count),
+                &result.chunk_kind,
+            );
+
             println!(
                 "{}:{} ({}/{}) {}",
                 file_id, chunk_ordinal, chunk_ordinal, chunk_count, report

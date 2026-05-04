@@ -10,6 +10,16 @@ use anyhow::{Result, anyhow};
 
 use crate::engine::identifier::{LabelId, validate_catalog};
 
+// =============================================================================
+// Source kind constants
+// =============================================================================
+
+/// Source kind for commit-based crawls.
+pub const SOURCE_KIND_GIT_COMMIT: &str = "git-commit";
+
+/// Source kind for working-directory crawls.
+pub const SOURCE_KIND_WORKING_DIRECTORY: &str = "working-directory";
+
 /// A row in the `chunks` table.
 ///
 /// This struct represents the Rust view of a chunk row. The `vector` column is stored
@@ -17,7 +27,7 @@ use crate::engine::identifier::{LabelId, validate_catalog};
 #[derive(Debug, Clone, PartialEq)]
 pub struct ChunkRow {
     // Primary key
-    pub point_id: String,
+    pub row_id: String,
 
     // Content
     pub text: String,
@@ -102,14 +112,14 @@ impl ChunkRow {
             ));
         }
 
-        // Validate point_id matches computed value from file_id and chunk_ordinal
-        let expected_point_id =
-            crate::engine::util::compute_point_id(&self.file_id, self.chunk_ordinal as usize);
-        if self.point_id != expected_point_id {
+        // Validate row_id matches computed value from file_id and chunk_ordinal
+        let expected_row_id =
+            crate::engine::util::compute_row_id(&self.file_id, self.chunk_ordinal as usize);
+        if self.row_id != expected_row_id {
             return Err(anyhow!(
-                "ChunkRow point_id '{}' does not match expected '{}' for file_id '{}' and chunk_ordinal {}",
-                self.point_id,
-                expected_point_id,
+                "ChunkRow row_id '{}' does not match expected '{}' for file_id '{}' and chunk_ordinal {}",
+                self.row_id,
+                expected_row_id,
                 self.file_id,
                 self.chunk_ordinal
             ));
@@ -175,7 +185,7 @@ mod tests {
 
     fn valid_chunk_row() -> ChunkRow {
         ChunkRow {
-            point_id: "abc123:1".to_string(),
+            row_id: "abc123:1".to_string(),
             text: "some code".to_string(),
             catalog: "my-catalog".to_string(),
             active_label_ids: vec!["my-catalog:main".to_string()],
@@ -234,7 +244,7 @@ mod tests {
             catalog: "my-catalog".to_string(),
             label: "main".to_string(),
             commit_oid: "abc123def456".to_string(),
-            source_kind: "git-commit".to_string(),
+            source_kind: SOURCE_KIND_GIT_COMMIT.to_string(),
             crawl_complete: true,
             updated_at_unix_secs: 1700000000,
         }

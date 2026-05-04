@@ -10,7 +10,9 @@ use std::io::Write;
 use lancedb::connect;
 
 use crate::engine::schema::{VECTOR_DIMENSION, chunks_schema, label_metadata_schema};
-use crate::engine::storage::{ChunkRow, Database, LabelMetadataRow, META_FILE, MetaFile};
+use crate::engine::storage::{
+    ChunkRow, Database, LabelMetadataRow, META_FILE, MetaFile, SOURCE_KIND_GIT_COMMIT,
+};
 
 /// Helper to safely set MONODEX_HOME.
 pub fn set_monodex_home(path: &std::path::Path) {
@@ -95,9 +97,9 @@ pub async fn create_test_db_with_chunks(
 }
 
 /// Create a test chunk row with default catalog.
-pub fn test_chunk_row(point_id: &str, file_id: &str, ordinal: i32, label_id: &str) -> ChunkRow {
+pub fn test_chunk_row(row_id: &str, file_id: &str, ordinal: i32, label_id: &str) -> ChunkRow {
     ChunkRow {
-        point_id: point_id.to_string(),
+        row_id: row_id.to_string(),
         text: format!("Test content for chunk {} in file {}", ordinal, file_id),
         catalog: label_id
             .split(':')
@@ -132,14 +134,14 @@ pub fn test_chunk_row(point_id: &str, file_id: &str, ordinal: i32, label_id: &st
 
 /// Create a test chunk row with explicit catalog.
 pub fn test_chunk_row_with_catalog(
-    point_id: &str,
+    row_id: &str,
     file_id: &str,
     ordinal: i32,
     catalog: &str,
     label_id: &str,
 ) -> ChunkRow {
     ChunkRow {
-        point_id: point_id.to_string(),
+        row_id: row_id.to_string(),
         text: format!("Test content for chunk {}", ordinal),
         catalog: catalog.to_string(),
         active_label_ids: vec![label_id.to_string()],
@@ -180,7 +182,7 @@ pub fn test_label_metadata_row(label_id: &str) -> LabelMetadataRow {
             .unwrap_or("main")
             .to_string(),
         commit_oid: "abc123def456".to_string(),
-        source_kind: "git-commit".to_string(),
+        source_kind: SOURCE_KIND_GIT_COMMIT.to_string(),
         crawl_complete: true,
         updated_at_unix_secs: 1700000000,
     }
@@ -193,7 +195,7 @@ pub fn test_label_metadata_row_with_parts(catalog: &str, label: &str) -> LabelMe
         catalog: catalog.to_string(),
         label: label.to_string(),
         commit_oid: "abc123def456".to_string(),
-        source_kind: "git-commit".to_string(),
+        source_kind: SOURCE_KIND_GIT_COMMIT.to_string(),
         crawl_complete: true,
         updated_at_unix_secs: 1700000000,
     }

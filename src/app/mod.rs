@@ -21,6 +21,6 @@ pub use context::{
 };
 pub use crawl::{CrawlFailures, run_embed_upload_pipeline};
 pub use util::{
-    chrono_timestamp, format_duration, format_eta, load_warning_state, sanitize_for_terminal,
-    save_warning_state,
+    chrono_timestamp, format_chunk_report, format_duration, format_eta, load_warning_state,
+    sanitize_for_terminal, save_warning_state,
 };

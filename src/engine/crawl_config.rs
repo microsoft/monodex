@@ -23,6 +23,24 @@
 
 // Field shape is mirrored in schemas/crawl.schema.json. When adding or renaming fields here, update the JSON Schema in the same change.
 
+/// Chunking strategy enumeration.
+///
+/// Determines how a file is split into chunks for indexing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChunkingStrategy {
+    /// TypeScript files - AST-based semantic chunking
+    TypeScript,
+
+    /// Markdown files - Split by heading hierarchy
+    Markdown,
+
+    /// Simple line-based chunking
+    LineBased,
+
+    /// Skip this file (don't index)
+    Skip,
+}
+
 use anyhow::{Result, anyhow};
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use serde::Deserialize;
@@ -226,14 +244,20 @@ impl CompiledCrawlConfig {
 
     /// Get the chunking strategy for a file.
     ///
-    /// Returns None if file type is not configured.
-    pub fn get_strategy(&self, repo_relative_path: &str) -> Option<&str> {
+    /// Returns the strategy for the file's extension, or `ChunkingStrategy::Skip`
+    /// if the file type is not configured.
+    pub fn get_strategy(&self, repo_relative_path: &str) -> ChunkingStrategy {
         for (suffix, strategy) in &self.config.file_types {
             if repo_relative_path.ends_with(suffix) {
-                return Some(strategy);
+                return match strategy.as_str() {
+                    "typescript" => ChunkingStrategy::TypeScript,
+                    "markdown" => ChunkingStrategy::Markdown,
+                    "lineBased" => ChunkingStrategy::LineBased,
+                    _ => ChunkingStrategy::Skip, // Unknown strategy string
+                };
             }
         }
-        None
+        ChunkingStrategy::Skip
     }
 }
 
@@ -544,11 +568,23 @@ mod tests {
     fn test_get_strategy() {
         let compiled = test_config().compile().unwrap();
 
-        assert_eq!(compiled.get_strategy("src/index.ts"), Some("typescript"));
-        assert_eq!(compiled.get_strategy("src/App.tsx"), Some("typescript"));
-        assert_eq!(compiled.get_strategy("README.md"), Some("markdown"));
-        assert_eq!(compiled.get_strategy("config.yaml"), Some("lineBased"));
-        assert_eq!(compiled.get_strategy("image.png"), None);
+        assert_eq!(
+            compiled.get_strategy("src/index.ts"),
+            ChunkingStrategy::TypeScript
+        );
+        assert_eq!(
+            compiled.get_strategy("src/App.tsx"),
+            ChunkingStrategy::TypeScript
+        );
+        assert_eq!(
+            compiled.get_strategy("README.md"),
+            ChunkingStrategy::Markdown
+        );
+        assert_eq!(
+            compiled.get_strategy("config.yaml"),
+            ChunkingStrategy::LineBased
+        );
+        assert_eq!(compiled.get_strategy("image.png"), ChunkingStrategy::Skip);
     }
 
     #[test]
