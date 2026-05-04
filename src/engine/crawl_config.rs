@@ -1,20 +1,6 @@
 //! Purpose: Load and compile `monodex-crawl.json` (file types, exclude/keep patterns) and evaluate `should_crawl` / `get_strategy`.
 //! Edit here when: Adding crawl-config fields, changing pattern evaluation, updating the embedded default, or adding `ChunkingStrategy` variants.
 //! Do not edit here for: Chunking algorithms (see `chunker.rs` and submodules), app-level config (see `app/config.rs`).
-//! 1. `<repo-root>/monodex-crawl.json` (repo-local)
-//! 2. `~/.monodex/crawl.json` (user-global)
-//! 3. Embedded default (compiled into binary)
-//!
-//! ## Evaluation Rule
-//!
-//! ```text
-//! shouldCrawl = matchesFileType && (matchesPatternsToKeep || !matchesPatternsToExclude)
-//! ```
-//!
-//! Key properties:
-//! - fileTypes is the primary filter
-//! - patternsToKeep only overrides exclusion
-//! - patternsToKeep does NOT force unsupported file types to be crawled
 
 // Field shape is mirrored in schemas/crawl.schema.json. When adding or renaming fields here, update the JSON Schema in the same change.
 

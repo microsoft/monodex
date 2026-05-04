@@ -1,7 +1,6 @@
 //! Purpose: Filesystem-only package-name lookup that walks up to find the nearest `package.json`. Used only by `dump-chunks`.
 //! Edit here when: Changing the dump-chunks fallback for resolving package names from a working tree.
 //! Do not edit here for: Main-crawl package resolution (see `git_ops/`), JSON name extraction (see `git_ops/mod.rs`).
-//! directly on Git blob data.
 
 use std::path::Path;
 

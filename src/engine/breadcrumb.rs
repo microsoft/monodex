@@ -1,14 +1,6 @@
 //! Purpose: Percent-encode reserved characters in breadcrumb path components and slugify markdown headings GitHub-style.
 //! Edit here when: Changing the reserved-character set, percent-encoding rules, or heading slugification.
 //! Do not edit here for: Identifier validation (see `identifier.rs`), breadcrumb composition by chunkers (see `chunker.rs`, `markdown_partitioner.rs`, `partitioner/`).
-//! Reserved characters (`:`, `@`, `=`, `+`, `#`, `%`, whitespace, control characters)
-//! are percent-encoded in path components. The `/` character is NOT encoded as it
-//! serves as a path separator within file names.
-//!
-//! ## Heading Slugification
-//!
-//! Markdown headings are converted to URL-safe slugs using GitHub-style slugification
-//! for consistent heading identification across documents.
 
 /// Percent-encodes reserved characters in a path component for use in locators (breadcrumbs).
 ///
