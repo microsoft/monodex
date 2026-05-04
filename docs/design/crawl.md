@@ -43,7 +43,7 @@ Lookup happens later, during file processing: given a file at `libraries/foo/src
 3. `libraries`
 4. `""`
 
-The first match wins, reproducing the "nearest ancestor `package.json` governs the file" rule. The lookup helper is `find_package_name_from_index()` in `src/engine/git_ops/mod.rs`.
+The first match wins, reproducing the "nearest ancestor `package.json` governs the file" rule. The lookup helper is `PackageIndex::find_package_name` in `src/engine/git_ops/mod.rs`.
 
 ## Step 4: File processing
 
