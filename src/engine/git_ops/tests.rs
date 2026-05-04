@@ -31,8 +31,7 @@ fn test_read_blob_content_current_repo() {
 #[test]
 fn test_build_package_index() {
     let repo_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let _index =
-        build_package_index_for_commit(&repo_path, "HEAD").expect("Failed to build index");
+    let _index = build_package_index_for_commit(&repo_path, "HEAD").expect("Failed to build index");
 }
 
 #[test]

@@ -8,7 +8,7 @@ use gix::objs::TreeRefIter;
 use gix::traverse::tree::Recorder;
 use std::path::Path;
 
-use super::{extract_package_name_from_bytes, FileEntry, PackageIndex};
+use super::{FileEntry, PackageIndex, extract_package_name_from_bytes};
 
 pub fn resolve_commit_oid(repo_path: &Path, commit: &str) -> Result<String> {
     let repo = gix::open(repo_path)

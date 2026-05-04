@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::process::Command;
 
-use super::{extract_package_name_from_bytes, FileEntry, PackageIndex};
+use super::{FileEntry, PackageIndex, extract_package_name_from_bytes};
 
 /// Minimum required Git version for working directory crawling.
 /// Git 2.35.0 introduced `git ls-files --format` which we use for blob ID extraction.
