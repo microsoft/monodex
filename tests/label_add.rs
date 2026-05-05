@@ -85,7 +85,8 @@ async fn create_test_storage() -> (tempfile::TempDir, ChunkStorage) {
         .await
         .expect("Failed to create table");
 
-    (tmp_dir, ChunkStorage::new(Arc::new(table)))
+    // Pass db_path for commit mutex acquisition in write methods
+    (tmp_dir, ChunkStorage::new(Arc::new(table), db_path))
 }
 
 /// Test that crawling the same content under a second label makes it searchable

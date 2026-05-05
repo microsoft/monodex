@@ -23,7 +23,8 @@ async fn create_test_storage() -> (TempDir, ChunkStorage) {
         .await
         .expect("Failed to create table");
 
-    (tmp_dir, ChunkStorage::new(Arc::new(table)))
+    // Pass db_path for commit mutex acquisition in write methods
+    (tmp_dir, ChunkStorage::new(Arc::new(table), db_path))
 }
 
 fn test_chunk_row(row_id: &str, file_id: &str, ordinal: i32) -> ChunkRow {

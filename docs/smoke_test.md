@@ -141,5 +141,6 @@ The procedure does not exercise:
 - Label reassignment on re-crawls (run step 2 twice with different commits to test).
 - The `audit-chunks` and `dump-chunks` development commands.
 - Any error-handling path.
+- Cross-process locking behavior. Two `monodex crawl` invocations against the same catalog should serialize on the catalog lock; two against different catalogs should run in parallel. The smoke test runs commands sequentially and does not exercise this. A maintainer can verify locking manually by starting two `crawl` invocations against a larger catalog (long enough for the wait to be visible) from separate terminals: the second should print a progress message after a few seconds and both should complete successfully. Sparo crawls finish too quickly for this check to be reliable.
 
 These are reasonable extensions when the procedure starts proving inadequate. The doc should grow as new commands and surfaces are added.

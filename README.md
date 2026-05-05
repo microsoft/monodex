@@ -356,6 +356,10 @@ monodex init-db
 
 The database is stored at `~/.monodex/default-db/` by default. You can customize this location via the `database.path` field in config.
 
+### Concurrency
+
+Multiple `monodex` invocations against the same database coordinate via OS-level file locks. Concurrent crawls against the same catalog wait for each other; concurrent crawls against different catalogs run in parallel. Read-only commands (`search`, `view`) acquire no locks and run alongside writers. See `docs/design/concurrency.md` for details.
+
 ## Development
 
 When making a pull request, add a bullet under "## Unreleased" in [CHANGELOG.md](./CHANGELOG.md) describing the change from an end-user perspective. See CHANGELOG.md for the version history and publishing instructions.
