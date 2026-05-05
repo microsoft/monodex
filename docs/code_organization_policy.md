@@ -4,7 +4,7 @@ Rules for where code lives and how files are structured. Scan this before adding
 
 ## Core principle: split by edit intent
 
-Each file should have **one dominant reason to be edited**. Not "one subsystem" and not "one visibility level" — one change intent.
+Each file should have **one dominant reason to be edited**. Not "one subsystem" and not "one visibility level": one change intent.
 
 The test for whether two pieces of code share an edit intent: name the changes that would cause each to be edited. If the changes are the same kind of work (both edited when the label-id format changes; both edited when the search ranking algorithm changes), they share an edit intent. If the changes are different kinds of work that just happen to land in the same PR sometimes, they do not.
 
@@ -19,13 +19,13 @@ A coherent file at 750 lines is better than two incoherent files at 400. The thr
 | Types-only file           | any           | 500              | 800                     |
 | Test-only file            | any           | 800              | 1200                    |
 
-Lines = production code excluding `#[cfg(test)]` blocks and the module header. `mod.rs`, `lib.rs`, and `main.rs` files containing only declarations, re-exports, and small dispatch logic are not counted. Implementation-heavy `mod.rs` files are classified by what they contain and follow that row — a `mod.rs` full of algorithm code is an algorithm module, not exempt because of its filename.
+Lines = production code excluding `#[cfg(test)]` blocks and the module header. `mod.rs`, `lib.rs`, and `main.rs` files containing only declarations, re-exports, and small dispatch logic are not counted. Implementation-heavy `mod.rs` files are classified by what they contain and follow that row. A `mod.rs` full of algorithm code is an algorithm module, not exempt because of its filename.
 
 Production modules that don't fit a more specific row use the algorithm/engine row.
 
 The thresholds fire when the agent makes a non-trivial addition to a file. They do not require re-litigating files that the agent is only reading or making minor edits to.
 
-**At the review threshold:** ask whether the new addition fits the file's existing edit intent. If it does, proceed. If it doesn't, the addition belongs in a different file — find or create the right one.
+**At the review threshold:** ask whether the new addition fits the file's existing edit intent. If it does, proceed. If it doesn't, the addition belongs in a different file. Find or create the right one.
 
 **At the split-or-flag threshold:** apply the test below. The result is either a split (the test authorizes one) or a note in the "Out-of-scope notes" footer (the test is inconclusive or no clean split exists).
 
@@ -39,9 +39,9 @@ The split is valid only if all of the following hold:
 
 - The two answers are different kinds of work, not the same work described two ways. "Predicate construction" and "predicate validation" are the same work. "Predicate primitives" and "label metadata storage" are different work.
 - Neither answer is "helpers", "shared logic", "misc", or "utilities".
-- Each answer names a change visible in existing code, tests, docs, or the current task — not a hypothetical future change.
+- Each answer names a change visible in existing code, tests, docs, or the current task: not a hypothetical future change.
 
-If any of these fails, do not split — note the situation in the footer instead.
+If any of these fails, do not split. Note the situation in the footer instead.
 
 ### Calibrating judgement: signal → response
 
@@ -57,7 +57,7 @@ When working on a file, the agent will encounter situations that _look like_ spl
 
 ## When the local rules don't fit
 
-The rules above describe local decisions: where one new piece of code goes, whether one file should split. They do not describe how the codebase as a whole is organized — the choice of axis along which the code is divided (by CLI command, by storage table, by phase, by backend). That axis is a separate question, and reshaping it is the human's job.
+The rules above describe local decisions: where one new piece of code goes, whether one file should split. They do not describe how the codebase as a whole is organized. The choice of axis along which the code is divided (by CLI command, by storage table, by phase, by backend) is a separate question, and reshaping it is the human's job.
 
 If the agent finds:
 
@@ -94,7 +94,7 @@ Every non-trivial file must start with a header containing these three elements:
 
 - **Purpose:** one line.
 - **Edit here when:** the change intents this file serves.
-- **Do not edit here for:** common wrong guesses — point to the right file.
+- **Do not edit here for:** common wrong guesses: point to the right file.
 
 In Rust source files, the header is a module doc comment (`//!`). Two shapes are in use and both are compliant: the bare three-line form, and a form with a leading summary line followed by the three elements separated by blank lines. When editing an existing file, match its existing shape. When creating a new file, default to the bare three-line form.
 

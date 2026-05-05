@@ -23,7 +23,7 @@ The model was selected for four reasons that still hold:
 - **Docstring awareness** means natural-language queries like "how to read JSON files" can match `JsonFile.load()` even when the call site doesn't use the same words.
 - **ONNX Runtime portability** runs well on commodity developer hardware including Apple Silicon, with no dependency on a specific accelerator.
 
-**Target chunk size is 6000 characters.** The 8192-token model limit corresponds to roughly 6500-7500 characters of code in practice; the 6000 target leaves headroom for the breadcrumb prefix and tokenizer variance. Going closer to the model's maximum was tested and rejected: at very long lengths, semantic embedding quality degrades — the model's attention pools across more content and produces a more diffuse representation. 6000 characters is a balance between fitting whole semantic units (functions, classes, sections) and keeping the embedding focused. The constants `TARGET_CHARS` and `SMALL_CHUNK_CHARS` live in `src/engine/partitioner/types.rs`.
+**Target chunk size is 6000 characters.** The 8192-token model limit corresponds to roughly 6500-7500 characters of code in practice; the 6000 target leaves headroom for the breadcrumb prefix and tokenizer variance. Going closer to the model's maximum was tested and rejected: at very long lengths, semantic embedding quality degrades. The model's attention pools across more content and produces a more diffuse representation. 6000 characters is a balance between fitting whole semantic units (functions, classes, sections) and keeping the embedding focused. The constants `TARGET_CHARS` and `SMALL_CHUNK_CHARS` live in `src/engine/partitioner/types.rs`.
 
 ### Runtime
 
@@ -61,8 +61,8 @@ The TypeScript partitioner is the part with substantial design content. It exist
 
 The algorithm separates two concerns that look like they should be coupled but aren't:
 
-- **Sizing world.** Treats the file as a sequence of line ranges. Knows the target chunk size and minimum-chunk-size constraints. Has no opinion about what an AST node is or what makes a "good" split point — only about whether a split produces well-sized chunks.
-- **AST world.** Walks the tree-sitter syntax tree. Provides candidate split points at semantic boundaries (function boundaries, class members, statement-block children, JSX element children). Has no opinion about chunk sizes — it just describes structure.
+- **Sizing world.** Treats the file as a sequence of line ranges. Knows the target chunk size and minimum-chunk-size constraints. Has no opinion about what an AST node is or what makes a "good" split point: only about whether a split produces well-sized chunks.
+- **AST world.** Walks the tree-sitter syntax tree. Provides candidate split points at semantic boundaries (function boundaries, class members, statement-block children, JSX element children). Has no opinion about chunk sizes: it just describes structure.
 
 The partitioner's job is to coordinate between them: ask the AST world for candidate splits within a given line range, ask the sizing world whether any of those splits produces an acceptable partition, and recurse on the resulting halves until everything fits.
 
@@ -76,7 +76,7 @@ A **split scope** is a node whose direct children define legal split boundaries.
 
 A **transparent conduit** is a node that wraps a deeper structure but doesn't itself define split boundaries. Examples: `class_declaration` wraps a `class_body`; `if_statement` wraps `statement_block` children; `arrow_function` wraps `statement_block`; `return_statement` and `throw_statement` may wrap call expressions that contain object literals with method values. The descent walks through conduits to reach the next split scope below.
 
-The full lists of split scopes and transparent conduits are in `is_split_scope()` and `is_transparent_conduit()` at the top of `src/engine/partitioner/split_search.rs`. They're tuned empirically — when a real file in the Rush Stack codebase chunks badly, the fix is usually to reclassify a node kind (e.g., a wrapper that should have been transparent but was being treated as a leaf, blocking descent). Several test artifacts in the repo come from problem files identified during this tuning.
+The full lists of split scopes and transparent conduits are in `is_split_scope()` and `is_transparent_conduit()` at the top of `src/engine/partitioner/split_search.rs`. They're tuned empirically. When a real file in the Rush Stack codebase chunks badly, the fix is usually to reclassify a node kind (e.g., a wrapper that should have been transparent but was being treated as a leaf, blocking descent). Several test artifacts in the repo come from problem files identified during this tuning.
 
 ### The split-search algorithm
 
@@ -90,7 +90,7 @@ For a chunk that exceeds the target size:
 6. If descent terminates without finding an acceptable split, fall back to the least-bad split. If the least-bad split creates a chunk below the minimum-size threshold, mark the result as a **degraded AST split** rather than a clean one.
 7. If no AST split was found at any level (rare, typically pathological generated code), emit a **fallback line-based split** that picks an arbitrary line in the middle of the range.
 
-The descent is what handles cases like a single class with one giant method — the shallowest scope (`program`) has only one child (the class), so splitting at the program level is impossible; the algorithm must descend through `class_declaration` (transparent) into `class_body` (split scope) and try again with the class's methods as candidates.
+The descent is what handles cases like a single class with one giant method. The shallowest scope (`program`) has only one child (the class), so splitting at the program level is impossible; the algorithm must descend through `class_declaration` (transparent) into `class_body` (split scope) and try again with the class's methods as candidates.
 
 ### Quality markers in breadcrumbs
 
@@ -122,7 +122,7 @@ Both commands run the partitioner without writing to the database, so they're sa
 
 ## Markdown partitioning
 
-`src/engine/markdown_partitioner.rs` splits markdown files at structural boundaries: headings (`#`, `##`, `###`, etc.), fenced code blocks (` ``` `), block quotes (`>`), and paragraphs. Heading hierarchy generates the breadcrumb context — a section under `## Installation` inside `# README` produces a breadcrumb fragment that includes both heading slugs.
+`src/engine/markdown_partitioner.rs` splits markdown files at structural boundaries: headings (`#`, `##`, `###`, etc.), fenced code blocks (` ``` `), block quotes (`>`), and paragraphs. Heading hierarchy generates the breadcrumb context. A section under `## Installation` inside `# README` produces a breadcrumb fragment that includes both heading slugs.
 
 Heading slugs use GitHub-style slugification via the `github_slugger` crate, which matches GitHub's anchor-link convention. This means a breadcrumb pointing at a heading section also points at the URL fragment that GitHub would generate for it.
 

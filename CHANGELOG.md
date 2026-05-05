@@ -27,6 +27,10 @@ PUBLISHING PROCEDURE:
 
 - **Empty search result sets now print a `No results.` line.** Previously, `monodex search` would print only the catalog/label header and then nothing if no chunks matched, which looked like a hang.
 
+### Changed
+
+- Cleaned up prose style in documentation: replaced em-dashes with colons in list separators, rewrote prose em-dashes as periods/commas/colons per context, kept 5 bracketed-aside em-dash pairs where comma substitution would create ambiguity.
+
 ## 0.5.1 (2026-04-30)
 
 ### Changed

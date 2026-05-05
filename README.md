@@ -25,7 +25,7 @@ See [CHANGELOG.md](./CHANGELOG.md) to see what's new.
 - **Commit-based crawling**: Reads directly from Git objects, not working tree (deterministic, reproducible)
 - **AST-based chunking**: Tree-sitter powered intelligent splitting for TypeScript/TSX files
 - **Breadcrumb context**: Full symbol paths like `@rushstack/node-core-library:JsonFile.ts:JsonFile.load`
-- **Local code-aware embeddings**: Uses jina-embeddings-v2-base-code with ONNX Runtime — runs on commodity developer hardware, no external APIs or services required
+- **Local code-aware embeddings**: Uses jina-embeddings-v2-base-code with ONNX Runtime: runs on commodity developer hardware, no external APIs or services required
 - **Incremental sync**: Content-hash based change detection for fast re-indexing
 - **Intelligent deduplication**: Identical content at same path across labels shares chunks
 - **Rush-optimized**: Smart exclusion rules for Rush monorepo patterns
@@ -34,16 +34,16 @@ See [CHANGELOG.md](./CHANGELOG.md) to see what's new.
 
 Monodex uses a few terms to describe the containment hierarchy:
 
-- A **database** is the on-disk store — by default `~/.monodex/default-db`. Everything lives here.
+- A **database** is the on-disk store: by default `~/.monodex/default-db`. Everything lives here.
 - A **catalog** is a named monorepo registered in your config. You might have one catalog per codebase.
-- A **label** is a named fileset within a catalog — typically a branch or commit. Searches are scoped to a label.
+- A **label** is a named fileset within a catalog: typically a branch or commit. Searches are scoped to a label.
 - A **chunk** is a unit of indexed content (function, class, section) with its embedding.
 
 Hierarchy: **database** › **catalog** › **label** › **chunk**
 
 ## Agent Usage Guide
 
-This tool is designed for AI assistants. The indexed database provides a complete, internally consistent snapshot of the codebase as it existed at crawl time — independent of any local file changes, branches, or whether the repo is even cloned. This makes it more than a replacement for grep; it can be the primary way an agent learns about a codebase.
+This tool is designed for AI assistants. The indexed database provides a complete, internally consistent snapshot of the codebase as it existed at crawl time. Independent of any local file changes, branches, or whether the repo is even cloned, this makes it more than a replacement for grep; it can be the primary way an agent learns about a codebase.
 
 **Typical workflow:**
 
@@ -260,11 +260,11 @@ monodex crawl --catalog rushstack --label v1.0.0 --commit a1b2c3d4e5f6
 
 **Required arguments:** The `crawl` command requires `--label` and either `--working-dir` or `--commit`. This prevents accidental overwrites of important labels.
 
-**Incremental sync:** The crawl is incremental — unchanged files are skipped. You can safely CTRL+C and resume later.
+**Incremental sync:** The crawl is incremental. Unchanged files are skipped. You can safely CTRL+C and resume later.
 
 **Commit-based:** Crawling with `--commit` reads from Git objects, not the working tree. This ensures deterministic, reproducible indexing.
 
-**Working directory mode:** Use `--working-dir` to index uncommitted changes. This reads directly from the filesystem instead of Git objects. The label metadata will show `source_kind = "working-directory"` and `commit_oid = ""`. Working directory labels are mutable — re-crawling updates the indexed content.
+**Working directory mode:** Use `--working-dir` to index uncommitted changes. This reads directly from the filesystem instead of Git objects. The label metadata will show `source_kind = "working-directory"` and `commit_oid = ""`. Working directory labels are mutable. Re-crawling updates the indexed content.
 
 **Label reassignment:** When you re-crawl a label with a new commit, chunks from the old commit that no longer exist are removed from that label's membership.
 
@@ -406,7 +406,7 @@ Configs are loaded in this precedence order:
 2. `~/.monodex/crawl.json` (user-global)
 3. Embedded default (compiled into binary)
 
-No merging occurs — exactly one config is used.
+No merging occurs. Exactly one config is used.
 
 ### Config Schema
 
@@ -463,7 +463,7 @@ Create a `monodex-crawl.json` file:
 shouldCrawl = matchesFileType && (matchesPatternsToKeep || !matchesPatternsToExclude)
 ```
 
-- `fileTypes` is the primary filter — unsupported file types are never crawled
+- `fileTypes` is the primary filter. Unsupported file types are never crawled.
 - `patternsToKeep` overrides `patternsToExclude` (useful for keeping test files in `src/`)
 - Directory patterns (ending in `/`) match anywhere in the path
 
@@ -481,14 +481,14 @@ This project is under active development. Expect breaking changes between versio
 
 For contributors and curious users:
 
-- [`docs/design/architecture.md`](./docs/design/architecture.md) — Five-minute crash course for working on the codebase: vocabulary, data model, crawl pipeline overview, chunker dispatch, source tree.
-- [`docs/design/label_ids.md`](./docs/design/label_ids.md) — Identifier and reference syntax: catalogs, labels, breadcrumbs, path encoding, planned typed-label and cross-catalog reference grammar.
-- [`docs/design/crawl.md`](./docs/design/crawl.md) — Crawl pipeline in detail: package index, working-directory identity model, label reassignment, partial-crawl semantics.
-- [`docs/design/chunker.md`](./docs/design/chunker.md) — Chunking algorithms: embedding model, TypeScript AST partitioning (the "two worlds model"), markdown splitting, quality scoring, empirical findings on alternative runtimes.
-- [`docs/design/monodex_files.md`](./docs/design/monodex_files.md) — Inventory of files Monodex reads or writes: tool-home state, database directory, repo-local config, shipped artifacts.
-- [`docs/code_organization_policy.md`](./docs/code_organization_policy.md) — File size targets, where new code goes, banned patterns. Required reading for contributors.
-- [`docs/backlog.md`](./docs/backlog.md) — Maintainer scratch pad for what might come next.
-- [`docs/smoke_test.md`](./docs/smoke_test.md) — End-to-end verification procedure to run after any change.
+- [`docs/design/architecture.md`](./docs/design/architecture.md): Five-minute crash course for working on the codebase: vocabulary, data model, crawl pipeline overview, chunker dispatch, source tree.
+- [`docs/design/label_ids.md`](./docs/design/label_ids.md): Identifier and reference syntax: catalogs, labels, breadcrumbs, path encoding, planned typed-label and cross-catalog reference grammar.
+- [`docs/design/crawl.md`](./docs/design/crawl.md): Crawl pipeline in detail: package index, working-directory identity model, label reassignment, partial-crawl semantics.
+- [`docs/design/chunker.md`](./docs/design/chunker.md): Chunking algorithms: embedding model, TypeScript AST partitioning (the "two worlds model"), markdown splitting, quality scoring, empirical findings on alternative runtimes.
+- [`docs/design/monodex_files.md`](./docs/design/monodex_files.md): Inventory of files Monodex reads or writes: tool-home state, database directory, repo-local config, shipped artifacts.
+- [`docs/code_organization_policy.md`](./docs/code_organization_policy.md): File size targets, where new code goes, banned patterns. Required reading for contributors.
+- [`docs/backlog.md`](./docs/backlog.md): Maintainer scratch pad for what might come next.
+- [`docs/smoke_test.md`](./docs/smoke_test.md): End-to-end verification procedure to run after any change.
 
 ## License
 

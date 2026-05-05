@@ -1,6 +1,6 @@
 # Smoke test
 
-This document describes a minimal end-to-end procedure for verifying that a Monodex build actually works. It exists because `cargo test` passing is not sufficient evidence — the unit tests do not exercise the embedding model, the LanceDB writer, or the full CLI surface, so a build can pass tests and still be entirely broken at runtime.
+This document describes a minimal end-to-end procedure for verifying that a Monodex build actually works. It exists because `cargo test` passing is not sufficient evidence. The unit tests do not exercise the embedding model, the LanceDB writer, or the full CLI surface, so a build can pass tests and still be entirely broken at runtime.
 
 A coding agent finishing a change should run the test procedure below before claiming the change is complete. A human verifying their own build should do the same. The setup procedure runs once per machine; the test procedure runs every time.
 
@@ -71,7 +71,7 @@ The command should complete without error. After this, the database has no chunk
 
 The expected output is progress reporting as files are processed, then a summary indicating how many chunks were written. Typical scale for Sparo at recent commits is around 250-300 chunks.
 
-If the crawl produces warnings about fallback splits, that is normal — those are chunker quality reports, not crawl failures. The crawl is successful as long as it completes without an error exit.
+If the crawl produces warnings about fallback splits, that is normal: those are chunker quality reports, not crawl failures. The crawl is successful as long as it completes without an error exit.
 
 ### 3. Search
 
@@ -85,7 +85,7 @@ The expected output is a list of search results in `>`-prefixed format. Each res
 <file_id>:<chunk_ordinal>  dist=<score>  <breadcrumb>
 ```
 
-followed by three lines of the chunk's text quoted with `>`, and a blank separator. Results should look thematically related to Git repository cloning — Sparo wraps Git operations, so any code dealing with `git clone`, repository setup, or shell invocation should rank highly.
+followed by three lines of the chunk's text quoted with `>`, and a blank separator. Results should look thematically related to Git repository cloning. Sparo wraps Git operations, so any code dealing with `git clone`, repository setup, or shell invocation should rank highly.
 
 If results come back empty or as completely unrelated chunks, the search index is broken even if the crawl appeared to succeed.
 
@@ -109,7 +109,7 @@ After this, subsequent `search` and `view` commands can omit `--catalog` and `--
 
 ## Clean-slate variant
 
-The procedure above runs against `~/.monodex/`, which is shared with the user's normal Monodex installation. For most verification work this is fine — the purge in step 1 ensures the test starts fresh, and re-using the same catalog and database between runs saves time.
+The procedure above runs against `~/.monodex/`, which is shared with the user's normal Monodex installation. For most verification work this is fine: the purge in step 1 ensures the test starts fresh, and re-using the same catalog and database between runs saves time.
 
 A clean-slate variant runs the same test against a completely fresh tool home, with no shared state. Set `MONODEX_HOME` to a temporary directory before any of the steps:
 

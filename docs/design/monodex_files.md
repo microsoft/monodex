@@ -4,8 +4,8 @@ This document inventories every file involved in Monodex's runtime contract: too
 
 Two placeholders are used throughout:
 
-- `<tool-home>` — the Monodex tool home directory. Defaults to `~/.monodex/`, overridable via the `MONODEX_HOME` environment variable. Resolution logic in `src/paths.rs`. A relative `MONODEX_HOME` is resolved against the current working directory at process start; empty or whitespace-only values are treated as unset.
-- `<database-dir>` — the database directory. Defaults to `<tool-home>/default-db/`, relocatable via the `database.path` field in `config.json`. Must be an absolute path on a local filesystem.
+- `<tool-home>`: the Monodex tool home directory. Defaults to `~/.monodex/`, overridable via the `MONODEX_HOME` environment variable. Resolution logic in `src/paths.rs`. A relative `MONODEX_HOME` is resolved against the current working directory at process start; empty or whitespace-only values are treated as unset.
+- `<database-dir>`: the database directory. Defaults to `<tool-home>/default-db/`, relocatable via the `database.path` field in `config.json`. Must be an absolute path on a local filesystem.
 
 ## A note on validation
 
@@ -14,9 +14,9 @@ The user-editable JSON files have two layers of validation that look like one bu
 - **Editor-time validation** comes from JSON Schema files under `schemas/`. The user's editor reads the `$schema` URL from the file being edited, fetches the schema, and uses it for autocomplete and inline error reporting. This is the Rush Stack / VS Code path; it is not specific to Monodex.
 - **Runtime validation** comes from typed Rust structs that derive `serde::Deserialize`, with `#[serde(deny_unknown_fields)]` on each struct so that misspelled keys or stale field names produce a clear error rather than being silently ignored. The structs live alongside the loader code in `src/app/config.rs`, `src/app/context.rs`, and `src/engine/crawl_config.rs`.
 
-The two layers describe the same shapes but are independently maintained. Adding or renaming a field requires updating both: the JSON Schema (for editor experience) and the Rust struct (for runtime correctness). This is duplication, and it is deliberate — the alternative would be code-generating one side from the other, which has its own maintenance burden and tooling cost. Treat this as a known coupling: a config-shape change is not done until both sides agree.
+The two layers describe the same shapes but are independently maintained. Adding or renaming a field requires updating both: the JSON Schema (for editor experience) and the Rust struct (for runtime correctness). This is duplication, and it is deliberate. The alternative would be code-generating one side from the other, which has its own maintenance burden and tooling cost. Treat this as a known coupling: a config-shape change is not done until both sides agree.
 
-One distinction worth knowing: `config.json` and `crawl.json` reject unknown fields at load time, but `context.json` does not. This is intentional, not an oversight. The user-edited files want strict failure (an unknown field is almost always a typo that would otherwise silently do nothing). The tool-managed `context.json` wants lenient parsing so that an older binary can still read a state file written by a newer binary — the alternative is that downgrading Monodex breaks until the user manually edits or deletes their context.
+One distinction worth knowing: `config.json` and `crawl.json` reject unknown fields at load time, but `context.json` does not. This is intentional, not an oversight. The user-edited files want strict failure (an unknown field is almost always a typo that would otherwise silently do nothing). The tool-managed `context.json` wants lenient parsing so that an older binary can still read a state file written by a newer binary. The alternative is that downgrading Monodex breaks until the user manually edits or deletes their context.
 
 ## Tool home
 
@@ -42,7 +42,7 @@ Earlier prerelease versions placed these files at platform-dependent locations (
 
 ## Database directory
 
-`<database-dir>` contains a metadata file, the LanceDB tables, and per-catalog warning state. It is not designed to be edited by hand — every file in it is tool-managed except where noted.
+`<database-dir>` contains a metadata file, the LanceDB tables, and per-catalog warning state. It is not designed to be edited by hand. Every file in it is tool-managed except where noted.
 
 The database location must be on a local filesystem. Network filesystems and synced cloud folders (NFS, SMB, Dropbox, OneDrive, iCloud, Google Drive, etc.) are not supported. The single-writer process lock that will guard concurrent crawls (see [backlog.md](../backlog.md)) is intended to span all storage formats in this directory under one invariant.
 
@@ -50,17 +50,17 @@ The database location must be on a local filesystem. Network filesystems and syn
 
 Records the schema version, creation timestamp, the binary version that created the database, and the Lance format version at creation time. Written by `monodex init-db`; read on every database open. Defined in `src/engine/storage/database.rs`.
 
-The `monodex_schema_version` field is the load-bearing one. Every database open reads it and compares it to the `MONODEX_SCHEMA_VERSION` constant in `src/engine/schema.rs`. A mismatch fails the open with a clear error rather than attempting silent migration. Bumping the schema version is a breaking change to existing databases — users have to rebuild — and any change to the schema's column shape requires a bump. This includes adding columns, even though LanceDB itself can store rows with unset columns: an older binary running against a newer database has no contract that says "blank cells in this column are OK," so the safe rule is to treat any shape change as breaking. The compatibility cost of avoiding a bump (writing code to read schemas with unfamiliar columns, deciding what to do with new columns when writing rows) is not worth absorbing without a concrete need.
+The `monodex_schema_version` field is the load-bearing one. Every database open reads it and compares it to the `MONODEX_SCHEMA_VERSION` constant in `src/engine/schema.rs`. A mismatch fails the open with a clear error rather than attempting silent migration. Bumping the schema version is a breaking change to existing databases (users have to rebuild), and any change to the schema's column shape requires a bump. This includes adding columns, even though LanceDB itself can store rows with unset columns: an older binary running against a newer database has no contract that says "blank cells in this column are OK," so the safe rule is to treat any shape change as breaking. The compatibility cost of avoiding a bump (writing code to read schemas with unfamiliar columns, deciding what to do with new columns when writing rows) is not worth absorbing without a concrete need.
 
 ### `<database-dir>/chunks.lance/` and `<database-dir>/label_metadata.lance/`
 
-LanceDB tables. The `.lance/` suffix is LanceDB's directory-based table format — every LanceDB table is a directory with that suffix containing data files, transaction logs, and index files. The suffix is a LanceDB convention, not a Monodex one; that's why the LanceDB tables are sibling directories under `<database-dir>` rather than nested inside a `vectordb/` subdirectory. Schema definitions live in `src/engine/schema.rs`; row types in `src/engine/storage/rows.rs`.
+LanceDB tables. The `.lance/` suffix is LanceDB's directory-based table format: every LanceDB table is a directory with that suffix containing data files, transaction logs, and index files. The suffix is a LanceDB convention, not a Monodex one; that's why the LanceDB tables are sibling directories under `<database-dir>` rather than nested inside a `vectordb/` subdirectory. Schema definitions live in `src/engine/schema.rs`; row types in `src/engine/storage/rows.rs`.
 
 When Tantivy full-text search is added, its index is planned to live at `<database-dir>/fts/`. Tantivy doesn't impose a directory-suffix convention, so the layout can be simpler than the LanceDB equivalent. The naming convention for `<database-dir>` siblings is: any directory ending in `.lance/` is a LanceDB table; everything else is something else.
 
 ### `<database-dir>/warnings-<catalog>.json`
 
-One file per catalog. Records the list of repo-relative paths that produced chunker warnings (`[fallback-split]` markers — see [chunker.md](./chunker.md)) on the most recent crawl, used by the next crawl to decide which previously-warned files to revisit. Format: a JSON array of repo-relative path strings. Written at the end of each crawl by `src/app/util.rs`; read at the start of each crawl. Safe to delete; the next crawl will rebuild it.
+One file per catalog. Records the list of repo-relative paths that produced chunker warnings (`[fallback-split]` markers; see [chunker.md](./chunker.md)) on the most recent crawl, used by the next crawl to decide which previously-warned files to revisit. Format: a JSON array of repo-relative path strings. Written at the end of each crawl by `src/app/util.rs`; read at the start of each crawl. Safe to delete; the next crawl will rebuild it.
 
 ## Repo-local files
 
@@ -84,14 +84,14 @@ The intended end state is: schemas published to a Microsoft-hosted schema server
 
 ### `schemas/*.schema.json`
 
-JSON-Schema files following the Rush Stack convention for user-editable JSON. Three files: `config.schema.json`, `context.schema.json`, `crawl.schema.json`. Their purpose is editor integration — a user editing a config file with VS Code (or any JSON-Schema-aware editor) gets autocomplete, validation, and inline documentation by way of the `$schema` field at the top of the file pointing at the appropriate schema URL.
+JSON-Schema files following the Rush Stack convention for user-editable JSON. Three files: `config.schema.json`, `context.schema.json`, `crawl.schema.json`. Their purpose is editor integration: a user editing a config file with VS Code (or any JSON-Schema-aware editor) gets autocomplete, validation, and inline documentation by way of the `$schema` field at the top of the file pointing at the appropriate schema URL.
 
-These are not used at runtime; runtime validation comes from the typed Rust structs described in the validation note at the top of this document. The schemas and the structs describe the same shape and must be kept in sync by hand. Treat the schemas as a release artifact — once published, a schema change requires a coordinated update on the json-schemas server.
+These are not used at runtime; runtime validation comes from the typed Rust structs described in the validation note at the top of this document. The schemas and the structs describe the same shape and must be kept in sync by hand. Treat the schemas as a release artifact: once published, a schema change requires a coordinated update on the json-schemas server.
 
 ### `examples/*.json`
 
 Templates for the user-editable JSON files, in JSON-with-comments format. Three files corresponding to the three schemas: `config.json`, `context.json`, `monodex-crawl.json`. Each is a fully-commented example of the corresponding format with sensible defaults.
 
-JSON-with-comments is the format Rush Stack uses for user-editable JSON. Comments serve two purposes: as ambient documentation that survives editing (the user keeps the comments when they tweak a value, so the next time they open the file they remember what each field does), and as an upgrade vector — when the comment guidance changes, Monodex can offer to upgrade the comments in a user's existing file while preserving their values, analogous to how Debian package upgrades present new versions of `/etc` config files for diff-and-merge. This is not a settled industry convention; calling the format JSONC is misleading because several different specifications use that name. The format is JSON-with-comments — it is not JSON5 (a JavaScript subset much broader than JSON-with-comments).
+JSON-with-comments is the format Rush Stack uses for user-editable JSON. Comments serve two purposes: as ambient documentation that survives editing (the user keeps the comments when they tweak a value, so the next time they open the file they remember what each field does), and as an upgrade vector. When the comment guidance changes, Monodex can offer to upgrade the comments in a user's existing file while preserving their values, analogous to how Debian package upgrades present new versions of `/etc` config files for diff-and-merge. This is not a settled industry convention; calling the format JSONC is misleading because several different specifications use that name. The format is JSON-with-comments. It is not JSON5 (a JavaScript subset much broader than JSON-with-comments).
 
-The current directory name `examples/` is a misnomer — these files are templates first and examples second. A future rename to something like `config-templates/` is a candidate for the backlog.
+The current directory name `examples/` is a misnomer: these files are templates first and examples second. A future rename to something like `config-templates/` is a candidate for the backlog.
