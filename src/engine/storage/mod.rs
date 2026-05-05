@@ -10,12 +10,17 @@
 mod chunks;
 mod database;
 mod labels;
+mod locks;
 mod predicate;
 mod rows;
 
 pub use chunks::ChunkStorage;
 pub use database::{Database, META_FILE, MetaFile, err_schema_mismatch};
 pub use labels::LabelStorage;
+pub use locks::{
+    CatalogLock, CommitMutex, DatabaseLockExclusive, DatabaseLockShared, acquire_catalog_lock,
+    acquire_commit_mutex, acquire_database_exclusive, acquire_database_shared,
+};
 pub use rows::{
     ChunkRow, LabelMetadataRow, SOURCE_KIND_GIT_COMMIT, SOURCE_KIND_WORKING_DIRECTORY,
     ScoredChunkRow,
