@@ -14,8 +14,8 @@ A coherent file at 750 lines is better than two incoherent files at 400. The thr
 
 | Category                  | Target        | Review threshold | Split-or-flag threshold |
 | ------------------------- | ------------- | ---------------- | ----------------------- |
-| Command handler           | 150–350 lines | 500              | 700                     |
-| Algorithm / engine module | 250–500 lines | 700              | 1000                    |
+| Command handler           | 150-350 lines | 500              | 700                     |
+| Algorithm / engine module | 250-500 lines | 700              | 1000                    |
 | Types-only file           | any           | 500              | 800                     |
 | Test-only file            | any           | 800              | 1200                    |
 

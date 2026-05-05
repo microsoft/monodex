@@ -23,7 +23,7 @@ The model was selected for four reasons that still hold:
 - **Docstring awareness** means natural-language queries like "how to read JSON files" can match `JsonFile.load()` even when the call site doesn't use the same words.
 - **ONNX Runtime portability** runs well on commodity developer hardware including Apple Silicon, with no dependency on a specific accelerator.
 
-**Target chunk size is 6000 characters.** The 8192-token model limit corresponds to roughly 6500–7500 characters of code in practice; the 6000 target leaves headroom for the breadcrumb prefix and tokenizer variance. Going closer to the model's maximum was tested and rejected: at very long lengths, semantic embedding quality degrades — the model's attention pools across more content and produces a more diffuse representation. 6000 characters is a balance between fitting whole semantic units (functions, classes, sections) and keeping the embedding focused. The constants `TARGET_CHARS` and `SMALL_CHUNK_CHARS` live in `src/engine/partitioner/types.rs`.
+**Target chunk size is 6000 characters.** The 8192-token model limit corresponds to roughly 6500-7500 characters of code in practice; the 6000 target leaves headroom for the breadcrumb prefix and tokenizer variance. Going closer to the model's maximum was tested and rejected: at very long lengths, semantic embedding quality degrades — the model's attention pools across more content and produces a more diffuse representation. 6000 characters is a balance between fitting whole semantic units (functions, classes, sections) and keeping the embedding focused. The constants `TARGET_CHARS` and `SMALL_CHUNK_CHARS` live in `src/engine/partitioner/types.rs`.
 
 ### Runtime
 
@@ -37,11 +37,11 @@ Several runtime alternatives have been investigated. The findings are platform-c
 
 **Apple CoreML / Metal GPU.** Significantly slower than CPU on tested Apple Silicon (M3 generation). The Jina v2 base code model is shallow at 12 transformer layers, tensors are small, and JIT-compilation plus data-transfer overhead dominate the per-inference cost. Not a useful path on Apple GPUs for this workload.
 
-**CUDA on NVIDIA workstations.** A proof-of-concept by Nick Pape demonstrated approximately 4–12x speedup over CPU baseline on an RTX 3090 with batched inference. See [rushdex-prototype PR #1](https://github.com/octogonz/rushdex-prototype/pull/1) for the implementation and benchmark numbers; that PR predates the rename to Monodex and was never merged because of intervening codebase changes. Batching is essential on GPU — single-item inference offers no benefit due to kernel-launch overhead — and batch sizes are bounded above by variable-length-padding cost (attention is O(n²) in sequence length, so padding short sequences to match long ones wastes compute). A future contributor could revisit this as a hardware-conditional adapter alongside the CPU runtime; ongoing maintenance would require team access to the relevant hardware.
+**CUDA on NVIDIA workstations.** A proof-of-concept by Nick Pape demonstrated approximately 4-12x speedup over CPU baseline on an RTX 3090 with batched inference. See [rushdex-prototype PR #1](https://github.com/octogonz/rushdex-prototype/pull/1) for the implementation and benchmark numbers; that PR predates the rename to Monodex and was never merged because of intervening codebase changes. Batching is essential on GPU — single-item inference offers no benefit due to kernel-launch overhead — and batch sizes are bounded above by variable-length-padding cost (attention is O(n²) in sequence length, so padding short sequences to match long ones wastes compute). A future contributor could revisit this as a hardware-conditional adapter alongside the CPU runtime; ongoing maintenance would require team access to the relevant hardware.
 
 **CPU batching.** Slower than parallel single-item processing on CPU. Variable-length sequences require padding, attention is O(n²) in sequence length, and there's no GPU to amortize kernel-launch overhead. The parallel-sessions strategy gets the same parallelism benefit without the padding cost.
 
-**INT8 quantization.** Approximately 2x faster than FP32 with 1–2% similarity-score accuracy loss. The accuracy cost was judged unacceptable for semantic search at the time of evaluation. Worth revisiting if quantization tooling improves or if a future use case has different accuracy tolerances.
+**INT8 quantization.** Approximately 2x faster than FP32 with 1-2% similarity-score accuracy loss. The accuracy cost was judged unacceptable for semantic search at the time of evaluation. Worth revisiting if quantization tooling improves or if a future use case has different accuracy tolerances.
 
 ## Dispatcher
 
@@ -104,7 +104,7 @@ Files producing fallback splits are tracked in a sidecar warnings file during cr
 
 ### Quality scoring
 
-`src/engine/partitioner/scoring.rs` computes a 0–100% score for a complete partitioning, used by `audit-chunks` to summarize chunker behavior across a sample of files. The score combines two badnesses:
+`src/engine/partitioner/scoring.rs` computes a 0-100% score for a complete partitioning, used by `audit-chunks` to summarize chunker behavior across a sample of files. The score combines two badnesses:
 
 - **Count badness.** Penalizes producing too many chunks relative to the ideal partition (total content size divided by max chunk size, rounded up). A file that should partition into 3 chunks but produces 7 has high count badness.
 - **Micro badness.** Penalizes individual chunks being either too small (size below the threshold) or too large (size at or above max). For each chunk, a per-chunk badness is computed and averaged across the partition.

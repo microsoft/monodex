@@ -22,7 +22,7 @@ The chunk row carries enough path/package/breadcrumb context to be displayed wit
 
 A label-scoped search is the storage-layer filter `catalog == X AND active_label_ids CONTAINS "<catalog>:<label>"` combined with vector similarity on the embedding column. View queries use the same `active_label_ids` filter without the vector search.
 
-Designed scale: around 200K files and 600K chunks per catalog. Full crawls take 15–30 minutes; embedding throughput is around 12ms per chunk on a typical multi-core machine with the auto-tuned ONNX session pool.
+Designed scale: around 200K files and 600K chunks per catalog. Full crawls take 15-30 minutes; embedding throughput is around 12ms per chunk on a typical multi-core machine with the auto-tuned ONNX session pool.
 
 ### Chunk identity
 
@@ -141,7 +141,7 @@ TypeScript/TSX AST-based chunking. See [chunker.md](./chunker.md) for the algori
 - `debug.rs` — Debug logging hooks for split decisions; `PartitionDebug` flag struct controlling verbose output.
 - `node_analysis.rs` — AST node helpers: meaningful-children enumeration, symbol-name extraction, line-span computation, JSDoc/TSDoc collection.
 - `partition.rs` — Top-level entry point: parse with tree-sitter, drive the recursive split search, finalize chunks with metadata.
-- `scoring.rs` — Quality scoring (0–100%) and the `ChunkQualityReport` consumed by `audit-chunks`. Penalizes tiny chunks and oversized chunks.
+- `scoring.rs` — Quality scoring (0-100%) and the `ChunkQualityReport` consumed by `audit-chunks`. Penalizes tiny chunks and oversized chunks.
 - `split_search.rs` — Recursive search for split points at AST boundaries; descent into nested scopes when no shallow split fits the budget.
 - `types.rs` — `PartitionedChunk`, `PartitionConfig`, `SplitResult`, the `TARGET_CHARS` and `SMALL_CHUNK_CHARS` constants.
 

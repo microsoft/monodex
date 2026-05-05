@@ -69,7 +69,7 @@ The command should complete without error. After this, the database has no chunk
 ./target/release/monodex crawl --catalog sparo --label main --commit HEAD
 ```
 
-The expected output is progress reporting as files are processed, then a summary indicating how many chunks were written. Typical scale for Sparo at recent commits is around 250–300 chunks.
+The expected output is progress reporting as files are processed, then a summary indicating how many chunks were written. Typical scale for Sparo at recent commits is around 250-300 chunks.
 
 If the crawl produces warnings about fallback splits, that is normal — those are chunker quality reports, not crawl failures. The crawl is successful as long as it completes without an error exit.
 

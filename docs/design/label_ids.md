@@ -27,7 +27,7 @@ Composite forms (`label:path`, `kind=payload`, `@catalog:label`, `@catalog:label
 ^[a-z0-9]+(?:-[a-z0-9]+)*$
 ```
 
-- Length 1–64 characters.
+- Length 1-64 characters.
 - Lowercase ASCII alphanumeric words separated by single `-`.
 - No leading, trailing, or consecutive `-`.
 
@@ -42,7 +42,7 @@ Examples:
 ^[a-z0-9]+(?:[./=-][a-z0-9]+)*$
 ```
 
-- Length 1–128 characters.
+- Length 1-128 characters.
 - Lowercase ASCII alphanumeric words separated by single `.`, `/`, `-`, or `=`.
 - No leading, trailing, or consecutive separators.
 - `=` is a permitted separator character but is not interpreted as a typed-form delimiter today (see §Typed labels below).
