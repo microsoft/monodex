@@ -92,7 +92,8 @@ pub fn run_init_db(config: &Config) -> Result<()> {
     }
 
     // Step 4: Pre-lock existence check (short-circuit if already initialized)
-    if let Some(meta) = check_existing_database(&db_path)? {
+    // Use the tolerant check that falls through to lock acquisition for transient mid-init states
+    if let Some(meta) = check_existing_database_pre_lock(&db_path)? {
         println!(
             "{}",
             log_already_initialized(&db_path, meta.monodex_schema_version)
@@ -125,10 +126,91 @@ pub fn run_init_db(config: &Config) -> Result<()> {
     Ok(())
 }
 
-/// Check if a database already exists at the given path.
-/// Returns Some(MetaFile) if valid database exists, None if path doesn't exist
-/// or is an empty directory (ignoring lockfile and locks/ detritus).
-/// Returns error if path exists but is not a valid database.
+/// Pre-lock existence check for init-db.
+///
+/// Returns Some(MetaFile) if a fully-valid initialized database exists.
+/// Returns None if the path doesn't exist, is empty (ignoring lockfile/locks detritus),
+/// or is in a transient mid-init state (tables exist but meta missing).
+/// Returns error for terminal conditions that no concurrent writer could resolve:
+/// corrupt meta, schema mismatch, meta present but tables missing, or non-empty non-monodex directory.
+///
+/// The pre-lock check is tolerant of the "tables exist, meta missing" state because another
+/// process might be mid-init. The caller should acquire the exclusive lock and recheck with
+/// the strict `check_existing_database`.
+fn check_existing_database_pre_lock(db_path: &Path) -> Result<Option<MetaFile>> {
+    if !db_path.exists() {
+        return Ok(None);
+    }
+
+    // Check if it's a valid monodex database
+    let meta_path = db_path.join(META_FILE);
+    let chunks_path = db_path.join(format!("{}.lance", CHUNKS_TABLE));
+    let labels_path = db_path.join(format!("{}.lance", LABEL_METADATA_TABLE));
+
+    if meta_path.exists() {
+        // Try to load meta file
+        let meta = match Database::load_meta(&meta_path) {
+            Ok(m) => m,
+            Err(_) => {
+                // Corrupted meta file - terminal error
+                bail!(err_partial_state(db_path));
+            }
+        };
+
+        // Check schema version
+        if meta.monodex_schema_version != crate::engine::schema::MONODEX_SCHEMA_VERSION {
+            bail!(err_schema_mismatch(
+                meta.monodex_schema_version,
+                crate::engine::schema::MONODEX_SCHEMA_VERSION
+            ));
+        }
+
+        // Check that table directories exist
+        if !chunks_path.exists() || !labels_path.exists() {
+            bail!(err_partial_state(db_path));
+        }
+
+        Ok(Some(meta))
+    } else {
+        // Check for partial state (tables exist but no meta)
+        // Pre-lock: this might be a concurrent init in progress, so fall through to lock
+        if chunks_path.exists() || labels_path.exists() {
+            return Ok(None);
+        }
+
+        // Check if directory is empty (ignoring lockfile and locks/ detritus)
+        let is_empty = db_path
+            .read_dir()
+            .map(|mut entries| {
+                entries.all(|e| {
+                    e.ok()
+                        .map(|e| {
+                            let name = e.file_name();
+                            name == ".monodex.lock" || name == "locks"
+                        })
+                        .unwrap_or(false)
+                })
+            })
+            .unwrap_or(false);
+
+        if is_empty {
+            // Empty directory (or only lockfile/locks), treat as non-existent
+            Ok(None)
+        } else {
+            // Non-empty without meta file or tables
+            bail!(err_not_monodex_db(db_path));
+        }
+    }
+}
+
+/// Strict existence check for init-db (used under the exclusive lock).
+///
+/// Returns Some(MetaFile) if a fully-valid initialized database exists.
+/// Returns None if path doesn't exist or is an empty directory (ignoring lockfile/locks detritus).
+/// Returns error if path exists but is not a valid database, including partial state.
+///
+/// This is the strict version used after acquiring the exclusive lock. Under the lock,
+/// no other process can be mid-init, so any partial state is a real corruption.
 fn check_existing_database(db_path: &Path) -> Result<Option<MetaFile>> {
     if !db_path.exists() {
         return Ok(None);
@@ -552,5 +634,43 @@ mod tests {
         assert!(db_path.join(META_FILE).exists());
 
         remove_monodex_home();
+    }
+
+    #[test]
+    fn test_pre_lock_check_tolerates_missing_meta_with_tables() {
+        // Regression test for concurrent init-db race:
+        // Pre-lock check should return Ok(None) for "tables exist, meta missing"
+        // so the caller falls through to lock acquisition.
+        // The strict check (used under lock) should error on this state.
+
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path().join("test-db");
+
+        // Create the shape of a mid-init database: chunks.lance exists, no meta yet
+        fs::create_dir_all(&db_path).unwrap();
+        fs::create_dir_all(db_path.join("chunks.lance")).unwrap();
+
+        // Pre-lock check should return Ok(None) (tolerant of transient state)
+        let pre_lock_result = check_existing_database_pre_lock(&db_path);
+        assert!(
+            pre_lock_result.is_ok(),
+            "pre-lock check should not error: {:?}",
+            pre_lock_result.err()
+        );
+        assert!(
+            pre_lock_result.unwrap().is_none(),
+            "pre-lock check should return None for mid-init state"
+        );
+
+        // Strict check should error (partial state is corruption under lock)
+        let strict_result = check_existing_database(&db_path);
+        assert!(
+            strict_result.is_err(),
+            "strict check should error on partial state"
+        );
+        assert_eq!(
+            strict_result.unwrap_err().to_string(),
+            err_partial_state(&db_path)
+        );
     }
 }
