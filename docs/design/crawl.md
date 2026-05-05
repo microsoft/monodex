@@ -36,10 +36,10 @@ For working-directory mode, the package index is built by walking the filesystem
 
 For each `package.json`, the `"name"` field is parsed out and stored under the directory's repo-relative path as the key. Repo-root `package.json` is keyed by the empty string `""`.
 
-Lookup happens later, during file processing: given a file at `libraries/foo/src/Bar.ts`, the index is queried for ancestor directories in this order:
+Lookup happens later, during file processing: given a file at `libraries/lib1/src/Example.ts`, the index is queried for ancestor directories in this order:
 
-1. `libraries/foo/src`
-2. `libraries/foo`
+1. `libraries/lib1/src`
+2. `libraries/lib1`
 3. `libraries`
 4. `""`
 

@@ -34,7 +34,7 @@ Composite forms (`label:path`, `kind=payload`, `@catalog:label`, `@catalog:label
 Examples:
 
 - Valid: `my-repo`, `frontend`, `backend-api`
-- Invalid: `My-Repo` (uppercase), `foo--bar` (consecutive `-`), `foo-` (trailing separator)
+- Invalid: `My-Repo` (uppercase), `left--right` (consecutive `-`), `trailing-` (trailing separator)
 
 ## Label syntax (Git-like)
 
@@ -50,7 +50,7 @@ Examples:
 Examples:
 
 - Valid: `main`, `feature/x`, `release/v1.2.3`, `working-dir`, `branch=main`, `repo/sub/feature`
-- Invalid: `feature_login` (underscore), `FOO` (uppercase), `foo//bar` (consecutive separators)
+- Invalid: `feature_login` (underscore), `EXAMPLE` (uppercase), `first//second` (consecutive separators)
 
 ## Forbidden characters
 
@@ -116,9 +116,9 @@ The encode/decode helpers live in `src/engine/breadcrumb.rs`.
 | Stored path                                   | In a breadcrumb                                          | In a global reference                                         |
 | --------------------------------------------- | -------------------------------------------------------- | ------------------------------------------------------------- |
 | `libraries/node-core-library/src/JsonFile.ts` | `@rushstack/node-core-library:JsonFile.ts:JsonFile.load` | `@rushstack:main:libraries/node-core-library/src/JsonFile.ts` |
-| `src/index.ts`                                | `node-core-library:index.ts:foo`                         | `@my-repo:main:src/index.ts`                                  |
-| `src/weird:file.ts`                           | `node-core-library:weird%3Afile.ts:foo`                  | `@my-repo:main:src/weird%3Afile.ts`                           |
-| `50%off/notes.md`                             | `node-core-library:50%25off/notes.md:foo`                | `@my-repo:main:50%25off/notes.md`                             |
+| `src/index.ts`                                | `node-core-library:index.ts:example`                    | `@my-repo:main:src/index.ts`                                  |
+| `src/weird:file.ts`                           | `node-core-library:weird%3Afile.ts:example`             | `@my-repo:main:src/weird%3Afile.ts`                           |
+| `50%off/notes.md`                             | `node-core-library:50%25off/notes.md:example`           | `@my-repo:main:50%25off/notes.md`                             |
 
 ## Breadcrumbs
 

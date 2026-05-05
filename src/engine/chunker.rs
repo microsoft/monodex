@@ -401,9 +401,17 @@ export class JsonFile {
     }
 }
 "#;
-        // Simulate a file moving from libraries/foo to libraries/bar
-        let ctx1 = test_context("abc123", "libraries/foo/src/JsonFile.ts", "@scope/foo");
-        let ctx2 = test_context("abc123", "libraries/bar/src/JsonFile.ts", "@scope/bar");
+        // Simulate a file moving from libraries/package1 to libraries/package2
+        let ctx1 = test_context(
+            "abc123",
+            "libraries/package1/src/JsonFile.ts",
+            "@scope/package1",
+        );
+        let ctx2 = test_context(
+            "abc123",
+            "libraries/package2/src/JsonFile.ts",
+            "@scope/package2",
+        );
 
         let chunks1 =
             chunk_content(content, &ctx1, 6000, default_strategy(&ctx1.relative_path)).unwrap();
@@ -421,13 +429,13 @@ export class JsonFile {
 
         // Breadcrumbs should reflect the different package context (percent-encoded @scope)
         assert!(
-            chunks1[0].breadcrumb.starts_with("%40scope/foo"),
-            "Breadcrumb should start with %40scope/foo, got: {}",
+            chunks1[0].breadcrumb.starts_with("%40scope/package1"),
+            "Breadcrumb should start with %40scope/package1, got: {}",
             chunks1[0].breadcrumb
         );
         assert!(
-            chunks2[0].breadcrumb.starts_with("%40scope/bar"),
-            "Breadcrumb should start with %40scope/bar, got: {}",
+            chunks2[0].breadcrumb.starts_with("%40scope/package2"),
+            "Breadcrumb should start with %40scope/package2, got: {}",
             chunks2[0].breadcrumb
         );
     }
