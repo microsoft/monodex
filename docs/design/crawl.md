@@ -6,9 +6,9 @@ The relevant source files are `src/app/commands/crawl.rs` (top-level command han
 
 ## Step 1: Label upsert
 
-Resolve `--commit` to a full 40-character SHA using `gix` (or, for `--working-dir`, set `commit_oid = ""` and `source_kind = "working-directory"`). Upsert the label metadata row with `crawl_complete = false`.
+Resolve `--commit` to a full 40-character SHA using `gix` (or, for `--working-dir`, generate a per-crawl-unique sentinel string and set `source_kind = "working-directory"`). Read the previous retrieval selection from the existing `label_metadata` row, if any, and compute the new selection from `--retrieval` (or "all methods" if absent). For each method in the new selection, set its source column to the resolved commit (or working-dir sentinel) and its completion flag to false. For each method previously in the selection but not in the new selection, set its source column to NULL.
 
-Marking the label in-progress before any chunk work begins is what lets a later interrupted-crawl recovery distinguish "this label was being written and the writer didn't finish" from "this label is intentionally in this state."
+Marking each in-selection method's completion flag false before any chunk work begins is what lets a later interrupted-crawl recovery distinguish "this method's phase was being written and the writer didn't finish" from "this method is intentionally in this state." The retrieval-selection update happens in the same upsert so that an interrupted crawl leaves the user-visible scope change visible: typing `--retrieval fts` drops vector from the selection at upsert time, even if the FTS phase then fails.
 
 Concurrent writers against the same catalog (two `monodex crawl` invocations, or a `monodex crawl` running while a `monodex purge --catalog` of that catalog runs) are serialized by the writer-lock layer; concurrent writers against different catalogs run in parallel. Concurrent reads (`search`, `view`) during a crawl are lock-free and observe committed per-storage state. The full lock taxonomy and reader semantics are in [concurrency.md](./concurrency.md). The database location must be on a local filesystem; network filesystems and synced cloud folders are not supported.
 
@@ -73,7 +73,7 @@ The "only after success" rule matters because the touched set is only complete o
 
 ## Step 6: Crawl finalization
 
-Update the label metadata row: set `crawl_complete = true`, store the resolved commit OID (or `""` for working-dir), update the timestamp.
+For each in-selection method whose phase completed successfully, mark its completion flag true. Update the label metadata row's timestamp.
 
 This is the closing handshake. Once finalized, search and view operations against the label see a consistent view of its content.
 
@@ -89,11 +89,13 @@ Use cases:
 
 The identity model differs from commit mode in two fields, but `file_id` matches:
 
-| Property      | Commit-based         | Working directory                    |
-| ------------- | -------------------- | ------------------------------------ |
-| `blob_id`     | Git blob SHA-1       | Git blob SHA-1 (computed on the fly) |
-| `commit_oid`  | Resolved 40-char SHA | `""` (empty)                         |
-| `source_kind` | `"git-commit"`       | `"working-directory"`                |
+| Property                            | Commit-based         | Working directory                                |
+| ----------------------------------- | -------------------- | ------------------------------------------------ |
+| `blob_id`                           | Git blob SHA-1       | Git blob SHA-1 (computed on the fly)             |
+| Per-method source on `label_metadata` | Resolved 40-char SHA | Per-crawl-unique sentinel string                 |
+| `source_kind`                       | `"git-commit"`       | `"working-directory"`                            |
+
+Two working-directory crawls of the same label always have unequal per-method source sentinels, even if the working tree is unchanged between them. The conservative-unequal answer is right: detecting working-tree equality cheaply is not feasible, and treating two working-dir crawls as comparing equal would let inconsistent state look consistent.
 
 Because `blob_id` matches between modes, a file that's been committed without modification produces the same `file_id` whether crawled from `HEAD` or from the working tree. This is what enables an agent to maintain both a commit-based label and a working-dir label cheaply: only the actually-different files re-embed.
 
@@ -106,7 +108,7 @@ Crawls can be interrupted (Ctrl+C, OOM, network blip during ONNX runtime downloa
 What survives an interrupted crawl:
 
 - Chunks already written to the database stay written. Their `active_label_ids` correctly include the current label. The work isn't lost.
-- The label metadata row exists with `crawl_complete = false`. This is the signal that the label is in an unfinished state.
+- The label metadata row exists with at least one in-selection method's completion flag false. This is the signal that the label is in an unfinished state for that method.
 - The sentinel rows for fully-processed files have `file_complete = true`, so a resumed crawl skips them via the fast path.
 
 What does _not_ happen:

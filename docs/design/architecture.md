@@ -16,7 +16,7 @@ The database is a directory containing two LanceDB tables. The on-disk layout (t
 The two tables:
 
 - `chunks`: one row per indexed chunk. Carries the chunk text, embedding vector, identity fields, path/package context, and label membership. Schema in `src/engine/schema.rs`; the typed Rust row struct (`ChunkRow`) in `src/engine/storage/rows.rs`.
-- `label_metadata`: one row per label. Carries the catalog, the bare label name, the qualified `label_id`, the resolved commit OID (or empty for working-directory labels), the source kind, and a `crawl_complete` flag.
+- `label_metadata`: one row per label. Carries the catalog, the bare label name, the qualified `label_id`, the source kind, and per-retrieval-method state: a nullable source column (commit OID, working-directory sentinel, or NULL when the method is out of the label's retrieval selection) and a completion boolean per method. The set of in-selection methods for a label is derived from which method-source columns are non-NULL.
 
 The chunk row carries enough path/package/breadcrumb context to be displayed without a working tree or Git checkout. Search results stand alone.
 
@@ -47,12 +47,12 @@ Chunk 1 of each file is the sentinel: the row with `chunk_ordinal = 1` is also t
 
 A crawl run, end to end:
 
-1. **Label upsert**: Resolve `--commit` to a full SHA (or note that this is a `--working-dir` run); upsert label metadata with `crawl_complete = false`.
+1. **Label upsert**: Resolve `--commit` to a full SHA (or note that this is a `--working-dir` run); update the label's retrieval selection from `--retrieval` (set per-method `source` columns to the resolved commit, NULL out methods being dropped) and mark each in-selection method's `complete` flag false.
 2. **Tree visitor**: Enumerate files from the commit tree or walk the working directory.
 3. **Package indexing**: Build the package index, a map from directory paths to package names, by reading every `package.json` in the tree.
 4. **File processing**: For each file: compute `file_id`, check the sentinel, and either skip-with-label-add or read-chunk-embed-upsert.
 5. **Label reassignment**: After all files succeed, scan chunks tagged with this label, drop the label from any whose `file_id` wasn't touched, and delete chunks whose `active_label_ids` becomes empty.
-6. **Crawl finalization**: Mark `crawl_complete = true`.
+6. **Crawl finalization**: For each method whose phase completed successfully, mark its `complete` flag true.
 
 Step 5 only runs after a fully successful crawl. An interrupted crawl leaves stale chunks in the label, which the next successful crawl cleans up. See [crawl.md](./crawl.md) for the working-directory identity model and the package-index implementation. The named steps above are the same vocabulary `crawl.md` uses for its detail sections.
 
@@ -154,7 +154,7 @@ TypeScript/TSX AST-based chunking. See [chunker.md](./chunker.md) for the algori
 LanceDB storage layer. Typed operations on the two tables.
 
 - `database.rs`: Open a database directory, validate `monodex-meta.json` schema version, expose table handles. Single source of database-open errors.
-- `labels.rs`: Read, upsert, and delete `label_metadata` rows. Handles the `crawl_complete` lifecycle.
+- `labels.rs`: Read, upsert, and delete `label_metadata` rows. Handles the per-method retrieval-selection and completion lifecycle.
 - `rows.rs`: Plain-Rust `ChunkRow` and `LabelMetadataRow` types with conversion to/from Arrow `RecordBatch`. The rest of the engine deals only in these row types, never in raw Arrow.
 
 ### src/engine/storage/chunks/
