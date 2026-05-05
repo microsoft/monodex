@@ -37,7 +37,7 @@ The three primitives compose. A typical writer holds shared(database) + exclusiv
 | `crawl --catalog X` | shared | exclusive(X) | acquired around each LanceDB write |
 | `purge --catalog X` | shared | exclusive(X) | acquired around each LanceDB write |
 | `purge --all` | exclusive | none | acquired around each LanceDB write |
-| `init-db` | exclusive | none | acquired around each LanceDB write |
+| `init-db` | exclusive | none | not used (see "Storage-layer integration") |
 | `search`, `view`, `audit-chunks`, `dump-chunks` | none | none | none |
 | `use` | none | none | none |
 
@@ -56,6 +56,8 @@ All contended lock acquisitions block until the lock is available. Contention on
 For waits that exceed three seconds, a progress message identifies the database path and elapsed time, repeating roughly once a minute thereafter. The destination of these messages is owned by the caller, not the lock helper (see "Progress reporting" below). This serves two audiences: an interactive user who started a duplicate command in another terminal sees what's happening and can Ctrl-C; a CI machine that would otherwise hang silently on a contended lock leaves a clear trace in its log.
 
 The progress mechanism uses a separate thread that polls an atomic flag and emits messages based on elapsed time. The main thread sits in the kernel-level blocking lock call. This delegates fairness to the kernel (Linux/macOS `flock`, Windows `LockFileEx`) rather than implementing application-level fairness with a spin-with-backoff loop, and avoids the starvation risk inherent to spin patterns.
+
+The commit mutex is exempt from this progress-message mechanism. Commit-mutex acquisitions are millisecond-scale: a contended acquisition that took long enough to cross the three-second threshold would indicate a different failure (a LanceDB write itself has hung), which a "waiting on the database lock" message would misdescribe. The two database/catalog locks are the locks where contention is a legitimate workflow pattern worth surfacing; the commit mutex is not.
 
 Lock-holder identification is not displayed. The OS-level file-lock APIs do not expose the holding process directly. The non-racy alternative (write the PID into the lockfile contents while holding the exclusive lock; readers, that is other contenders, read it without the lock at progress-message time) is implementable but rejected: the motivating scenario is "I forgot I started monodex in another terminal," for which `ps -ef | grep monodex` is the natural debugging path and would point at the same process. The marginal value of in-message PID display does not justify the extra write+fsync per acquisition or the lockfile gaining content (currently empty by design). The database path alone is the disambiguating context that matters for both interactive and CI debugging.
 
@@ -79,6 +81,8 @@ A reader querying FTS state during a concurrent `purge --catalog X` may encounte
 ## Storage-layer integration
 
 LanceDB writes are wrapped in commit-mutex acquisition inside the storage methods themselves. A caller invoking `chunk_storage.upsert_chunks(...)` does not need to know about the commit mutex; the method acquires it, performs the LanceDB call, releases. The discipline is uniform: every LanceDB write goes through the commit mutex, including writes from `purge --all`. The latter holds the database-exclusive lock and could not in principle conflict with anyone, but the storage methods don't know that, and keeping the rule "every LanceDB write takes the commit mutex" without exceptions is simpler than tracking whether each call site is already protected by an outer lock.
+
+The rule is scoped to the storage layer. `init-db`'s `create_empty_table` calls do not go through `ChunkStorage` or `LabelStorage` (they call directly into `lancedb::Connection`, since the storage types do not yet exist for an uninitialized database) and therefore do not participate in the commit-mutex discipline. This is consistent rather than exceptional: the database-exclusive lock that `init-db` holds is the only thing that could conceivably contend with anyone, and no other writer can acquire it while `init-db` runs.
 
 The methods covered by this rule include every LanceDB-mutating storage operation: `merge_insert` for upserts, `delete` for tombstoning, `update` for in-place column changes, plus the higher-level methods built on these (label-add, label-removal, file-complete sentinel updates, per-catalog truncate). The commit mutex is not recursive. POSIX `flock` and Windows `LockFileEx` both produce undefined behavior or deadlock on recursive acquisition. Storage methods that compose other storage methods must acquire the mutex only at the outermost level; the inner methods detect that the mutex is already held by being structured as private helpers that don't acquire on their own. Concretely, the mutex is acquired inside the public-facing storage methods (the ones called from command handlers and the crawl pipeline), not inside the internal helpers they call.
 

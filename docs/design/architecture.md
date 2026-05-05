@@ -27,13 +27,15 @@ Designed scale: around 200K files and 600K chunks per catalog. Full crawls take 
 ### Chunk identity
 
 ```
-file_id  = hash(embedder_id + chunker_id + blob_id + relative_path)
+file_id  = hash(embedder_id + chunker_id + catalog + blob_id + relative_path)
 row_id = "{file_id}:{chunk_ordinal}"
 ```
 
 The `file_id` is a 16-char hex string identifying a semantic version of a file. The `row_id` is the row's primary key. `chunk_ordinal` is 1-indexed.
 
 The fact that `relative_path` is part of `file_id` matters: identical content at different paths produces different `file_id` values. Path renames create new chunks. This is intentional. Breadcrumb context is part of what gets indexed, so different paths mean different indexed artifacts.
+
+The fact that `catalog` is part of `file_id` matters too: identical content at the same path in two different catalogs produces distinct `file_id` values, and therefore distinct rows. Catalogs are sovereign units; cross-catalog content sharing is not a feature, and the writer-lock layer relies on this isolation to permit parallel writers against different catalogs.
 
 The `embedder_id` and `chunker_id` constants live in `src/engine/util.rs`. Bumping either invalidates reuse. Change them when chunking or embedding behavior changes in a way that should force re-indexing.
 
@@ -126,7 +128,7 @@ Reusable indexing engine. Does not depend on `src/app/`.
 - `parallel_embedder.rs`: Pool of ONNX sessions for parallel embedding generation. Each session uses limited intra-op threads; pool size and threads are auto-tuned from RAM and core count via `system_info`.
 - `schema.rs`: Arrow schema definitions for the `chunks` and `label_metadata` LanceDB tables. Holds `MONODEX_SCHEMA_VERSION`, which must be bumped on any change to column shape; see [monodex_files.md](./monodex_files.md) for the rationale.
 - `system_info.rs`: Detect total RAM, cgroup limits, CPU cores. Implements the `"auto"` heuristic for embedding-model `modelInstances` and `threadsPerInstance`. Cgroup-aware so containerized installs warn correctly.
-- `util.rs`: Hash utilities: `compute_file_id` (xxhash of embedder/chunker/blob/path), `compute_row_id`, `compute_hash`. Holds the `EMBEDDER_ID` and `CHUNKER_ID` constants.
+- `util.rs`: Hash utilities: `compute_file_id` (xxhash of embedder/chunker/catalog/blob/path), `compute_row_id`, `compute_hash`. Holds the `EMBEDDER_ID` and `CHUNKER_ID` constants.
 
 ### src/engine/git_ops/
 

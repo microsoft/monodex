@@ -49,7 +49,7 @@ The first match wins, reproducing the "nearest ancestor `package.json` governs t
 
 For each enumerated file, the work splits into a sentinel-check fast path and a chunk-embed-upsert slow path.
 
-**Sentinel-check fast path:** Compute `file_id` from `(embedder_id, chunker_id, blob_id, relative_path)`. Look up the `row_id` of the sentinel chunk (`{file_id}:1`). If the row exists and has `file_complete = true`, the file has already been indexed under some previous label; add the current `label_id` to its `active_label_ids` (and to every other chunk row sharing this `file_id`). No content read, no chunking, no embedding.
+**Sentinel-check fast path:** Compute `file_id` from `(embedder_id, chunker_id, catalog, blob_id, relative_path)`. Look up the `row_id` of the sentinel chunk (`{file_id}:1`). If the row exists and has `file_complete = true`, the file has already been indexed under some previous label; add the current `label_id` to its `active_label_ids` (and to every other chunk row sharing this `file_id`). No content read, no chunking, no embedding.
 
 **Slow path:** Read the blob bytes (commit mode: from Git, via the cat-file batch process; working-dir mode: from the filesystem). Resolve the package name via the package index. Compute the breadcrumb prefix. Dispatch to the chunker via `src/engine/chunker.rs` (see [chunker.md](./chunker.md) for the algorithm) to produce chunks. Embed each chunk via the parallel ONNX embedder pool (see `src/engine/parallel_embedder.rs`). Upsert each resulting `ChunkRow` to the `chunks` table, with `active_label_ids` containing the current `label_id`. The sentinel chunk (ordinal 1) gets `file_complete = true` once all chunks for the file have been written.
 
