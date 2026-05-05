@@ -179,10 +179,7 @@ pub fn acquire_catalog_lock(
         .join("per-catalog")
         .join(format!("{}.lock", catalog));
     run_with_watchdog(progress, db_path, || {
-        // Ensure per-catalog directory exists
-        if let Some(parent) = lockfile_path.parent() {
-            fs::create_dir_all(parent)?;
-        }
+        ensure_lock_dir(&lockfile_path)?;
         let file = OpenOptions::new()
             .create(true)
             .truncate(false)
@@ -248,7 +245,7 @@ fn run_with_watchdog<T>(
                     ProgressAction::Emit { elapsed: e } => {
                         let secs = e.as_secs();
                         progress(&format!(
-                            "Waiting for database lock on {} ({}s elapsed)...",
+                            "Waiting for lock on {} ({}s elapsed)...",
                             db_path_display, secs
                         ));
                         last_emit = Some(e);
@@ -341,6 +338,20 @@ mod tests {
         drop(guard);
         // Second acquisition should succeed
         let _guard2 = acquire_database_shared(tempdir.path(), &progress).unwrap();
+    }
+
+    #[test]
+    fn test_acquire_database_shared_allows_concurrent_shared() {
+        // Two shared holders can coexist - this is what distinguishes
+        // DatabaseLockShared from an exclusive lock.
+        let tempdir = TempDir::new().unwrap();
+        let progress = |_msg: &str| {};
+        let guard1 = acquire_database_shared(tempdir.path(), &progress).unwrap();
+        // While guard1 is still held, acquire a second shared lock
+        let guard2 = acquire_database_shared(tempdir.path(), &progress).unwrap();
+        // Both should succeed
+        drop(guard1);
+        drop(guard2);
     }
 
     #[test]
