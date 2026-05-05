@@ -25,7 +25,7 @@ use arrow_schema::{DataType, Field, Schema, SchemaRef};
 use std::sync::Arc;
 
 /// Current schema version. Increment on breaking schema changes.
-pub const MONODEX_SCHEMA_VERSION: u32 = 2;
+pub const MONODEX_SCHEMA_VERSION: u32 = 3;
 
 /// Vector dimension for the embedding model (jina-embeddings-v2-base-code).
 pub const VECTOR_DIMENSION: usize = 768;
@@ -184,7 +184,7 @@ mod tests {
     fn test_schema_version_constant() {
         // This test documents the current schema version. It will need updating
         // when the schema evolves.
-        assert_eq!(MONODEX_SCHEMA_VERSION, 2);
+        assert_eq!(MONODEX_SCHEMA_VERSION, 3);
     }
 
     #[test]

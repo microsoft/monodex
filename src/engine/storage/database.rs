@@ -208,7 +208,7 @@ impl Database {
             .await
             .map_err(|e| anyhow!("Failed to open chunks table: {}", e))?;
 
-        Ok(ChunkStorage::new(Arc::new(table)))
+        Ok(ChunkStorage::new(Arc::new(table), self.path.clone()))
     }
 
     /// Open the label_metadata table and return a LabelStorage wrapper.
@@ -224,7 +224,7 @@ impl Database {
             .await
             .map_err(|e| anyhow!("Failed to open label_metadata table: {}", e))?;
 
-        Ok(LabelStorage::new(Arc::new(table)))
+        Ok(LabelStorage::new(Arc::new(table), self.path.clone()))
     }
 }
 

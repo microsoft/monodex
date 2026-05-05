@@ -2,8 +2,12 @@
 //! Edit here when: Modifying purge behavior, scope, or confirmation flow.
 //! Do not edit here for: Storage delete operations (see `engine/storage/chunks/mod.rs`, `engine/storage/labels.rs`).
 
+use crate::app::util::stderr_lock_progress;
 use crate::app::{Config, resolve_database_path};
-use crate::engine::storage::Database;
+use crate::engine::identifier;
+use crate::engine::storage::{
+    Database, acquire_catalog_lock, acquire_database_exclusive, acquire_database_shared,
+};
 
 /// Run purge command (delete all chunks from a catalog, or the entire database)
 pub fn run_purge(
@@ -12,46 +16,71 @@ pub fn run_purge(
     all: bool,
     _debug: bool,
 ) -> anyhow::Result<()> {
-    // Open database (handshake validates monodex-meta.json)
+    // Resolve database path early (before any lock acquisition)
     let db_path = resolve_database_path(Some(config))?;
-    let rt = tokio::runtime::Runtime::new()?;
-    rt.block_on(run_purge_async(&db_path, catalog, all))
-}
 
-async fn run_purge_async(
-    db_path: &std::path::Path,
-    catalog: Option<&str>,
-    all: bool,
-) -> anyhow::Result<()> {
-    let db = Database::open(db_path).await?;
-    let chunk_storage = db.chunks_storage().await?;
-    let label_storage = db.label_storage().await?;
-
-    if all {
-        println!("🗑️  Purging entire database");
-
-        // Truncate both tables (keeps monodex-meta.json and dataset structure)
-        chunk_storage.truncate().await?;
-        label_storage.truncate().await?;
-
-        println!("✅ Database purged successfully");
-    } else if let Some(catalog_name) = catalog {
-        println!("🗑️  Purging catalog: {}", catalog_name);
-
-        // Delete chunks and label metadata for this catalog
-        let chunks_deleted = chunk_storage.delete_by_catalog(catalog_name).await?;
-        let labels_deleted = label_storage.delete_by_catalog(catalog_name).await?;
-
-        println!(
-            "✅ Catalog purged successfully ({} chunks, {} labels deleted)",
-            chunks_deleted, labels_deleted
-        );
-    } else {
+    // Move error check to synchronous entry point (before lock acquisition)
+    // No lock should be taken when arguments are invalid
+    if !all && catalog.is_none() {
         return Err(anyhow::anyhow!(
             "Must specify either --catalog <name> or --all"
         ));
     }
 
+    // Branch based on purge type for lock acquisition
+    if all {
+        // purge --all: acquire DatabaseLockExclusive
+        let _guard = acquire_database_exclusive(&db_path, &stderr_lock_progress)?;
+        let rt = tokio::runtime::Runtime::new()?;
+        rt.block_on(run_purge_all_async(&db_path))
+    } else if let Some(catalog_name) = catalog {
+        // purge --catalog X: validate catalog name, then acquire shared + catalog lock
+        identifier::validate_catalog(catalog_name)?;
+
+        let _db_guard = acquire_database_shared(&db_path, &stderr_lock_progress)?;
+        let _catalog_guard = acquire_catalog_lock(&db_path, catalog_name, &stderr_lock_progress)?;
+
+        let rt = tokio::runtime::Runtime::new()?;
+        rt.block_on(run_purge_catalog_async(&db_path, catalog_name))
+    } else {
+        // Already handled above, but for exhaustiveness
+        unreachable!("Either --all or --catalog must be specified")
+    }
+}
+
+async fn run_purge_all_async(db_path: &std::path::Path) -> anyhow::Result<()> {
+    let db = Database::open(db_path).await?;
+    let chunk_storage = db.chunks_storage().await?;
+    let label_storage = db.label_storage().await?;
+
+    println!("🗑️  Purging entire database");
+
+    // Truncate both tables (keeps monodex-meta.json and dataset structure)
+    chunk_storage.truncate().await?;
+    label_storage.truncate().await?;
+
+    println!("✅ Database purged successfully");
+    Ok(())
+}
+
+async fn run_purge_catalog_async(
+    db_path: &std::path::Path,
+    catalog_name: &str,
+) -> anyhow::Result<()> {
+    let db = Database::open(db_path).await?;
+    let chunk_storage = db.chunks_storage().await?;
+    let label_storage = db.label_storage().await?;
+
+    println!("🗑️  Purging catalog: {}", catalog_name);
+
+    // Delete chunks and label metadata for this catalog
+    let chunks_deleted = chunk_storage.delete_by_catalog(catalog_name).await?;
+    let labels_deleted = label_storage.delete_by_catalog(catalog_name).await?;
+
+    println!(
+        "✅ Catalog purged successfully ({} chunks, {} labels deleted)",
+        chunks_deleted, labels_deleted
+    );
     Ok(())
 }
 

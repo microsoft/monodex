@@ -9,9 +9,11 @@ use arrow_array::{
 use arrow_schema::SchemaRef;
 use futures::TryStreamExt;
 use lancedb::query::{ExecutableQuery, QueryBase};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::engine::storage::LabelMetadataRow;
+use crate::engine::storage::locks::acquire_commit_mutex;
 use crate::engine::storage::predicate::eq_str;
 
 /// Convert an iterator of LabelMetadataRows to a RecordBatch.
@@ -126,16 +128,19 @@ fn parse_label_metadata_row(batch: &RecordBatch, row_idx: usize) -> Result<Label
 /// Label metadata storage operations for LanceDB.
 pub struct LabelStorage {
     table: Arc<lancedb::table::Table>,
+    db_path: PathBuf,
 }
 
 impl LabelStorage {
     /// Create a new LabelStorage wrapping a table reference.
-    pub fn new(table: Arc<lancedb::table::Table>) -> Self {
-        Self { table }
+    pub fn new(table: Arc<lancedb::table::Table>, db_path: PathBuf) -> Self {
+        Self { table, db_path }
     }
 
     /// Upsert a single label metadata row by label_id.
     pub async fn upsert(&self, row: &LabelMetadataRow) -> Result<()> {
+        let _commit_guard = acquire_commit_mutex(&self.db_path)?;
+
         // Validate row before writing
         row.validate()?;
 
@@ -213,6 +218,8 @@ impl LabelStorage {
 
     /// Delete a single label metadata row by label_id.
     pub async fn delete_by_label_id(&self, label_id: &str) -> Result<()> {
+        let _commit_guard = acquire_commit_mutex(&self.db_path)?;
+
         let predicate = eq_str("label_id", label_id);
 
         self.table
@@ -225,30 +232,29 @@ impl LabelStorage {
 
     /// Delete all label metadata rows for a given catalog, returning the count deleted.
     pub async fn delete_by_catalog(&self, catalog: &str) -> Result<u64> {
+        let _commit_guard = acquire_commit_mutex(&self.db_path)?;
+
         let predicate = eq_str("catalog", catalog);
 
-        let count_before = self
+        // Use predicate-scoped count to avoid race with cross-catalog writes
+        let count = self
             .table
-            .count_rows(None)
+            .count_rows(Some(predicate.clone()))
             .await
-            .map_err(|e| anyhow!("Failed to count rows before delete: {}", e))?;
+            .map_err(|e| anyhow!("Failed to count rows for catalog: {}", e))?;
 
         self.table
             .delete(&predicate)
             .await
             .map_err(|e| anyhow!("Failed to delete label metadata by catalog: {}", e))?;
 
-        let count_after = self
-            .table
-            .count_rows(None)
-            .await
-            .map_err(|e| anyhow!("Failed to count rows after delete: {}", e))?;
-
-        Ok(count_before.saturating_sub(count_after) as u64)
+        Ok(count as u64)
     }
 
     /// Truncate the table (empty all rows, preserve schema).
     pub async fn truncate(&self) -> Result<()> {
+        let _commit_guard = acquire_commit_mutex(&self.db_path)?;
+
         self.table
             .delete("true")
             .await
@@ -287,7 +293,8 @@ mod tests {
             .await
             .expect("Failed to create table");
 
-        (tmp_dir, LabelStorage::new(Arc::new(table)))
+        // Pass db_path for commit mutex acquisition in write methods
+        (tmp_dir, LabelStorage::new(Arc::new(table), db_path))
     }
 
     fn test_label_metadata_row(label: &str) -> LabelMetadataRow {

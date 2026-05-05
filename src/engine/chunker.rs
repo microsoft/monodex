@@ -121,7 +121,13 @@ pub fn chunk_content(
     strategy: ChunkingStrategy,
 ) -> Result<Vec<Chunk>> {
     // Compute file ID from the new identity components
-    let file_id = compute_file_id(EMBEDDER_ID, CHUNKER_ID, &ctx.blob_id, &ctx.relative_path);
+    let file_id = compute_file_id(
+        EMBEDDER_ID,
+        CHUNKER_ID,
+        &ctx.catalog,
+        &ctx.blob_id,
+        &ctx.relative_path,
+    );
 
     match strategy {
         ChunkingStrategy::TypeScript => Ok(chunk_with_partitioner(

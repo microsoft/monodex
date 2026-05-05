@@ -18,9 +18,11 @@ use futures::TryStreamExt;
 use lancedb::DistanceType;
 use lancedb::query::{ExecutableQuery, QueryBase};
 use std::collections::HashSet;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::engine::schema::VECTOR_DIMENSION;
+use crate::engine::storage::locks::acquire_commit_mutex;
 use crate::engine::storage::predicate::{array_contains_str, eq_str, in_quoted_strs};
 use crate::engine::storage::{ChunkRow, ScoredChunkRow};
 
@@ -466,12 +468,13 @@ fn extract_distance(batch: &RecordBatch, row_idx: usize) -> Result<f32> {
 /// Chunk storage operations for LanceDB.
 pub struct ChunkStorage {
     table: Arc<lancedb::table::Table>,
+    db_path: PathBuf,
 }
 
 impl ChunkStorage {
     /// Create a new ChunkStorage wrapping a table reference.
-    pub fn new(table: Arc<lancedb::table::Table>) -> Self {
-        Self { table }
+    pub fn new(table: Arc<lancedb::table::Table>, db_path: PathBuf) -> Self {
+        Self { table, db_path }
     }
     /// Upsert a batch of chunk rows with their embedding vectors by row_id.
     ///
@@ -484,6 +487,8 @@ impl ChunkStorage {
     ///
     /// Batching is handled internally; callers may pass any number of rows.
     pub async fn upsert_with_vectors(&self, rows: &[ChunkRow], vectors: &[Vec<f32>]) -> Result<()> {
+        let _commit_guard = acquire_commit_mutex(&self.db_path)?;
+
         if rows.is_empty() {
             return Ok(());
         }
@@ -718,6 +723,12 @@ impl ChunkStorage {
     ///
     /// Uses LanceDB's update() with SQL expression for in-place modification.
     pub async fn update_active_labels(&self, row_id: &str, new_labels: &[String]) -> Result<()> {
+        let _commit_guard = acquire_commit_mutex(&self.db_path)?;
+        self.update_active_labels_inner(row_id, new_labels).await
+    }
+
+    /// Internal helper for update_active_labels (no mutex acquisition).
+    async fn update_active_labels_inner(&self, row_id: &str, new_labels: &[String]) -> Result<()> {
         // Reject empty label list - a chunk must belong to at least one label.
         // Callers should use delete_by_row_ids to remove chunks, not clear their labels.
         if new_labels.is_empty() {
@@ -747,6 +758,8 @@ impl ChunkStorage {
     ///
     /// Uses LanceDB's update() with SQL boolean literal (true/false).
     pub async fn update_file_complete(&self, row_id: &str, complete: bool) -> Result<()> {
+        let _commit_guard = acquire_commit_mutex(&self.db_path)?;
+
         let predicate = eq_str("row_id", row_id);
         let value = if complete { "true" } else { "false" };
 
@@ -763,6 +776,12 @@ impl ChunkStorage {
 
     /// Batch-delete chunks by a list of row_ids.
     pub async fn delete_by_row_ids(&self, row_ids: &[String]) -> Result<()> {
+        let _commit_guard = acquire_commit_mutex(&self.db_path)?;
+        self.delete_by_row_ids_inner(row_ids).await
+    }
+
+    /// Internal helper for delete_by_row_ids (no mutex acquisition).
+    async fn delete_by_row_ids_inner(&self, row_ids: &[String]) -> Result<()> {
         if row_ids.is_empty() {
             return Ok(());
         }
@@ -780,26 +799,23 @@ impl ChunkStorage {
 
     /// Delete all chunks matching a given catalog, returning the count deleted.
     pub async fn delete_by_catalog(&self, catalog: &str) -> Result<u64> {
+        let _commit_guard = acquire_commit_mutex(&self.db_path)?;
+
         let predicate = eq_str("catalog", catalog);
 
-        let count_before = self
+        // Use predicate-scoped count to avoid race with cross-catalog writes
+        let count = self
             .table
-            .count_rows(None)
+            .count_rows(Some(predicate.clone()))
             .await
-            .map_err(|e| anyhow!("Failed to count rows before delete: {}", e))?;
+            .map_err(|e| anyhow!("Failed to count rows for catalog: {}", e))?;
 
         self.table
             .delete(&predicate)
             .await
             .map_err(|e| anyhow!("Failed to delete chunks by catalog: {}", e))?;
 
-        let count_after = self
-            .table
-            .count_rows(None)
-            .await
-            .map_err(|e| anyhow!("Failed to count rows after delete: {}", e))?;
-
-        Ok(count_before.saturating_sub(count_after) as u64)
+        Ok(count as u64)
     }
 
     /// Remove a label from chunks where it's in active_label_ids, excluding specified files.
@@ -813,6 +829,9 @@ impl ChunkStorage {
         label_id: &str,
         exclude_file_ids: &HashSet<String>,
     ) -> Result<u64> {
+        // Acquire commit mutex once for the entire operation
+        let _commit_guard = acquire_commit_mutex(&self.db_path)?;
+
         let mut processed: u64 = 0;
 
         // Get all chunks with this label
@@ -829,12 +848,12 @@ impl ChunkStorage {
             new_labels.retain(|l| l != label_id);
 
             if new_labels.is_empty() {
-                // Delete the chunk
-                self.delete_by_row_ids(std::slice::from_ref(&chunk.row_id))
+                // Delete the chunk using inner helper (no mutex re-acquisition)
+                self.delete_by_row_ids_inner(std::slice::from_ref(&chunk.row_id))
                     .await?;
             } else {
-                // Update active_label_ids
-                self.update_active_labels(&chunk.row_id, &new_labels)
+                // Update active_label_ids using inner helper (no mutex re-acquisition)
+                self.update_active_labels_inner(&chunk.row_id, &new_labels)
                     .await?;
             }
 
@@ -846,6 +865,8 @@ impl ChunkStorage {
 
     /// Truncate the table (empty all rows, preserve schema).
     pub async fn truncate(&self) -> Result<()> {
+        let _commit_guard = acquire_commit_mutex(&self.db_path)?;
+
         self.table
             .delete("true")
             .await

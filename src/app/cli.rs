@@ -68,7 +68,7 @@ pub enum Commands {
 
     /// Purge all chunks from a catalog, or the entire database
     Purge {
-        /// Catalog name to purge (if not specified, purges the entire database)
+        /// Catalog name to purge. Use --all to purge the entire database.
         #[arg(long)]
         catalog: Option<String>,
 

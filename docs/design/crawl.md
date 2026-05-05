@@ -10,7 +10,7 @@ Resolve `--commit` to a full 40-character SHA using `gix` (or, for `--working-di
 
 Marking the label in-progress before any chunk work begins is what lets a later interrupted-crawl recovery distinguish "this label was being written and the writer didn't finish" from "this label is intentionally in this state."
 
-Concurrent crawls against the same database are not supported and will be rejected by a forthcoming process-level lock (see [backlog.md](../backlog.md)). The intended invariant is single-writer: at most one `monodex crawl` process at a time per database. Concurrent reads (search, view) during a crawl are safe: they observe a consistent snapshot from before the in-progress writes. But two simultaneous crawls against the same database directory are out of scope. The database location must also be on a local filesystem; network filesystems and synced cloud folders are not supported.
+Concurrent writers against the same catalog (two `monodex crawl` invocations, or a `monodex crawl` running while a `monodex purge --catalog` of that catalog runs) are serialized by the writer-lock layer; concurrent writers against different catalogs run in parallel. Concurrent reads (`search`, `view`) during a crawl are lock-free and observe committed per-storage state. The full lock taxonomy and reader semantics are in [concurrency.md](./concurrency.md). The database location must be on a local filesystem; network filesystems and synced cloud folders are not supported.
 
 For commit mode, the resolution step rejects ambiguous refs and unresolvable refs with a clear error rather than silently picking a default. For working-directory mode, no resolution is needed; the source_kind alone signals the contents are mutable.
 
@@ -49,7 +49,7 @@ The first match wins, reproducing the "nearest ancestor `package.json` governs t
 
 For each enumerated file, the work splits into a sentinel-check fast path and a chunk-embed-upsert slow path.
 
-**Sentinel-check fast path:** Compute `file_id` from `(embedder_id, chunker_id, blob_id, relative_path)`. Look up the `row_id` of the sentinel chunk (`{file_id}:1`). If the row exists and has `file_complete = true`, the file has already been indexed under some previous label; add the current `label_id` to its `active_label_ids` (and to every other chunk row sharing this `file_id`). No content read, no chunking, no embedding.
+**Sentinel-check fast path:** Compute `file_id` from `(embedder_id, chunker_id, catalog, blob_id, relative_path)`. Look up the `row_id` of the sentinel chunk (`{file_id}:1`). If the row exists and has `file_complete = true`, the file has already been indexed under some previous label; add the current `label_id` to its `active_label_ids` (and to every other chunk row sharing this `file_id`). No content read, no chunking, no embedding.
 
 **Slow path:** Read the blob bytes (commit mode: from Git, via the cat-file batch process; working-dir mode: from the filesystem). Resolve the package name via the package index. Compute the breadcrumb prefix. Dispatch to the chunker via `src/engine/chunker.rs` (see [chunker.md](./chunker.md) for the algorithm) to produce chunks. Embed each chunk via the parallel ONNX embedder pool (see `src/engine/parallel_embedder.rs`). Upsert each resulting `ChunkRow` to the `chunks` table, with `active_label_ids` containing the current `label_id`. The sentinel chunk (ordinal 1) gets `file_complete = true` once all chunks for the file have been written.
 

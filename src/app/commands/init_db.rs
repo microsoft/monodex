@@ -6,14 +6,17 @@
 //!   schema definitions (see engine/schema.rs), config loading (app/config.rs).
 
 use anyhow::{Result, anyhow, bail};
-use std::fs::{self, File, OpenOptions};
+use std::fs;
 use std::path::Path;
 
 use crate::app::config::{Config, resolve_database_path};
+use crate::app::util::stderr_lock_progress;
 use crate::engine::schema::{
     CHUNKS_TABLE, LABEL_METADATA_TABLE, chunks_schema, label_metadata_schema,
 };
-use crate::engine::storage::{Database, META_FILE, MetaFile, err_schema_mismatch};
+use crate::engine::storage::{
+    Database, META_FILE, MetaFile, acquire_database_exclusive, err_schema_mismatch,
+};
 use crate::paths;
 
 // ============================================================================
@@ -55,22 +58,6 @@ fn log_already_initialized(db_path: &Path, schema_version: u32) -> String {
 }
 
 // ============================================================================
-// Lock guard for init-db
-// ============================================================================
-
-/// Guard that holds the lockfile handle. Drop releases the OS-level lock.
-/// The lockfile itself is NOT removed - it is permanent database state.
-struct LockGuard {
-    file: File,
-}
-
-impl Drop for LockGuard {
-    fn drop(&mut self) {
-        let _ = fs4::fs_std::FileExt::unlock(&self.file);
-    }
-}
-
-// ============================================================================
 // Command entry point
 // ============================================================================
 
@@ -82,12 +69,6 @@ impl Drop for LockGuard {
 /// Note: Config must be loaded by the caller (main.rs) and passed in.
 /// This ensures the --config flag is respected uniformly across all commands.
 pub fn run_init_db(config: &Config) -> Result<()> {
-    let rt = tokio::runtime::Runtime::new()
-        .map_err(|e| anyhow!("Failed to create tokio runtime: {}", e))?;
-    rt.block_on(init_db_inner(config))
-}
-
-async fn init_db_inner(config: &Config) -> Result<()> {
     // Step 1: Resolve database path from config
     let db_path = resolve_database_path(Some(config))?;
 
@@ -103,30 +84,28 @@ async fn init_db_inner(config: &Config) -> Result<()> {
     if db_path == default_db_path {
         // default-db: ensure tool_home exists, then create default-db if needed
         fs::create_dir_all(&tool_home)?;
-        if !db_path.exists() {
-            fs::create_dir(&db_path)?;
-        }
+        fs::create_dir_all(&db_path)?;
     } else if !db_path.exists() {
         // Custom path: parent must exist (validated above), create only db_path
-        fs::create_dir(&db_path)?;
+        // Use create_dir_all so concurrent init-db invocations both succeed
+        fs::create_dir_all(&db_path)?;
     }
 
-    // Step 4: Acquire exclusive lock
-    // The lockfile is permanent and never removed. The OS-level lock is released on Drop.
-    let lock_path = db_path.join(".monodex.lock");
-    let lock_file = OpenOptions::new()
-        .create(true)
-        .truncate(true)
-        .read(true)
-        .write(true)
-        .open(&lock_path)?;
-    fs4::fs_std::FileExt::lock_exclusive(&lock_file)?;
+    // Step 4: Pre-lock existence check (short-circuit if already initialized)
+    // Use the tolerant check that falls through to lock acquisition for transient mid-init states
+    if let Some(meta) = check_existing_database_pre_lock(&db_path)? {
+        println!(
+            "{}",
+            log_already_initialized(&db_path, meta.monodex_schema_version)
+        );
+        return Ok(());
+    }
 
-    // Hold the lock for the duration of init. Drop releases the OS-level lock.
-    // Do NOT remove the lockfile - it is expected database state.
-    let _guard = LockGuard { file: lock_file };
+    // Step 5: Acquire exclusive database lock
+    // The lock module creates <db>/locks/ and the lockfile lazily
+    let _guard = acquire_database_exclusive(&db_path, &stderr_lock_progress)?;
 
-    // Step 5: Check if already initialized (under the lock)
+    // Step 6: Under-lock recheck (double-checked init pattern)
     if let Some(meta) = check_existing_database(&db_path)? {
         println!(
             "{}",
@@ -135,16 +114,103 @@ async fn init_db_inner(config: &Config) -> Result<()> {
         return Ok(());
     }
 
-    // Step 6: Create the database
-    create_database(&db_path).await?;
+    // Step 7: Create the database
+    // Note: create_empty_table calls do not acquire the commit mutex.
+    // The database is being initialized for the first time under DatabaseLockExclusive,
+    // with no possible concurrent writer; the commit mutex would be ceremonial.
+    let rt = tokio::runtime::Runtime::new()
+        .map_err(|e| anyhow!("Failed to create tokio runtime: {}", e))?;
+    rt.block_on(create_database(&db_path))?;
 
     println!("Created monodex database at {}", db_path.display());
     Ok(())
 }
 
-/// Check if a database already exists at the given path.
-/// Returns Some(MetaFile) if valid database exists, None if path doesn't exist.
-/// Returns error if path exists but is not a valid database.
+/// Pre-lock existence check for init-db.
+///
+/// Returns Some(MetaFile) if a fully-valid initialized database exists.
+/// Returns None if the path doesn't exist, is empty (ignoring lockfile/locks detritus),
+/// or is in a transient mid-init state (tables exist but meta missing).
+/// Returns error for terminal conditions that no concurrent writer could resolve:
+/// corrupt meta, schema mismatch, meta present but tables missing, or non-empty non-monodex directory.
+///
+/// The pre-lock check is tolerant of the "tables exist, meta missing" state because another
+/// process might be mid-init. The caller should acquire the exclusive lock and recheck with
+/// the strict `check_existing_database`.
+fn check_existing_database_pre_lock(db_path: &Path) -> Result<Option<MetaFile>> {
+    if !db_path.exists() {
+        return Ok(None);
+    }
+
+    // Check if it's a valid monodex database
+    let meta_path = db_path.join(META_FILE);
+    let chunks_path = db_path.join(format!("{}.lance", CHUNKS_TABLE));
+    let labels_path = db_path.join(format!("{}.lance", LABEL_METADATA_TABLE));
+
+    if meta_path.exists() {
+        // Try to load meta file
+        let meta = match Database::load_meta(&meta_path) {
+            Ok(m) => m,
+            Err(_) => {
+                // Corrupted meta file - terminal error
+                bail!(err_partial_state(db_path));
+            }
+        };
+
+        // Check schema version
+        if meta.monodex_schema_version != crate::engine::schema::MONODEX_SCHEMA_VERSION {
+            bail!(err_schema_mismatch(
+                meta.monodex_schema_version,
+                crate::engine::schema::MONODEX_SCHEMA_VERSION
+            ));
+        }
+
+        // Check that table directories exist
+        if !chunks_path.exists() || !labels_path.exists() {
+            bail!(err_partial_state(db_path));
+        }
+
+        Ok(Some(meta))
+    } else {
+        // Check for partial state (tables exist but no meta)
+        // Pre-lock: this might be a concurrent init in progress, so fall through to lock
+        if chunks_path.exists() || labels_path.exists() {
+            return Ok(None);
+        }
+
+        // Check if directory is empty (ignoring lockfile and locks/ detritus)
+        let is_empty = db_path
+            .read_dir()
+            .map(|mut entries| {
+                entries.all(|e| {
+                    e.ok()
+                        .map(|e| {
+                            let name = e.file_name();
+                            name == ".monodex.lock" || name == "locks"
+                        })
+                        .unwrap_or(false)
+                })
+            })
+            .unwrap_or(false);
+
+        if is_empty {
+            // Empty directory (or only lockfile/locks), treat as non-existent
+            Ok(None)
+        } else {
+            // Non-empty without meta file or tables
+            bail!(err_not_monodex_db(db_path));
+        }
+    }
+}
+
+/// Strict existence check for init-db (used under the exclusive lock).
+///
+/// Returns Some(MetaFile) if a fully-valid initialized database exists.
+/// Returns None if path doesn't exist or is an empty directory (ignoring lockfile/locks detritus).
+/// Returns error if path exists but is not a valid database, including partial state.
+///
+/// This is the strict version used after acquiring the exclusive lock. Under the lock,
+/// no other process can be mid-init, so any partial state is a real corruption.
 fn check_existing_database(db_path: &Path) -> Result<Option<MetaFile>> {
     if !db_path.exists() {
         return Ok(None);
@@ -185,20 +251,23 @@ fn check_existing_database(db_path: &Path) -> Result<Option<MetaFile>> {
             bail!(err_partial_state(db_path));
         }
 
-        // Check if directory is empty (ignoring lockfile)
+        // Check if directory is empty (ignoring lockfile and locks/ detritus)
         let is_empty = db_path
             .read_dir()
             .map(|mut entries| {
                 entries.all(|e| {
                     e.ok()
-                        .map(|e| e.file_name() == ".monodex.lock")
+                        .map(|e| {
+                            let name = e.file_name();
+                            name == ".monodex.lock" || name == "locks"
+                        })
                         .unwrap_or(false)
                 })
             })
             .unwrap_or(false);
 
         if is_empty {
-            // Empty directory (or only lockfile), treat as non-existent
+            // Empty directory (or only lockfile/locks), treat as non-existent
             Ok(None)
         } else {
             // Non-empty without meta file or tables
@@ -215,7 +284,7 @@ fn validate_parent_directory(db_path: &Path) -> Result<()> {
     let default_db_path = tool_home.join("default-db");
 
     if db_path == default_db_path {
-        // default-db: tool_home will be created by create_database
+        // default-db: tool_home will be created by run_init_db
         return Ok(());
     }
 
@@ -270,7 +339,7 @@ mod tests {
 
     /// Helper to create a config file with a custom database path.
     fn write_config_with_db_path(config_path: &Path, db_path: &str) {
-        let mut file = File::create(config_path).unwrap();
+        let mut file = std::fs::File::create(config_path).unwrap();
         writeln!(
             file,
             r#"{{
@@ -310,6 +379,12 @@ mod tests {
         assert!(
             db_path.join(META_FILE).exists(),
             "monodex-meta.json should exist"
+        );
+
+        // Verify locks directory was created
+        assert!(
+            db_path.join("locks").exists(),
+            "locks directory should exist"
         );
 
         // Cleanup env
@@ -383,7 +458,7 @@ mod tests {
         // Create a directory with a stray file (not a monodex database)
         let db_path = temp_dir.path().join("my-db");
         fs::create_dir_all(&db_path).unwrap();
-        File::create(db_path.join("stray-file.txt"))
+        std::fs::File::create(db_path.join("stray-file.txt"))
             .unwrap()
             .write_all(b"not a monodex database")
             .unwrap();
@@ -424,7 +499,7 @@ mod tests {
         // Corrupt the meta file
         let db_path = temp_dir.path().join("default-db");
         let meta_path = db_path.join(META_FILE);
-        let mut file = File::create(&meta_path).unwrap();
+        let mut file = std::fs::File::create(&meta_path).unwrap();
         file.write_all(b"this is not valid json").unwrap();
 
         // Try to run init-db again
@@ -526,5 +601,76 @@ mod tests {
         assert_eq!(err.to_string(), err_partial_state(&db_path));
 
         remove_monodex_home();
+    }
+
+    #[test]
+    #[serial(monodex_home)]
+    fn test_empty_directory_with_locks_dir_succeeds() {
+        // Test that a directory containing only locks/ is treated as empty
+        clear_tool_home_cache();
+        let temp_dir = TempDir::new().unwrap();
+
+        set_monodex_home(temp_dir.path());
+
+        // Create database directory with only locks/database.lock
+        let db_path = temp_dir.path().join("default-db");
+        fs::create_dir_all(db_path.join("locks")).unwrap();
+        std::fs::File::create(db_path.join("locks/database.lock")).unwrap();
+
+        let config_path = temp_dir.path().join("config.json");
+        write_minimal_config(&config_path);
+
+        let config = load_config(&config_path).expect("Config should load");
+        let result = run_init_db(&config);
+
+        // Should succeed - locks/ is treated as detritus
+        assert!(
+            result.is_ok(),
+            "init-db should succeed with locks/ detritus: {:?}",
+            result.err()
+        );
+
+        // Verify database was created
+        assert!(db_path.join(META_FILE).exists());
+
+        remove_monodex_home();
+    }
+
+    #[test]
+    fn test_pre_lock_check_tolerates_missing_meta_with_tables() {
+        // Regression test for concurrent init-db race:
+        // Pre-lock check should return Ok(None) for "tables exist, meta missing"
+        // so the caller falls through to lock acquisition.
+        // The strict check (used under lock) should error on this state.
+
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path().join("test-db");
+
+        // Create the shape of a mid-init database: chunks.lance exists, no meta yet
+        fs::create_dir_all(&db_path).unwrap();
+        fs::create_dir_all(db_path.join("chunks.lance")).unwrap();
+
+        // Pre-lock check should return Ok(None) (tolerant of transient state)
+        let pre_lock_result = check_existing_database_pre_lock(&db_path);
+        assert!(
+            pre_lock_result.is_ok(),
+            "pre-lock check should not error: {:?}",
+            pre_lock_result.err()
+        );
+        assert!(
+            pre_lock_result.unwrap().is_none(),
+            "pre-lock check should return None for mid-init state"
+        );
+
+        // Strict check should error (partial state is corruption under lock)
+        let strict_result = check_existing_database(&db_path);
+        assert!(
+            strict_result.is_err(),
+            "strict check should error on partial state"
+        );
+        assert_eq!(
+            strict_result.unwrap_err().to_string(),
+            err_partial_state(&db_path)
+        );
     }
 }

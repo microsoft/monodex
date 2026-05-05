@@ -356,6 +356,10 @@ monodex init-db
 
 The database is stored at `~/.monodex/default-db/` by default. You can customize this location via the `database.path` field in config.
 
+### Concurrency
+
+Multiple `monodex` invocations against the same database coordinate via OS-level file locks. Concurrent crawls against the same catalog wait for each other; concurrent crawls against different catalogs run in parallel. Read-only commands (`search`, `view`) acquire no locks and run alongside writers. See `docs/design/concurrency.md` for details.
+
 ## Development
 
 When making a pull request, add a bullet under "## Unreleased" in [CHANGELOG.md](./CHANGELOG.md) describing the change from an end-user perspective. See CHANGELOG.md for the version history and publishing instructions.
@@ -485,6 +489,7 @@ For contributors and curious users:
 - [`docs/design/label_ids.md`](./docs/design/label_ids.md): Identifier and reference syntax: catalogs, labels, breadcrumbs, path encoding, planned typed-label and cross-catalog reference grammar.
 - [`docs/design/crawl.md`](./docs/design/crawl.md): Crawl pipeline in detail: package index, working-directory identity model, label reassignment, partial-crawl semantics.
 - [`docs/design/chunker.md`](./docs/design/chunker.md): Chunking algorithms: embedding model, TypeScript AST partitioning (the "two worlds model"), markdown splitting, quality scoring, empirical findings on alternative runtimes.
+- [`docs/design/concurrency.md`](./docs/design/concurrency.md): Writer lock taxonomy, reader semantics, and how the model interacts with LanceDB's and Tantivy's own concurrency mechanisms.
 - [`docs/design/monodex_files.md`](./docs/design/monodex_files.md): Inventory of files Monodex reads or writes: tool-home state, database directory, repo-local config, shipped artifacts.
 - [`docs/code_organization_policy.md`](./docs/code_organization_policy.md): File size targets, where new code goes, banned patterns. Required reading for contributors.
 - [`docs/backlog.md`](./docs/backlog.md): Maintainer scratch pad for what might come next.

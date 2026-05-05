@@ -6,8 +6,8 @@
 //!
 //! This module holds constants whose values have downstream invalidation consequences:
 //!
-//! - `EMBEDDER_ID` / `CHUNKER_ID`: Participate in `row_id` computation. Changing these
-//!   invalidates chunk identity and forces re-vectorizing all content.
+//! - `EMBEDDER_ID` / `CHUNKER_ID` / catalog name: Participate in `row_id` computation.
+//!   Changing any of these invalidates chunk identity and forces re-vectorizing all content.
 //!
 //! - Future FTS constants (`FTS_SCHEMA_ID`, `FTS_TOKENIZER_ID`): Will NOT participate
 //!   in `row_id`. Changing them invalidates only FTS state, leaving vector state untouched.
@@ -39,17 +39,24 @@ pub fn compute_hash(content: &str) -> String {
 /// # Arguments
 /// * `embedder_id` - Implementation identifier for the embedder (e.g., EMBEDDER_ID)
 /// * `chunker_id` - Implementation identifier for the chunker (e.g., CHUNKER_ID)
+/// * `catalog` - Catalog name (ensures different catalogs produce distinct file IDs)
 /// * `blob_id` - Git blob SHA (content identity)
 /// * `relative_path` - Path relative to catalog base (affects breadcrumb context)
+///
+/// # Invariant
+/// Two catalogs containing identical content at identical paths produce distinct `file_id`
+/// values, enabling per-catalog parallel writers without row contention.
 pub fn compute_file_id(
     embedder_id: &str,
     chunker_id: &str,
+    catalog: &str,
     blob_id: &str,
     relative_path: &str,
 ) -> String {
     let mut hasher = XxHash64::with_seed(0);
     embedder_id.hash(&mut hasher);
     chunker_id.hash(&mut hasher);
+    catalog.hash(&mut hasher);
     blob_id.hash(&mut hasher);
     relative_path.hash(&mut hasher);
     let hash = hasher.finish();
@@ -77,12 +84,14 @@ mod tests {
         let id1 = compute_file_id(
             EMBEDDER_ID,
             CHUNKER_ID,
+            "test-catalog",
             "abc123",
             "libraries/lib1/src/index.ts",
         );
         let id2 = compute_file_id(
             EMBEDDER_ID,
             CHUNKER_ID,
+            "test-catalog",
             "abc123",
             "libraries/lib1/src/index.ts",
         );
@@ -94,12 +103,14 @@ mod tests {
         let id1 = compute_file_id(
             EMBEDDER_ID,
             CHUNKER_ID,
+            "test-catalog",
             "abc123",
             "libraries/lib1/src/index.ts",
         );
         let id2 = compute_file_id(
             EMBEDDER_ID,
             CHUNKER_ID,
+            "test-catalog",
             "abc123",
             "libraries/lib2/src/index.ts",
         );
@@ -111,12 +122,14 @@ mod tests {
         let id1 = compute_file_id(
             EMBEDDER_ID,
             CHUNKER_ID,
+            "test-catalog",
             "abc123",
             "libraries/lib1/src/index.ts",
         );
         let id2 = compute_file_id(
             EMBEDDER_ID,
             CHUNKER_ID,
+            "test-catalog",
             "def456",
             "libraries/lib1/src/index.ts",
         );
@@ -124,8 +137,30 @@ mod tests {
     }
 
     #[test]
+    fn test_file_id_changes_with_catalog() {
+        let id1 = compute_file_id(
+            EMBEDDER_ID,
+            CHUNKER_ID,
+            "catalog-one",
+            "abc123",
+            "libraries/lib1/src/index.ts",
+        );
+        let id2 = compute_file_id(
+            EMBEDDER_ID,
+            CHUNKER_ID,
+            "catalog-two",
+            "abc123",
+            "libraries/lib1/src/index.ts",
+        );
+        assert_ne!(
+            id1, id2,
+            "Different catalogs with same content/path should produce different file IDs"
+        );
+    }
+
+    #[test]
     fn test_row_id_deterministic() {
-        let file_id = compute_file_id(EMBEDDER_ID, CHUNKER_ID, "abc123", "test.ts");
+        let file_id = compute_file_id(EMBEDDER_ID, CHUNKER_ID, "test-catalog", "abc123", "test.ts");
         let row_id_1 = compute_row_id(&file_id, 1);
         let row_id_2 = compute_row_id(&file_id, 2);
 
