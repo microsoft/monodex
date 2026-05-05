@@ -124,73 +124,68 @@ pub fn chunk_content(
     let file_id = compute_file_id(EMBEDDER_ID, CHUNKER_ID, &ctx.blob_id, &ctx.relative_path);
 
     match strategy {
-        ChunkingStrategy::TypeScript => {
-            let file_name = std::path::Path::new(&ctx.relative_path)
-                .file_name()
-                .map(|n| n.to_string_lossy().to_string())
-                .unwrap_or_else(|| ctx.relative_path.to_string());
-
-            let config = PartitionConfig {
-                target_size,
-                file_name,
-                package_name: ctx.package_name.clone(),
-                ..Default::default()
-            };
-
-            let partitioned = partition_typescript(content, &config, &ctx.source_uri, &ctx.catalog);
-            let mut chunks: Vec<Chunk> = partitioned
-                .into_iter()
-                .enumerate()
-                .map(|(i, p)| {
-                    Chunk::from_partitioned(p, &file_id, ctx, i + 1, 0) // chunk_count set later
-                })
-                .collect();
-
-            // Assign chunk ordinals (1-indexed, sorted by start_line)
-            chunks.sort_by_key(|c| c.start_line);
-            let chunk_count = chunks.len();
-            for (i, chunk) in chunks.iter_mut().enumerate() {
-                chunk.chunk_ordinal = i + 1;
-                chunk.chunk_count = chunk_count;
-            }
-
-            Ok(chunks)
-        }
-        ChunkingStrategy::Markdown => {
-            let file_name = std::path::Path::new(&ctx.relative_path)
-                .file_name()
-                .map(|n| n.to_string_lossy().to_string())
-                .unwrap_or_else(|| ctx.relative_path.to_string());
-
-            let config = PartitionConfig {
-                target_size,
-                file_name,
-                package_name: ctx.package_name.clone(),
-                ..Default::default()
-            };
-
-            let partitioned = partition_markdown(content, &config, &ctx.source_uri, &ctx.catalog);
-            let mut chunks: Vec<Chunk> = partitioned
-                .into_iter()
-                .enumerate()
-                .map(|(i, p)| {
-                    Chunk::from_partitioned(p, &file_id, ctx, i + 1, 0) // chunk_count set later
-                })
-                .collect();
-
-            // Assign chunk ordinals (1-indexed, sorted by start_line)
-            chunks.sort_by_key(|c| c.start_line);
-            let chunk_count = chunks.len();
-            for (i, chunk) in chunks.iter_mut().enumerate() {
-                chunk.chunk_ordinal = i + 1;
-                chunk.chunk_count = chunk_count;
-            }
-
-            Ok(chunks)
-        }
+        ChunkingStrategy::TypeScript => Ok(chunk_with_partitioner(
+            content,
+            ctx,
+            &file_id,
+            target_size,
+            partition_typescript,
+        )),
+        ChunkingStrategy::Markdown => Ok(chunk_with_partitioner(
+            content,
+            ctx,
+            &file_id,
+            target_size,
+            partition_markdown,
+        )),
         ChunkingStrategy::LineBased => chunk_by_lines(content, &file_id, ctx, target_size, "text"),
         ChunkingStrategy::Skip => Ok(Vec::new()),
     }
+}
+
+/// Helper to chunk content using a partitioner function (TypeScript or Markdown).
+///
+/// Both partitioners have the same signature, so we extract the common scaffold:
+/// file_name extraction, PartitionConfig construction, calling the partitioner,
+/// mapping to Chunk, sorting by start_line, and assigning ordinals.
+fn chunk_with_partitioner<F>(
+    content: &str,
+    ctx: &ChunkContext,
+    file_id: &str,
+    target_size: usize,
+    partition: F,
+) -> Vec<Chunk>
+where
+    F: FnOnce(&str, &PartitionConfig, &str, &str) -> Vec<PartitionedChunk>,
+{
+    let file_name = std::path::Path::new(&ctx.relative_path)
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| ctx.relative_path.to_string());
+
+    let config = PartitionConfig {
+        target_size,
+        file_name,
+        package_name: ctx.package_name.clone(),
+        ..Default::default()
+    };
+
+    let partitioned = partition(content, &config, &ctx.source_uri, &ctx.catalog);
+    let mut chunks: Vec<Chunk> = partitioned
+        .into_iter()
+        .enumerate()
+        .map(|(i, p)| Chunk::from_partitioned(p, file_id, ctx, i + 1, 0))
+        .collect();
+
+    // Assign chunk ordinals (1-indexed, sorted by start_line)
+    chunks.sort_by_key(|c| c.start_line);
+    let chunk_count = chunks.len();
+    for (i, chunk) in chunks.iter_mut().enumerate() {
+        chunk.chunk_ordinal = i + 1;
+        chunk.chunk_count = chunk_count;
+    }
+
+    chunks
 }
 
 impl Chunk {

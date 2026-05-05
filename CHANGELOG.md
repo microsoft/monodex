@@ -29,7 +29,9 @@ PUBLISHING PROCEDURE:
 
 ### Changed
 
-- Cleaned up prose style in documentation: replaced em-dashes with colons in list separators, rewrote prose em-dashes as periods/commas/colons per context, kept 5 bracketed-aside em-dash pairs where comma substitution would create ambiguity.
+- Revised documentation to improve writing mechanics and clarity
+
+- Various refactorings to improve code organization and prepare for the upcoming full-text search (FTS) feature.
 
 ## 0.5.1 (2026-04-30)
 
