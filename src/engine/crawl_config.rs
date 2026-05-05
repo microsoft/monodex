@@ -196,8 +196,8 @@ impl CompiledCrawlConfig {
         // Check directory prefixes
         for dir in &self.exclude_dirs {
             // Directory patterns match if:
-            // 1. Path starts with the directory (e.g., "lib/foo.ts" matches "lib/")
-            // 2. Path contains the directory with leading slash (e.g., "foo/lib/bar.ts" matches "lib/")
+            // 1. Path starts with the directory (e.g., "lib/example.ts" matches "lib/")
+            // 2. Path contains the directory with leading slash (e.g., "path/to/lib/file.ts" matches "lib/")
             if path.starts_with(dir) || path.contains(&format!("/{}", dir)) {
                 return true;
             }
@@ -214,8 +214,8 @@ impl CompiledCrawlConfig {
         // Check directory prefixes
         for dir in &self.keep_dirs {
             // Directory patterns match if:
-            // 1. Path starts with the directory (e.g., "src/foo.ts" matches "src/")
-            // 2. Path contains the directory with leading slash (e.g., "foo/src/bar.ts" matches "src/")
+            // 1. Path starts with the directory (e.g., "src/example.ts" matches "src/")
+            // 2. Path contains the directory with leading slash (e.g., "path/to/src/file.ts" matches "src/")
             if path.starts_with(dir) || path.contains(&format!("/{}", dir)) {
                 return true;
             }
@@ -579,7 +579,7 @@ mod tests {
         assert!(compiled.should_crawl("src/index.ts"));
 
         // Should exclude node_modules
-        assert!(!compiled.should_crawl("node_modules/foo/index.ts"));
+        assert!(!compiled.should_crawl("node_modules/some-package/index.ts"));
 
         // Should exclude test files (but src/test files override)
         assert!(!compiled.should_crawl("utils.test.ts"));
@@ -598,7 +598,7 @@ mod tests {
     fn test_load_compiled_crawl_config() {
         let compiled = load_compiled_crawl_config(None).unwrap();
         assert!(compiled.should_crawl("src/index.ts"));
-        assert!(!compiled.should_crawl("node_modules/foo.ts"));
+        assert!(!compiled.should_crawl("node_modules/example.ts"));
     }
 
     #[test]

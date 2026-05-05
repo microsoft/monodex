@@ -443,7 +443,7 @@ mod tests {
         assert!(validate_label("local=working-dir").is_ok());
 
         // Multiple `=` are now valid since `=` is just a separator
-        assert!(validate_label("foo=bar=baz").is_ok());
+        assert!(validate_label("part1=part2=part3").is_ok());
 
         // Mixed separators
         assert!(validate_label("repo/branch=name").is_ok());

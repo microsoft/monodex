@@ -122,7 +122,7 @@ struct DirtyEntry {
 
 /// Get all tracked files with their blob IDs using `git ls-files`.
 ///
-/// Format: `<mode> <blob_id> <stage>\t<path>`
+/// Format: `<blob_id>\t<path>`, NUL-delimited.
 fn git_list_tracked_blob_ids(repo_root: &Path) -> Result<HashMap<String, String>> {
     let output = Command::new("git")
         .args([

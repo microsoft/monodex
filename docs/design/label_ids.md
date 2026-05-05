@@ -4,11 +4,11 @@ This document defines the syntax of identifiers, locators, and reports used by M
 
 ## Terminology
 
-- **Catalog** — a Monodex-assigned name for a data source. Few and stable. Chosen by the user.
-- **Label** — a Monodex-assigned name for a version or snapshot of a catalog (branch, commit, tag, working-directory state, time snapshot). Many and diverse.
-- **Path** — a location within a label. The identity of a path is determined by the underlying data source. Monodex does not assign or constrain path syntax.
-- **Locator** — a structured string that identifies content within a grammar. Two locator grammars exist: **breadcrumbs** (catalog-relative, of the form `package:file:symbol`) and **references** (globally qualified, of the form `@catalog:label:path` and its sub-forms). Locators are parseable; their structural characters must be encoded when they appear inside path or identifier data.
-- **Report** — human-facing output (CLI stdout, error messages, log lines). Reports are not locators. They use decoded paths and separate fields by visual devices that cannot collide with identifier characters.
+- **Catalog**: a Monodex-assigned name for a data source. Few and stable. Chosen by the user.
+- **Label**: a Monodex-assigned name for a version or snapshot of a catalog (branch, commit, tag, working-directory state, time snapshot). Many and diverse.
+- **Path**: a location within a label. The identity of a path is determined by the underlying data source. Monodex does not assign or constrain path syntax.
+- **Locator**: a structured string that identifies content within a grammar. Two locator grammars exist: **breadcrumbs** (catalog-relative, of the form `package:file:symbol`) and **references** (globally qualified, of the form `@catalog:label:path` and its sub-forms). Locators are parseable; their structural characters must be encoded when they appear inside path or identifier data.
+- **Report**: human-facing output (CLI stdout, error messages, log lines). Reports are not locators. They use decoded paths and separate fields by visual devices that cannot collide with identifier characters.
 
 Catalogs and labels are identifiers Monodex owns. Paths are external data Monodex indexes. This distinction is load-bearing: it determines what Monodex may constrain (catalogs and labels) versus what it must represent faithfully (paths).
 
@@ -16,8 +16,8 @@ Catalogs and labels are identifiers Monodex owns. Paths are external data Monode
 
 Currently the CLI accepts only the bare forms:
 
-- `--catalog <catalog>` — a single bare catalog name.
-- `--label <label>` — a single bare label name.
+- `--catalog <catalog>`: a single bare catalog name.
+- `--label <label>`: a single bare label name.
 
 Composite forms (`label:path`, `kind=payload`, `@catalog:label`, `@catalog:label:path`, etc.) are reserved grammar but are not parsed yet. The reserved characters described below are rejected at validation time so they remain available when the composite forms land.
 
@@ -27,14 +27,14 @@ Composite forms (`label:path`, `kind=payload`, `@catalog:label`, `@catalog:label
 ^[a-z0-9]+(?:-[a-z0-9]+)*$
 ```
 
-- Length 1–64 characters.
+- Length 1-64 characters.
 - Lowercase ASCII alphanumeric words separated by single `-`.
 - No leading, trailing, or consecutive `-`.
 
 Examples:
 
 - Valid: `my-repo`, `frontend`, `backend-api`
-- Invalid: `My-Repo` (uppercase), `foo--bar` (consecutive `-`), `foo-` (trailing separator)
+- Invalid: `My-Repo` (uppercase), `left--right` (consecutive `-`), `trailing-` (trailing separator)
 
 ## Label syntax (Git-like)
 
@@ -42,7 +42,7 @@ Examples:
 ^[a-z0-9]+(?:[./=-][a-z0-9]+)*$
 ```
 
-- Length 1–128 characters.
+- Length 1-128 characters.
 - Lowercase ASCII alphanumeric words separated by single `.`, `/`, `-`, or `=`.
 - No leading, trailing, or consecutive separators.
 - `=` is a permitted separator character but is not interpreted as a typed-form delimiter today (see §Typed labels below).
@@ -50,7 +50,7 @@ Examples:
 Examples:
 
 - Valid: `main`, `feature/x`, `release/v1.2.3`, `working-dir`, `branch=main`, `repo/sub/feature`
-- Invalid: `feature_login` (underscore), `FOO` (uppercase), `foo//bar` (consecutive separators)
+- Invalid: `feature_login` (underscore), `EXAMPLE` (uppercase), `first//second` (consecutive separators)
 
 ## Forbidden characters
 
@@ -84,8 +84,8 @@ Paths are facts about external systems. Monodex does not assign path syntax and 
 
 This rules out two failure modes:
 
-- **Rejection** — refusing to crawl a file because its path contains `:`, `@`, or `=`. Monodex does not control what filenames appear in a Git tree.
-- **Silent omission** — skipping such files with a warning. The user gets a crawl reported as "successful" but search results are missing content they expect. Worse than rejection because the failure is invisible.
+- **Rejection**: refusing to crawl a file because its path contains `:`, `@`, or `=`. Monodex does not control what filenames appear in a Git tree.
+- **Silent omission**: skipping such files with a warning. The user gets a crawl reported as "successful" but search results are missing content they expect. Worse than rejection because the failure is invisible.
 
 Both are forbidden.
 
@@ -116,15 +116,15 @@ The encode/decode helpers live in `src/engine/breadcrumb.rs`.
 | Stored path                                   | In a breadcrumb                                          | In a global reference                                         |
 | --------------------------------------------- | -------------------------------------------------------- | ------------------------------------------------------------- |
 | `libraries/node-core-library/src/JsonFile.ts` | `@rushstack/node-core-library:JsonFile.ts:JsonFile.load` | `@rushstack:main:libraries/node-core-library/src/JsonFile.ts` |
-| `src/index.ts`                                | `node-core-library:index.ts:foo`                         | `@my-repo:main:src/index.ts`                                  |
-| `src/weird:file.ts`                           | `node-core-library:weird%3Afile.ts:foo`                  | `@my-repo:main:src/weird%3Afile.ts`                           |
-| `50%off/notes.md`                             | `node-core-library:50%25off/notes.md:foo`                | `@my-repo:main:50%25off/notes.md`                             |
+| `src/index.ts`                                | `node-core-library:index.ts:example`                    | `@my-repo:main:src/index.ts`                                  |
+| `src/weird:file.ts`                           | `node-core-library:weird%3Afile.ts:example`             | `@my-repo:main:src/weird%3Afile.ts`                           |
+| `50%off/notes.md`                             | `node-core-library:50%25off/notes.md:example`           | `@my-repo:main:50%25off/notes.md`                             |
 
 ## Breadcrumbs
 
 Breadcrumbs have the form `package:file:symbol`. The `:` is a structural separator within the breadcrumb grammar. Path components embedded in a breadcrumb are percent-encoded per the rules above. Example: a file named `weird:file.ts` in package `node-core-library` renders as `node-core-library:weird%3Afile.ts:JsonFile.load`.
 
-Breadcrumbs are catalog-relative — they do not begin with `@catalog`. A reader who needs the fully-qualified identity of a breadcrumb must consult the surrounding context (the search result's `catalog` field, the crawl's scope, etc.).
+Breadcrumbs are catalog-relative: they do not begin with `@catalog`. A reader who needs the fully-qualified identity of a breadcrumb must consult the surrounding context (the search result's `catalog` field, the crawl's scope, etc.).
 
 ## Reports (human-facing output)
 

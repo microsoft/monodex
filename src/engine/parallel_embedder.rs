@@ -10,6 +10,10 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use tokenizers::Tokenizer;
 
+/// Type alias for a worker: an ONNX session paired with a tokenizer.
+/// Both require &mut for encoding, so each worker wraps them in a Mutex.
+type Worker = Arc<Mutex<(Session, Tokenizer)>>;
+
 const MODEL_ID: &str = "jinaai/jina-embeddings-v2-base-code";
 const MAX_LENGTH: usize = 8192;
 const HIDDEN_SIZE: usize = 768;
@@ -92,16 +96,16 @@ impl ParallelEmbedder {
 
         // Create worker pool - each worker gets its own session AND tokenizer
         // This avoids lock contention on the tokenizer during parallel encoding
-        let workers: Vec<Arc<Mutex<(Session, Tokenizer)>>> = (0..config.num_workers)
+        let workers: Result<Vec<Worker>> = (0..config.num_workers)
             .map(|i| {
                 let session = Session::builder()
-                    .expect("Failed to create session builder")
+                    .map_err(|e| anyhow::anyhow!("Failed to create session builder: {}", e))?
                     .with_optimization_level(GraphOptimizationLevel::All)
-                    .expect("Failed to set optimization level")
+                    .map_err(|e| anyhow::anyhow!("Failed to set optimization level: {}", e))?
                     .with_intra_threads(config.intra_threads)
-                    .expect("Failed to set intra threads")
+                    .map_err(|e| anyhow::anyhow!("Failed to set intra threads: {}", e))?
                     .commit_from_file(&onnx_path)
-                    .expect("Failed to commit session");
+                    .map_err(|e| anyhow::anyhow!("Failed to commit session: {}", e))?;
 
                 // Clone tokenizer for this worker
                 let tokenizer = base_tokenizer.clone();
@@ -115,9 +119,10 @@ impl ParallelEmbedder {
                     );
                 }
 
-                Arc::new(Mutex::new((session, tokenizer)))
+                Ok(Arc::new(Mutex::new((session, tokenizer))))
             })
             .collect();
+        let workers = workers?;
 
         Ok(Self { workers })
     }

@@ -10,7 +10,7 @@ Resolve `--commit` to a full 40-character SHA using `gix` (or, for `--working-di
 
 Marking the label in-progress before any chunk work begins is what lets a later interrupted-crawl recovery distinguish "this label was being written and the writer didn't finish" from "this label is intentionally in this state."
 
-Concurrent crawls against the same database are not supported and will be rejected by a forthcoming process-level lock (see [backlog.md](../backlog.md)). The intended invariant is single-writer: at most one `monodex crawl` process at a time per database. Concurrent reads (search, view) during a crawl are safe — they observe a consistent snapshot from before the in-progress writes — but two simultaneous crawls against the same database directory are out of scope. The database location must also be on a local filesystem; network filesystems and synced cloud folders are not supported.
+Concurrent crawls against the same database are not supported and will be rejected by a forthcoming process-level lock (see [backlog.md](../backlog.md)). The intended invariant is single-writer: at most one `monodex crawl` process at a time per database. Concurrent reads (search, view) during a crawl are safe: they observe a consistent snapshot from before the in-progress writes. But two simultaneous crawls against the same database directory are out of scope. The database location must also be on a local filesystem; network filesystems and synced cloud folders are not supported.
 
 For commit mode, the resolution step rejects ambiguous refs and unresolvable refs with a clear error rather than silently picking a default. For working-directory mode, no resolution is needed; the source_kind alone signals the contents are mutable.
 
@@ -18,17 +18,17 @@ For commit mode, the resolution step rejects ambiguous refs and unresolvable ref
 
 Two enumeration paths, depending on the source:
 
-**Commit mode:** Use `gix` to walk the commit tree recursively. The walker emits a sequence of `(blob_id, relative_path)` pairs for every blob in the tree. Non-blob entries (submodules, symlinks under some repo configurations) are filtered out — Monodex doesn't follow submodule pointers and doesn't materialize symlink targets.
+**Commit mode:** Use `gix` to walk the commit tree recursively. The walker emits a sequence of `(blob_id, relative_path)` pairs for every blob in the tree. Non-blob entries (submodules, symlinks under some repo configurations) are filtered out. Monodex doesn't follow submodule pointers and doesn't materialize symlink targets.
 
 **Working-directory mode:** Walk the filesystem from the repo root using `walkdir`, skipping hidden directories (except `.git`), `node_modules`, `target`, `dist`, `build`, `.cache`, and `temp`. For each surviving file, compute a Git-compatible blob ID by shelling out to the `git` CLI. The minimum required Git version is 2.35.0 (for `git ls-files --format`).
 
 The blob-ID compatibility between the two modes is load-bearing: it's what makes a `--working-dir` re-crawl over an unchanged repo skip every file via the sentinel check, with no re-embedding. Earlier versions used a SHA-256 content hash for working-dir mode, which produced different `file_id` values from commit mode and broke incremental skipping. The current implementation uses `git ls-files`, `git status`, and `git hash-object --stdin-paths` so that `.gitattributes`, clean filters, and other repo-specific settings are respected and the resulting blob IDs match what `git` would compute on commit.
 
-After enumeration, the file list is filtered through the loaded crawl config's `should_crawl()` predicate — see `src/engine/crawl_config.rs` — which combines file-type matching against `patternsToExclude` and `patternsToKeep`.
+After enumeration, the file list is filtered through the loaded crawl config's `should_crawl()` predicate (see `src/engine/crawl_config.rs`), which combines file-type matching against `patternsToExclude` and `patternsToKeep`.
 
 ## Step 3: Package indexing
 
-Build a `HashMap<directory_path, package_name>` covering every `package.json` in the source. This step does its own enumeration of the source — it does not consume the file list produced by step 2 — because the package index needs only the `package.json` files, not the whole crawl-eligible file set.
+Build a `HashMap<directory_path, package_name>` covering every `package.json` in the source. This step does its own enumeration of the source: it does not consume the file list produced by step 2, because the package index needs only the `package.json` files, not the whole crawl-eligible file set.
 
 For commit mode, the strategy is two batched Git operations: `git ls-tree -r -z <commit>` to find every `package.json`, then `git cat-file --batch` over a single long-lived process to read all the blobs. This avoids per-file fork overhead and keeps the build to one focused tree enumeration plus one stream of blob reads.
 
@@ -36,10 +36,10 @@ For working-directory mode, the package index is built by walking the filesystem
 
 For each `package.json`, the `"name"` field is parsed out and stored under the directory's repo-relative path as the key. Repo-root `package.json` is keyed by the empty string `""`.
 
-Lookup happens later, during file processing: given a file at `libraries/foo/src/Bar.ts`, the index is queried for ancestor directories in this order:
+Lookup happens later, during file processing: given a file at `libraries/lib1/src/Example.ts`, the index is queried for ancestor directories in this order:
 
-1. `libraries/foo/src`
-2. `libraries/foo`
+1. `libraries/lib1/src`
+2. `libraries/lib1`
 3. `libraries`
 4. `""`
 
@@ -53,7 +53,7 @@ For each enumerated file, the work splits into a sentinel-check fast path and a 
 
 **Slow path:** Read the blob bytes (commit mode: from Git, via the cat-file batch process; working-dir mode: from the filesystem). Resolve the package name via the package index. Compute the breadcrumb prefix. Dispatch to the chunker via `src/engine/chunker.rs` (see [chunker.md](./chunker.md) for the algorithm) to produce chunks. Embed each chunk via the parallel ONNX embedder pool (see `src/engine/parallel_embedder.rs`). Upsert each resulting `ChunkRow` to the `chunks` table, with `active_label_ids` containing the current `label_id`. The sentinel chunk (ordinal 1) gets `file_complete = true` once all chunks for the file have been written.
 
-Files that the chunker reports warnings for (`[fallback-split]` quality marker — see [chunker.md](./chunker.md)) are tracked in a sidecar warnings file. By default, files with warnings are always re-processed on subsequent crawls so chunker improvements can take effect; the `--incremental-warnings` flag opts into skipping them when unchanged, useful for large repos with known chunker issues that aren't blocking work.
+Files that the chunker reports warnings for (`[fallback-split]` quality marker; see [chunker.md](./chunker.md)) are tracked in a sidecar warnings file. By default, files with warnings are always re-processed on subsequent crawls so chunker improvements can take effect; the `--incremental-warnings` flag opts into skipping them when unchanged, useful for large repos with known chunker issues that aren't blocking work.
 
 The pipeline is parallel: a worker thread pool drives chunking and embedding via `crossbeam` channels and `rayon`, with a separate writer thread doing the LanceDB upserts. Per-chunk failures (tokenizer edge cases, model issues on specific content) are tracked in `CrawlFailures` and reported at the end; structural errors (disk full, dataset corruption) abort immediately.
 
@@ -79,7 +79,7 @@ This is the closing handshake. Once finalized, search and view operations agains
 
 ## Working-directory mode
 
-A working-directory crawl indexes uncommitted changes from the filesystem rather than from Git objects. The label produced is mutable: re-crawling updates the indexed content based on the current filesystem state, which contrasts with commit-based labels (immutable for a given commit — re-crawling the same commit is idempotent).
+A working-directory crawl indexes uncommitted changes from the filesystem rather than from Git objects. The label produced is mutable: re-crawling updates the indexed content based on the current filesystem state, which contrasts with commit-based labels (immutable for a given commit; re-crawling the same commit is idempotent).
 
 Use cases:
 
@@ -114,6 +114,6 @@ What does _not_ happen:
 - Label reassignment (step 5) does not run, because the touched set is incomplete. Stale chunks from previous crawls of this label remain associated with the label.
 - The label metadata is not finalized.
 
-A subsequent successful crawl recovers the label cleanly: files already indexed are picked up by the sentinel fast path, files that hadn't been touched yet get processed, and step 5 then runs with a complete touched set, removing the stale chunks. The user never has to do anything special — re-running the same crawl command is the recovery procedure.
+A subsequent successful crawl recovers the label cleanly: files already indexed are picked up by the sentinel fast path, files that hadn't been touched yet get processed, and step 5 then runs with a complete touched set, removing the stale chunks. The user never has to do anything special. Re-running the same crawl command is the recovery procedure.
 
 A consequence of this design: orphaned chunks are possible. If a file was uploaded but its `active_label_ids` didn't get the label added before the crawl was interrupted, the chunk is in the database but tagged with no label. It's invisible to label-scoped search and view, but it occupies space. This is the case the planned offline GC command (see [backlog.md](../backlog.md)) is intended to address. Inline cleanup during crawl is not sufficient because there's no way to safely identify orphans without scanning the whole `chunks` table.

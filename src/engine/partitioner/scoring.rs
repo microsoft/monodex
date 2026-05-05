@@ -1,4 +1,4 @@
-//! Purpose: Chunk-quality scoring (0–100%) and `ChunkQualityReport` for `audit-chunks`.
+//! Purpose: Chunk-quality scoring (0-100%) and `ChunkQualityReport` for `audit-chunks`.
 //! Edit here when: Adding or modifying quality metrics, scoring formulas, or reports.
 //! Do not edit here for: Debug logging (see `debug.rs`), split logic (see `split_search.rs`), chunk types (see `types.rs`).
 

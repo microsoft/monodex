@@ -78,13 +78,13 @@ mod tests {
             EMBEDDER_ID,
             CHUNKER_ID,
             "abc123",
-            "libraries/foo/src/index.ts",
+            "libraries/lib1/src/index.ts",
         );
         let id2 = compute_file_id(
             EMBEDDER_ID,
             CHUNKER_ID,
             "abc123",
-            "libraries/foo/src/index.ts",
+            "libraries/lib1/src/index.ts",
         );
         assert_eq!(id1, id2);
     }
@@ -95,13 +95,13 @@ mod tests {
             EMBEDDER_ID,
             CHUNKER_ID,
             "abc123",
-            "libraries/foo/src/index.ts",
+            "libraries/lib1/src/index.ts",
         );
         let id2 = compute_file_id(
             EMBEDDER_ID,
             CHUNKER_ID,
             "abc123",
-            "libraries/bar/src/index.ts",
+            "libraries/lib2/src/index.ts",
         );
         assert_ne!(id1, id2);
     }
@@ -112,13 +112,13 @@ mod tests {
             EMBEDDER_ID,
             CHUNKER_ID,
             "abc123",
-            "libraries/foo/src/index.ts",
+            "libraries/lib1/src/index.ts",
         );
         let id2 = compute_file_id(
             EMBEDDER_ID,
             CHUNKER_ID,
             "def456",
-            "libraries/foo/src/index.ts",
+            "libraries/lib1/src/index.ts",
         );
         assert_ne!(id1, id2);
     }
