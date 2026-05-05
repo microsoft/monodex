@@ -15,6 +15,7 @@ use crate::app::crawl::phases::{
     run_label_cleanup, save_warning_state, update_final_metadata, write_in_progress_metadata,
 };
 use crate::app::crawl::types::CrawlSourceMetadata;
+use crate::app::util::stderr_lock_progress;
 use crate::app::{
     Config, load_warning_state, resolve_database_path, run_embed_upload_pipeline,
     validate_config_path,
@@ -24,7 +25,10 @@ use crate::engine::git_ops::{
     BlobSource, CommitBlobSource, WorkingDirBlobSource, resolve_commit_oid,
 };
 use crate::engine::identifier::LabelId;
-use crate::engine::storage::{SOURCE_KIND_GIT_COMMIT, SOURCE_KIND_WORKING_DIRECTORY};
+use crate::engine::storage::{
+    SOURCE_KIND_GIT_COMMIT, SOURCE_KIND_WORKING_DIRECTORY, acquire_catalog_lock,
+    acquire_database_shared,
+};
 
 /// Run crawl for a git commit label
 #[allow(clippy::too_many_arguments)]
@@ -64,6 +68,11 @@ pub fn run_crawl_label(
     // Resolve database path (needed for warning state file location)
     let db_path = resolve_database_path(Some(config))?;
     println!("Database: {}", db_path.display());
+
+    // Acquire locks before any catalog-scoped I/O
+    // Order: DatabaseLockShared first, then CatalogLock
+    let _db_guard = acquire_database_shared(&db_path, &stderr_lock_progress)?;
+    let _catalog_guard = acquire_catalog_lock(&db_path, catalog_name, &stderr_lock_progress)?;
 
     // Load persisted chunking warning files (sticky by default)
     let prior_warning_files = load_warning_state(&db_path, catalog_name);
@@ -142,6 +151,11 @@ pub fn run_crawl_working_dir(
     // Resolve database path (needed for warning state file location)
     let db_path = resolve_database_path(Some(config))?;
     println!("Database: {}", db_path.display());
+
+    // Acquire locks before any catalog-scoped I/O
+    // Order: DatabaseLockShared first, then CatalogLock
+    let _db_guard = acquire_database_shared(&db_path, &stderr_lock_progress)?;
+    let _catalog_guard = acquire_catalog_lock(&db_path, catalog_name, &stderr_lock_progress)?;
 
     // Load persisted chunking warning files (sticky by default)
     let prior_warning_files = load_warning_state(&db_path, catalog_name);
