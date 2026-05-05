@@ -23,7 +23,7 @@ Lines = production code excluding `#[cfg(test)]` blocks and the module header. `
 
 Production modules that don't fit a more specific row use the algorithm/engine row.
 
-The thresholds fire when the agent makes a non-trivial addition to a file. They do not require re-litigating files that the agent is only reading or making minor edits to.
+The thresholds apply when making a non-trivial addition to a file, not when only reading or making minor edits.
 
 **At the review threshold:** ask whether the new addition fits the file's existing edit intent. If it does, proceed. If it doesn't, the addition belongs in a different file. Find or create the right one.
 
@@ -45,7 +45,7 @@ If any of these fails, do not split. Note the situation in the footer instead.
 
 ### Calibrating judgement: signal → response
 
-When working on a file, the agent will encounter situations that _look like_ split signals but aren't. Use this map:
+Some situations look like split signals but aren't. Use this map:
 
 - **The file crossed a threshold** → apply the test above. The threshold is not itself authorization to split.
 - **A function is long but belongs to the same edit intent** → leave it. Length within one intent is not a split signal.
@@ -53,32 +53,30 @@ When working on a file, the agent will encounter situations that _look like_ spl
 - **Inline tests make the file look large** → check the production-code line count against the threshold, not the total.
 - **A new helper has only one caller** → leave it inline. Extract when a second caller appears, or when the helper itself represents a distinct edit intent.
 - **A proposed split satisfies the test but produces files that don't fit the "where to put new code" map** → do not split. Note in the footer; this is a reorganization signal (see below).
-- **A jobsheet directs a split** → apply the split as specified. The jobsheet is the authorization; do not re-derive the decision.
+- **A planned reorganization calls for a split** → apply the split as planned; do not re-derive the decision.
 
 ## When the local rules don't fit
 
-The rules above describe local decisions: where one new piece of code goes, whether one file should split. They do not describe how the codebase as a whole is organized. The choice of axis along which the code is divided (by CLI command, by storage table, by phase, by backend) is a separate question, and reshaping it is the human's job.
+The rules above describe local decisions: where one new piece of code goes, whether one file should split. They do not describe how the codebase as a whole is organized. The choice of axis along which the code is divided (by CLI command, by storage table, by phase, by backend) is a separate question, and reshaping it is out of scope for this policy and should be raised with the maintainer.
 
-If the agent finds:
+If you find:
 
 - a file at the split-or-flag threshold whose contents pass the edit-intent test as one intent (no clean split exists),
 - a proposed split whose pieces don't fit anywhere in the "where to put new code" map,
 - a pattern of edits that keep needing to touch the same set of files together for unrelated reasons, or
 - a "where to put new code" entry that no longer matches what the code is actually doing,
 
-then the local rules are misaligned with the codebase's current shape. Do not attempt a reorganization. Complete the current task within the existing structure (accepting a less-than-ideal placement if needed) and add a note to the footer describing the misalignment. The human decides whether a reorganization is warranted.
+then the local rules are misaligned with the codebase's current shape. Do not attempt a reorganization. Complete the current task within the existing structure (accepting a less-than-ideal placement if needed) and add a note to the footer describing the misalignment. The maintainer decides whether a reorganization is warranted.
 
-## Out-of-scope notes (footer)
+## Calling out deviations
 
-The agent ends its jobsheet completion report with a section titled `## Out-of-scope notes`. If the agent is operating without a jobsheet, this section goes at the end of its final report instead. The section captures things the agent observed but did not act on:
+Any policy-relevant thing observed but not acted on should be mentioned in the PR description. Examples include:
 
 - Reorganization signals from the section above.
-- Small policy-relevant deviations the agent noticed but didn't fix (e.g., an inline test block slightly over 300 lines, an existing file under 50 lines that doesn't fit a recognized small-file shape).
-- Anything else the agent thinks the human should know about that wasn't on the jobsheet.
+- Small policy-relevant deviations not fixed at the time (e.g., an inline test block slightly over 300 lines, an existing file under 50 lines that doesn't fit a recognized small-file shape).
+- Anything else worth flagging.
 
-If there's nothing to report, the section is omitted.
-
-This section is written when the agent is marking off final checkboxes, not in the middle of code edits. Reorganization questions are easier to think about with the work complete.
+This section can be omitted when there is nothing to flag.
 
 ## Where to put new code
 
@@ -118,7 +116,7 @@ When editing an existing file whose header doesn't match this rule, update it on
 - No files named `helpers.rs`, `common.rs`, or `misc.rs`.
 - No wildcard re-exports (`pub use submodule::*`). List re-exports explicitly.
 - No putting unrelated items together just because they're small.
-- No structural splits in the same change as feature or fix work, unless a jobsheet directs the split with a stated reason. Splits without that authorization are their own change.
+- No structural splits in the same change as feature or fix work. Splits are their own change unless explicitly authorized by the maintainer or the planned reorganization being applied.
 
 ## Small files
 

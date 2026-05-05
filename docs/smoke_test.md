@@ -119,7 +119,7 @@ export MONODEX_HOME=/tmp/monodex-smoke-test
 
 Then run the **One-time setup** section against this fresh location (configure `$MONODEX_HOME/config.json`, run `init-db`), followed by the **Test procedure**. Everything Monodex reads or writes will be under `/tmp/monodex-smoke-test/` instead of `~/.monodex/`.
 
-The clean-slate variant is slower than the normal procedure because it has to download the embedding model on first crawl, and it leaves a populated database in `/tmp/` after the test. The maintainer decides when to use it; an agent should not invoke it unless instructed.
+The clean-slate variant is slower than the normal procedure because it has to download the embedding model on first crawl, and it leaves a populated database in `/tmp/` after the test. Use the clean-slate variant only when verifying first-run behavior or reproducing a setup-time issue; otherwise, prefer the normal procedure.
 
 ## What this catches
 
