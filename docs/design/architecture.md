@@ -54,6 +54,8 @@ A crawl run, end to end:
 
 Step 5 only runs after a fully successful crawl. An interrupted crawl leaves stale chunks in the label, which the next successful crawl cleans up. See [crawl.md](./crawl.md) for the working-directory identity model and the package-index implementation. The named steps above are the same vocabulary `crawl.md` uses for its detail sections.
 
+Concurrent operations against the database (multiple writers, readers running during a crawl) are coordinated by a writer-lock layer; the lock taxonomy and reader semantics are in [concurrency.md](./concurrency.md).
+
 ## Chunker dispatch
 
 `src/engine/chunker.rs` is the dispatcher. It looks up the chunking strategy for a file extension in the loaded crawl config and routes to one of:
@@ -173,5 +175,6 @@ Every `.md` file in the repo, with a one-line description. Add an entry when add
 - `docs/design/label_ids.md`: Identifier and reference syntax: catalogs, labels, breadcrumbs, cross-catalog references, planned typed-label grammar, path encoding rules at locator boundaries.
 - `docs/design/crawl.md`: Crawl pipeline in detail: package index implementation, working-directory identity model, label reassignment.
 - `docs/design/chunker.md`: Chunking algorithms: TypeScript AST partitioning (the "two worlds model"), markdown splitting, quality markers and scoring.
+- `docs/design/concurrency.md`: Writer lock taxonomy (database, catalog, commit mutex), reader-lock-free contract, interaction with LanceDB MVCC and Tantivy's per-directory locks.
 - `docs/design/monodex_files.md`: Inventory of files monodex reads or writes: tool-home state, repo-local config files monodex reads from the indexed repo, editor-consumed schemas, init templates.
 - `schemas/editing.md`: Cross-reference back to the Rust structs that mirror these schemas, plus a policy reminder that these files are publicly published artifacts.

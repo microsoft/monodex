@@ -485,6 +485,7 @@ For contributors and curious users:
 - [`docs/design/label_ids.md`](./docs/design/label_ids.md): Identifier and reference syntax: catalogs, labels, breadcrumbs, path encoding, planned typed-label and cross-catalog reference grammar.
 - [`docs/design/crawl.md`](./docs/design/crawl.md): Crawl pipeline in detail: package index, working-directory identity model, label reassignment, partial-crawl semantics.
 - [`docs/design/chunker.md`](./docs/design/chunker.md): Chunking algorithms: embedding model, TypeScript AST partitioning (the "two worlds model"), markdown splitting, quality scoring, empirical findings on alternative runtimes.
+- [`docs/design/concurrency.md`](./docs/design/concurrency.md): Writer lock taxonomy, reader semantics, and how the model interacts with LanceDB's and Tantivy's own concurrency mechanisms.
 - [`docs/design/monodex_files.md`](./docs/design/monodex_files.md): Inventory of files Monodex reads or writes: tool-home state, database directory, repo-local config, shipped artifacts.
 - [`docs/code_organization_policy.md`](./docs/code_organization_policy.md): File size targets, where new code goes, banned patterns. Required reading for contributors.
 - [`docs/backlog.md`](./docs/backlog.md): Maintainer scratch pad for what might come next.

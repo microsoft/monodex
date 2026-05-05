@@ -10,7 +10,7 @@ Resolve `--commit` to a full 40-character SHA using `gix` (or, for `--working-di
 
 Marking the label in-progress before any chunk work begins is what lets a later interrupted-crawl recovery distinguish "this label was being written and the writer didn't finish" from "this label is intentionally in this state."
 
-Concurrent crawls against the same database are not supported and will be rejected by a forthcoming process-level lock (see [backlog.md](../backlog.md)). The intended invariant is single-writer: at most one `monodex crawl` process at a time per database. Concurrent reads (search, view) during a crawl are safe: they observe a consistent snapshot from before the in-progress writes. But two simultaneous crawls against the same database directory are out of scope. The database location must also be on a local filesystem; network filesystems and synced cloud folders are not supported.
+Concurrent writers against the same catalog (two `monodex crawl` invocations, or a `monodex crawl` running while a `monodex purge --catalog` of that catalog runs) are serialized by the writer-lock layer; concurrent writers against different catalogs run in parallel. Concurrent reads (`search`, `view`) during a crawl are lock-free and observe committed per-storage state. The full lock taxonomy and reader semantics are in [concurrency.md](./concurrency.md). The database location must be on a local filesystem; network filesystems and synced cloud folders are not supported.
 
 For commit mode, the resolution step rejects ambiguous refs and unresolvable refs with a clear error rather than silently picking a default. For working-directory mode, no resolution is needed; the source_kind alone signals the contents are mutable.
 

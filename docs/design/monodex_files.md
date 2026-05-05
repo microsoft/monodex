@@ -44,7 +44,7 @@ Earlier prerelease versions placed these files at platform-dependent locations (
 
 `<database-dir>` contains a metadata file, the LanceDB tables, and per-catalog warning state. It is not designed to be edited by hand. Every file in it is tool-managed except where noted.
 
-The database location must be on a local filesystem. Network filesystems and synced cloud folders (NFS, SMB, Dropbox, OneDrive, iCloud, Google Drive, etc.) are not supported. The single-writer process lock that will guard concurrent crawls (see [backlog.md](../backlog.md)) is intended to span all storage formats in this directory under one invariant.
+The database location must be on a local filesystem. Network filesystems and synced cloud folders (NFS, SMB, Dropbox, OneDrive, iCloud, Google Drive, etc.) are not supported. The writer-lock layer that coordinates concurrent operations against this directory is described in [concurrency.md](./concurrency.md); its lockfiles live under `<database-dir>/locks/`.
 
 ### `<database-dir>/monodex-meta.json`
 
@@ -61,6 +61,10 @@ When Tantivy full-text search is added, its index is planned to live at `<databa
 ### `<database-dir>/warnings-<catalog>.json`
 
 One file per catalog. Records the list of repo-relative paths that produced chunker warnings (`[fallback-split]` markers; see [chunker.md](./chunker.md)) on the most recent crawl, used by the next crawl to decide which previously-warned files to revisit. Format: a JSON array of repo-relative path strings. Written at the end of each crawl by `src/app/util.rs`; read at the start of each crawl. Safe to delete; the next crawl will rebuild it.
+
+### `<database-dir>/locks/`
+
+Lockfiles used by the writer-lock layer (see [concurrency.md](./concurrency.md)). Contents are empty; the file's role is as a named handle for OS-level file locking (`flock` on POSIX, `LockFileEx` on Windows). The directory contains `database.lock`, `commit.lock`, and a `per-catalog/` subdirectory holding one lockfile per catalog. Lockfiles are persistent: they are not deleted on lock release, and `rm -rf locks/` is safe when no Monodex process is running.
 
 ## Repo-local files
 
