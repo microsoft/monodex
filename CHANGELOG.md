@@ -27,7 +27,13 @@ PUBLISHING PROCEDURE:
 
 - **Empty search result sets now print a `No results.` line.** Previously, `monodex search` would print only the catalog/label header and then nothing if no chunks matched, which looked like a hang.
 
+### Added
+
+- **Concurrent monodex invocations now coordinate via file locks.** Two crawls against the same catalog wait for each other; two against different catalogs run in parallel. See `docs/design/concurrency.md` for details.
+
 ### Changed
+
+- **Breaking: schema version bumped from 2 to 3.** Catalog name is now part of chunk identity, so the same content at the same path in two different catalogs no longer produces colliding rows. Existing v2 databases are rejected with a schema-mismatch error; the remedy is to delete the database and re-crawl.
 
 - Revised documentation to improve writing mechanics and clarity
 
