@@ -224,6 +224,7 @@ async fn run_crawl_async(
         &chunk_storage,
         prior_warning_files,
         incremental_warnings,
+        catalog_name,
     )
     .await?;
 

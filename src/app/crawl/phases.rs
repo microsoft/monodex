@@ -116,6 +116,7 @@ pub async fn classify_files(
     chunk_storage: &ChunkStorage,
     prior_warning_files: &HashSet<String>,
     incremental_warnings: bool,
+    catalog_name: &str,
 ) -> Result<ClassifyOutput> {
     println!("⚡ Phase 1: Checking existing chunks and collecting new files...");
 
@@ -132,6 +133,7 @@ pub async fn classify_files(
         let file_id = crate::engine::util::compute_file_id(
             crate::engine::util::EMBEDDER_ID,
             crate::engine::util::CHUNKER_ID,
+            catalog_name,
             &file_entry.blob_id,
             &file_entry.relative_path,
         );
