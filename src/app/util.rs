@@ -117,3 +117,15 @@ pub fn save_warning_state(
     std::fs::write(&path, json)?;
     Ok(())
 }
+
+// ============================================================================
+// Lock Progress Callback
+// ============================================================================
+
+/// Progress callback for lock acquisitions that writes to stderr.
+///
+/// This is the shared progress callback for database, catalog, and other lock
+/// acquisitions across init-db, crawl, and purge commands.
+pub fn stderr_lock_progress(msg: &str) {
+    eprintln!("{}", msg);
+}
