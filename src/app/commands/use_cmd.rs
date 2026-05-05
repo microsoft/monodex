@@ -1,7 +1,6 @@
-//! Handler for the `use` command.
-//!
-//! Edit here when: Modifying how default context is set or displayed.
-//! Do not edit here for: Context persistence (see `../context.rs`).
+//! Purpose: Handler for the `use` command — set or display the default catalog/label context.
+//! Edit here when: Modifying how default context is set or displayed by the command.
+//! Do not edit here for: Context persistence (see `../context.rs`), identifier validation (see `engine/identifier.rs`).
 
 use crate::app::{Config, load_default_context, save_default_context};
 use crate::engine::identifier::{validate_catalog, validate_label};

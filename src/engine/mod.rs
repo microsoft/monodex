@@ -1,9 +1,6 @@
-//! Reusable indexing engine for LanceDB semantic search
-//!
-//! This module contains general-purpose indexing logic that works
-//! for any Rush monorepo. It is designed to be reusable across projects.
-//!
-//! Repository-specific configuration lives in `src/app/config.rs`
+//! Purpose: Reusable LanceDB indexing engine — chunking, embedding, storage, identifiers, breadcrumbs, and Git-aware enumeration.
+//! Edit here when: Adding a new top-level engine submodule or convenience re-export.
+//! Do not edit here for: App-level concerns such as CLI, config, commands (see `app/`); details inside individual engine submodules.
 
 pub mod breadcrumb;
 pub mod chunker;

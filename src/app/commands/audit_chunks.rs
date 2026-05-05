@@ -1,6 +1,5 @@
-//! Handler for the `audit-chunks` command.
-//!
-//! Edit here when: Modifying chunk quality auditing.
+//! Purpose: Handler for the `audit-chunks` command — sample TypeScript files and report aggregate chunk-quality scores.
+//! Edit here when: Modifying chunk-quality auditing output, sampling, or AST-only reporting.
 //! Do not edit here for: Chunking algorithm (see `engine/partitioner/`).
 
 use anyhow::Result;

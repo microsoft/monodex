@@ -1,6 +1,6 @@
-//! Integration tests for crawl label-add functionality.
-//!
-//! Tests the end-to-end behavior of crawling under multiple labels.
+//! Purpose: Integration tests for crawl label-add behavior — end-to-end multi-label crawl assertions.
+//! Edit here when: Adding or modifying end-to-end multi-label crawl tests.
+//! Do not edit here for: Production crawl code (see `app/commands/crawl.rs`, `app/crawl/`, `engine/git_ops/`); per-module unit tests (see the relevant module's `tests.rs` or inline `#[cfg(test)]` block).
 
 use std::collections::HashSet;
 use std::path::Path;

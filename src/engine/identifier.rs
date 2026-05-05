@@ -1,17 +1,6 @@
-//! Identifier validation and composition for monodex.
-//!
-//! This module centralizes all identifier handling to ensure consistency
-//! across the codebase. See the syntax spec at:
-//! https://github.com/microsoft/monodex/issues/25
-//!
-//! ## Terminology
-//!
-//! - **catalog**: A bare identifier naming a catalog (e.g., "my-repo")
-//! - **label**: A bare identifier naming a label (e.g., "main", "feature/x")
-//! - **label_id**: The qualified storage form "catalog:label" (e.g., "my-repo:main")
-//!
-//! The user-facing API always takes separate `--catalog` and `--label` flags.
-//! The qualified `label_id` form is internal only and never shown to users.
+//! Purpose: Validate catalog and label syntax, and compose qualified `label_id` storage keys.
+//! Edit here when: Changing identifier syntax rules, validation error codes, or qualified-form composition; adding parsers for typed labels or cross-catalog references.
+//! Do not edit here for: Breadcrumb encoding (see `breadcrumb.rs`), label-metadata storage (see `storage/labels.rs`).
 
 use std::fmt;
 use thiserror::Error;

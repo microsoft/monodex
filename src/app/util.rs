@@ -1,7 +1,5 @@
-//! App-wide utility functions for formatting and display.
-//!
-//! Edit here when: Adding formatting helpers, timestamp utilities,
-//! or terminal output functions.
+//! Purpose: App-wide formatting and display utilities — timestamps, durations, byte sizes, terminal-output sanitization for `>`-prefixed search lines.
+//! Edit here when: Adding or modifying user-facing formatting helpers.
 //! Do not edit here for: Engine-wide utilities (see `engine/util.rs`).
 
 use std::collections::HashSet;

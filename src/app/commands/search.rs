@@ -1,7 +1,6 @@
-//! Handler for the `search` command.
-//!
-//! Edit here when: Modifying search output or result formatting.
-//! Do not edit here for: Vector search logic (see `engine/storage/chunks.rs`).
+//! Purpose: Handler for the `search` command — embed a query, run a label-scoped vector search, format results.
+//! Edit here when: Modifying search output, result formatting, or the `>`-prefixed line shape.
+//! Do not edit here for: Vector search logic (see `engine/storage/chunks/mod.rs`), embedding (see `engine/parallel_embedder.rs`).
 
 use crate::app::{Config, format_chunk_report, resolve_database_path, resolve_label_context};
 use crate::engine::{ParallelEmbedder, storage::Database};

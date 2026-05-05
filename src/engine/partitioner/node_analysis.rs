@@ -1,7 +1,6 @@
-//! AST node analysis for partitioning.
-//!
-//! Edit here when: Adding or modifying node analysis heuristics, symbol extraction, or chunk metadata.
-//! Do not edit here for: Debug logging (debug.rs), split logic (split_search.rs), scoring (scoring.rs).
+//! Purpose: AST node helpers — meaningful-children enumeration, symbol-name extraction, line-span computation, JSDoc/TSDoc collection.
+//! Edit here when: Adding or modifying node-analysis heuristics, symbol extraction, or chunk metadata.
+//! Do not edit here for: Debug logging (see `debug.rs`), split logic (see `split_search.rs`), scoring (see `scoring.rs`).
 
 use super::debug::PartitionDebug;
 use tree_sitter::Node;

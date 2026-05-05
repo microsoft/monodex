@@ -1,5 +1,4 @@
-//! Orchestrator for TypeScript/TSX partitioning.
-//!
+//! Purpose: Top-level entry point for TypeScript/TSX partitioning — parse with tree-sitter, drive the recursive split search, finalize chunks with metadata.
 //! Edit here when: Modifying the top-level partition flow, parser setup, or chunk finalization.
 //! Do not edit here for: Split-point search (see `split_search.rs`), AST node analysis (see `node_analysis.rs`), chunk types (see `types.rs`).
 

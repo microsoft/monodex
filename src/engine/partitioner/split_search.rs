@@ -1,7 +1,6 @@
-//! Split-point search algorithm for AST-based chunking.
-//!
+//! Purpose: Recursive search for split points at AST boundaries; descent into nested scopes when no shallow split fits the budget.
 //! Edit here when: Changing split scope definitions, split heuristics, or descent logic.
-//! Do not edit here for: Chunk size targets, quality scoring, or AST node metadata.
+//! Do not edit here for: Chunk size targets (see `types.rs`), quality scoring (see `scoring.rs`), AST node metadata (see `node_analysis.rs`).
 
 use super::debug::PartitionDebug;
 use super::node_analysis::get_meaningful_children;

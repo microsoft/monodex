@@ -1,0 +1,253 @@
+//! Purpose: Test suite for the `git_ops` module.
+//! Edit here when: Adding or modifying tests for commit reading, working-directory enumeration, or the package index.
+//! Do not edit here for: Production code changes — edit the relevant submodule (`mod.rs`, `commit.rs`, `working_dir.rs`).
+
+use super::*;
+use std::path::PathBuf;
+use std::process::Command;
+
+#[test]
+fn test_enumerate_commit_tree_current_repo() {
+    let repo_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let entries = enumerate_commit_tree(&repo_path, "HEAD").expect("Failed to enumerate");
+    assert!(!entries.is_empty(), "Should have found some files");
+    assert!(entries.iter().any(|e| e.relative_path == "README.md"));
+    assert!(entries.iter().any(|e| e.relative_path == "Cargo.toml"));
+}
+
+#[test]
+fn test_read_blob_content_current_repo() {
+    let repo_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let entries = enumerate_commit_tree(&repo_path, "HEAD").expect("Failed to enumerate");
+    let readme = entries
+        .iter()
+        .find(|e| e.relative_path == "README.md")
+        .unwrap();
+    let content = read_blob_content(&repo_path, &readme.blob_id).expect("Failed to read blob");
+    let content_str = String::from_utf8_lossy(&content);
+    assert!(content_str.contains("Monodex"));
+}
+
+#[test]
+fn test_build_package_index() {
+    let repo_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let _index = build_package_index_for_commit(&repo_path, "HEAD").expect("Failed to build index");
+}
+
+#[test]
+fn test_find_package_name_uses_repo_relative_paths() {
+    let mut index = PackageIndex::new();
+    index.package_name_by_dir.insert(
+        "libraries/node-core-library".to_string(),
+        "@rushstack/node-core-library".to_string(),
+    );
+    index
+        .package_name_by_dir
+        .insert("".to_string(), "root-package".to_string());
+
+    assert_eq!(
+        index.find_package_name("libraries/node-core-library/src/JsonFile.ts"),
+        Some("@rushstack/node-core-library")
+    );
+    assert_eq!(
+        index.find_package_name("libraries/node-core-library/package.json"),
+        Some("@rushstack/node-core-library")
+    );
+    assert_eq!(index.find_package_name("src/main.rs"), Some("root-package"));
+}
+
+#[test]
+fn test_extract_package_name_from_bytes() {
+    let json = br#"{"name": "@scope/package-name", "version": "1.0.0"}"#;
+    let name = extract_package_name_from_bytes(json);
+    assert_eq!(name, Some("@scope/package-name".to_string()));
+
+    let json2 = br#"{
+  "name": "simple-package",
+  "version": "2.0.0"
+}"#;
+    let name2 = extract_package_name_from_bytes(json2);
+    assert_eq!(name2, Some("simple-package".to_string()));
+}
+
+#[test]
+fn test_extract_package_name_from_bytes_ignores_nested_name_fields() {
+    let json = br#"{
+  "exports": {
+    ".": {
+      "name": "nested-name-should-not-win"
+    }
+  },
+  "name": "top-level-package"
+}"#;
+    let name = extract_package_name_from_bytes(json);
+    assert_eq!(name, Some("top-level-package".to_string()));
+}
+
+#[test]
+fn test_nested_package_directory_key_round_trip() {
+    let relative_package_json = "libraries/node-core-library/package.json";
+    let dir_path = relative_package_json
+        .strip_suffix("/package.json")
+        .or_else(|| relative_package_json.strip_suffix("package.json"))
+        .unwrap_or("");
+
+    assert_eq!(dir_path, "libraries/node-core-library");
+
+    let mut index = PackageIndex::new();
+    index.package_name_by_dir.insert(
+        dir_path.to_string(),
+        "@rushstack/node-core-library".to_string(),
+    );
+
+    assert_eq!(
+        index.find_package_name("libraries/node-core-library/src/JsonFile.ts"),
+        Some("@rushstack/node-core-library")
+    );
+}
+
+#[test]
+#[ignore = "slow integration test that walks the entire repository"]
+fn test_enumerate_working_directory() {
+    let repo_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let entries =
+        enumerate_working_directory(&repo_path).expect("Failed to enumerate working directory");
+    assert!(!entries.is_empty(), "Should have found some files");
+    // README.md should be found (it's a regular file that should be found)
+    // Note: Hidden files/directories (dot-prefixed) are skipped during enumeration
+    assert!(entries.iter().any(|e| e.relative_path == "README.md"));
+    // All entries should have a 40-character hex blob_id
+    for entry in &entries {
+        assert_eq!(
+            entry.blob_id.len(),
+            40,
+            "blob_id should be 40 chars: {}",
+            entry.blob_id
+        );
+        assert!(
+            entry.blob_id.chars().all(|c| c.is_ascii_hexdigit()),
+            "blob_id should be hex: {}",
+            entry.blob_id
+        );
+    }
+}
+
+/// Regression test for BF.WD.1: file_id must be identical between commit and working-dir modes
+/// for unchanged files. This test creates a minimal Git repo and verifies the invariant.
+#[test]
+fn test_file_id_identical_between_modes() {
+    use std::fs;
+    use tempfile::TempDir;
+
+    // Create a temporary directory
+    let temp_dir = TempDir::new().expect("Failed to create temp dir");
+    let repo_path = temp_dir.path();
+
+    // Initialize a minimal Git repo
+    let git_init = Command::new("git")
+        .args(["init"])
+        .current_dir(repo_path)
+        .output()
+        .expect("Failed to run git init");
+    assert!(git_init.status.success(), "git init failed");
+
+    // Configure local user for this repo
+    Command::new("git")
+        .args(["config", "user.name", "Test User"])
+        .current_dir(repo_path)
+        .output()
+        .expect("Failed to set user.name");
+    Command::new("git")
+        .args(["config", "user.email", "test@example.com"])
+        .current_dir(repo_path)
+        .output()
+        .expect("Failed to set user.email");
+
+    // Create and commit a test file
+    let test_file = repo_path.join("test.txt");
+    fs::write(&test_file, "Hello, World!\n").expect("Failed to write test file");
+
+    Command::new("git")
+        .args(["add", "test.txt"])
+        .current_dir(repo_path)
+        .output()
+        .expect("Failed to run git add");
+
+    let git_commit = Command::new("git")
+        .args(["commit", "-m", "Initial commit"])
+        .current_dir(repo_path)
+        .output()
+        .expect("Failed to run git commit");
+    assert!(git_commit.status.success(), "git commit failed");
+
+    // Get commit-mode entries
+    let commit_entries =
+        enumerate_commit_tree(repo_path, "HEAD").expect("Failed to enumerate commit");
+    let commit_entry = commit_entries
+        .iter()
+        .find(|e| e.relative_path == "test.txt")
+        .expect("test.txt should exist in commit");
+
+    // Get working-dir entries (file is unchanged)
+    let workdir_entries =
+        enumerate_working_directory(repo_path).expect("Failed to enumerate working dir");
+
+    let workdir_entry = workdir_entries
+        .iter()
+        .find(|e| e.relative_path == "test.txt")
+        .expect("test.txt should exist in working dir");
+
+    // THE INVARIANT: blob_id must be identical
+    assert_eq!(
+        commit_entry.blob_id, workdir_entry.blob_id,
+        "blob_id must match between commit and working-dir modes for unchanged files"
+    );
+
+    // CRITICAL: relative_path must also be identical for file_id to match.
+    // This ensures path normalization is consistent between modes.
+    assert_eq!(
+        commit_entry.relative_path, workdir_entry.relative_path,
+        "relative_path must match between commit and working-dir modes"
+    );
+
+    // Also verify the blob_id looks like a valid Git SHA-1 (40 hex chars)
+    assert_eq!(
+        commit_entry.blob_id.len(),
+        40,
+        "blob_id should be 40 hex chars (SHA-1)"
+    );
+    assert!(
+        commit_entry.blob_id.chars().all(|c| c.is_ascii_hexdigit()),
+        "blob_id should be all hex chars"
+    );
+}
+
+#[test]
+fn test_working_dir_blob_id_matches_commit() {
+    let repo_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+
+    // Use a stable test artifact that rarely changes (not README.md or Cargo.toml)
+    let test_file = "test_artifacts/Colorize.ts";
+
+    // Get commit-mode blob ID for the test file
+    let commit_entries =
+        enumerate_commit_tree(&repo_path, "HEAD").expect("Failed to enumerate commit");
+    let file_commit = commit_entries
+        .iter()
+        .find(|e| e.relative_path == test_file)
+        .expect("test_artifacts/Colorize.ts should exist in commit");
+
+    // Get working-dir blob ID for the test file
+    let workdir_entries =
+        enumerate_working_directory(&repo_path).expect("Failed to enumerate working dir");
+    let file_workdir = workdir_entries
+        .iter()
+        .find(|e| e.relative_path == test_file)
+        .expect("test_artifacts/Colorize.ts should exist in working dir");
+
+    // They should match!
+    assert_eq!(
+        file_commit.blob_id, file_workdir.blob_id,
+        "test_artifacts/Colorize.ts blob_id should match between commit and working-dir modes"
+    );
+}

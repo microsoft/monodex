@@ -1,8 +1,6 @@
-//! System information for deterministic embedding configuration
-//!
-//! This module provides memory and CPU detection for the `"auto"` embedding model
-//! configuration heuristic. The heuristic is deterministic - it does not depend on
-//! current system load, only on static system properties like total RAM and CPU core count.
+//! Purpose: Detect total RAM, cgroup limits, and CPU cores; resolve the `"auto"` embedding configuration heuristic.
+//! Edit here when: Tuning the auto-detection heuristic, RAM/CPU constants, or cgroup detection.
+//! Do not edit here for: ONNX session pool itself (see `parallel_embedder.rs`), config schema (see `app/config.rs`).
 
 use anyhow::Result;
 
