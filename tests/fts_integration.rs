@@ -676,3 +676,65 @@ fn test_purge_cleanup() {
 
     remove_monodex_home();
 }
+
+// =============================================================================
+// Test 6: End-to-end test for schema-mismatch error
+// =============================================================================
+
+/// Test schema-mismatch error:
+/// - Hand-write a monodex-meta.json with version 3 (old version)
+/// - Attempt to open the database
+/// - Confirm error fires with expected message
+#[test]
+#[serial(monodex_home)]
+fn test_schema_mismatch_error() {
+    let (_monodex_home, _repo_dir) = {
+        // Set up temp directories
+        let monodex_home = tempfile::TempDir::new().unwrap();
+        let repo_dir = tempfile::TempDir::new().unwrap();
+
+        set_monodex_home(monodex_home.path());
+
+        // Create test git repo (unused - we just need a repo for config)
+        let _commit_oid = create_test_git_repo(repo_dir.path());
+
+        // Create config pointing to the repo
+        let config = create_test_config(monodex_home.path(), "test-catalog", repo_dir.path());
+
+        // Run init-db first
+        run_init_db(&config).expect("init-db failed");
+
+        // Get database path
+        let db_path = monodex::app::resolve_database_path(Some(&config)).unwrap();
+        let meta_path = db_path.join("monodex-meta.json");
+
+        // Now hand-write an old schema version
+        let old_meta = r#"{"monodex_schema_version": 3, "created_at": "2024-01-01T00:00:00Z", "created_by_binary_version": "0.5.0", "lance_format_version": "0.1.0"}"#;
+        fs::write(&meta_path, old_meta).expect("Failed to write old meta");
+
+        // Attempt to open storage should fail with schema mismatch
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let result = rt.block_on(monodex::engine::storage::Database::open(&db_path));
+        assert!(result.is_err(), "Should error on schema mismatch");
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("Schema mismatch"),
+            "Error should mention schema mismatch, got: {}",
+            err_msg
+        );
+        assert!(
+            err_msg.contains("database has version 3"),
+            "Error should mention database version 3, got: {}",
+            err_msg
+        );
+        assert!(
+            err_msg.contains("expects version 4"),
+            "Error should mention expected version 4, got: {}",
+            err_msg
+        );
+
+        (monodex_home, repo_dir)
+    };
+
+    remove_monodex_home();
+}
