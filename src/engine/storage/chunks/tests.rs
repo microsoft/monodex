@@ -536,3 +536,231 @@ async fn test_vector_search_correctness() {
         "file9:1 should be ranked first for query [1,1,1,1] (equal components)"
     );
 }
+
+// =============================================================================
+// Cluster 6b tests: upsert_without_vectors and preservation invariants
+// =============================================================================
+
+/// Test that upsert_without_vectors creates rows with NULL vectors.
+#[tokio::test]
+async fn test_upsert_without_vectors() {
+    let (_tmp_dir, storage) = create_test_storage().await;
+
+    let row = test_chunk_row("file1:1", "file1", 1);
+    storage.upsert_without_vectors(&[row]).await.unwrap();
+
+    // Verify the row was created
+    let retrieved = storage.get_by_row_id("file1:1").await.unwrap();
+    assert!(retrieved.is_some());
+    let retrieved = retrieved.unwrap();
+    assert_eq!(retrieved.row_id, "file1:1");
+
+    // Verify we can get the sentinel status and it reports no vector
+    let status = storage.get_sentinel_status("file1:1").await.unwrap();
+    assert!(status.is_some());
+    let status = status.unwrap();
+    assert!(
+        !status.has_vector,
+        "FTS-only chunk should not have a vector"
+    );
+}
+
+/// Test that upsert_without_vectors preserves existing vectors.
+///
+/// This is the key invariant: if a chunk already has a vector, an FTS-only
+/// upsert should NOT clobber it with NULL.
+#[tokio::test]
+async fn test_upsert_without_vectors_preserves_vectors() {
+    let (_tmp_dir, storage) = create_test_storage().await;
+
+    // First, insert with a NON-ZERO vector (zero vector causes issues with cosine similarity)
+    let row = test_chunk_row("file1:1", "file1", 1);
+    let mut vec = vec![0.0f32; VECTOR_DIMENSION];
+    vec[0] = 1.0; // Non-zero vector for valid cosine similarity
+    storage
+        .upsert_with_vectors(&[row.clone()], &[vec.clone()])
+        .await
+        .unwrap();
+
+    // Verify it has a vector
+    let status = storage
+        .get_sentinel_status("file1:1")
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(status.has_vector, "Should have vector after initial insert");
+
+    // Now upsert without vectors (simulating FTS-only crawl)
+    storage.upsert_without_vectors(&[row]).await.unwrap();
+
+    // Verify the vector is preserved
+    let status = storage
+        .get_sentinel_status("file1:1")
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        status.has_vector,
+        "Vector should be preserved after upsert_without_vectors"
+    );
+
+    // Verify vector_search still works
+    let results = storage
+        .vector_search(&vec, "test-catalog:main", 10)
+        .await
+        .unwrap();
+    assert_eq!(
+        results.len(),
+        1,
+        "Should still find the chunk via vector search"
+    );
+}
+
+/// Test that upsert_with_vectors preserves existing active_label_ids.
+///
+/// When upserting a row that already exists, the labels should be unioned,
+/// not replaced.
+#[tokio::test]
+async fn test_upsert_preserves_active_label_ids() {
+    let (_tmp_dir, storage) = create_test_storage().await;
+
+    // Insert with label A
+    let mut row = test_chunk_row("file1:1", "file1", 1);
+    row.active_label_ids = vec!["catalog:label-a".to_string()];
+    storage
+        .upsert_with_vectors(&[row.clone()], &[zero_vector()])
+        .await
+        .unwrap();
+
+    // Verify label A
+    let retrieved = storage.get_by_row_id("file1:1").await.unwrap().unwrap();
+    assert_eq!(retrieved.active_label_ids, vec!["catalog:label-a"]);
+
+    // Upsert with label B (same row_id)
+    row.active_label_ids = vec!["catalog:label-b".to_string()];
+    storage
+        .upsert_with_vectors(&[row.clone()], &[zero_vector()])
+        .await
+        .unwrap();
+
+    // Verify both labels are present (union)
+    let retrieved = storage.get_by_row_id("file1:1").await.unwrap().unwrap();
+    assert_eq!(retrieved.active_label_ids.len(), 2);
+    assert!(
+        retrieved
+            .active_label_ids
+            .contains(&"catalog:label-a".to_string())
+    );
+    assert!(
+        retrieved
+            .active_label_ids
+            .contains(&"catalog:label-b".to_string())
+    );
+}
+
+/// Test that upsert_without_vectors preserves existing active_label_ids.
+///
+/// FTS-only crawl followed by vector crawl should preserve both labels.
+#[tokio::test]
+async fn test_upsert_without_vectors_preserves_active_label_ids() {
+    let (_tmp_dir, storage) = create_test_storage().await;
+
+    // Insert without vector, with label A (FTS-only crawl)
+    let mut row = test_chunk_row("file1:1", "file1", 1);
+    row.active_label_ids = vec!["catalog:label-a".to_string()];
+    storage
+        .upsert_without_vectors(&[row.clone()])
+        .await
+        .unwrap();
+
+    // Verify label A and no vector
+    let retrieved = storage.get_by_row_id("file1:1").await.unwrap().unwrap();
+    assert_eq!(retrieved.active_label_ids, vec!["catalog:label-a"]);
+    let status = storage
+        .get_sentinel_status("file1:1")
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(!status.has_vector);
+
+    // Now do a vector crawl with label B
+    row.active_label_ids = vec!["catalog:label-b".to_string()];
+    storage
+        .upsert_with_vectors(&[row.clone()], &[zero_vector()])
+        .await
+        .unwrap();
+
+    // Verify both labels are present AND vector exists
+    let retrieved = storage.get_by_row_id("file1:1").await.unwrap().unwrap();
+    assert_eq!(retrieved.active_label_ids.len(), 2);
+    assert!(
+        retrieved
+            .active_label_ids
+            .contains(&"catalog:label-a".to_string())
+    );
+    assert!(
+        retrieved
+            .active_label_ids
+            .contains(&"catalog:label-b".to_string())
+    );
+    let status = storage
+        .get_sentinel_status("file1:1")
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(status.has_vector);
+}
+
+/// Test that self-upsert is idempotent (labels don't duplicate).
+#[tokio::test]
+async fn test_upsert_idempotent_labels() {
+    let (_tmp_dir, storage) = create_test_storage().await;
+
+    // Insert with label A
+    let mut row = test_chunk_row("file1:1", "file1", 1);
+    row.active_label_ids = vec!["catalog:label-a".to_string()];
+    storage
+        .upsert_with_vectors(&[row.clone()], &[zero_vector()])
+        .await
+        .unwrap();
+
+    // Upsert again with same label
+    storage
+        .upsert_with_vectors(&[row.clone()], &[zero_vector()])
+        .await
+        .unwrap();
+
+    // Verify no duplicates
+    let retrieved = storage.get_by_row_id("file1:1").await.unwrap().unwrap();
+    assert_eq!(retrieved.active_label_ids, vec!["catalog:label-a"]);
+}
+
+/// Test get_sentinel_status returns None for nonexistent row.
+#[tokio::test]
+async fn test_get_sentinel_status_nonexistent() {
+    let (_tmp_dir, storage) = create_test_storage().await;
+
+    let status = storage.get_sentinel_status("nonexistent:1").await.unwrap();
+    assert!(status.is_none());
+}
+
+/// Test get_sentinel_status correctly reports vector presence.
+#[tokio::test]
+async fn test_get_sentinel_status_vector_presence() {
+    let (_tmp_dir, storage) = create_test_storage().await;
+
+    // Insert with vector
+    let row = test_chunk_row("file1:1", "file1", 1);
+    storage
+        .upsert_with_vectors(&[row.clone()], &[zero_vector()])
+        .await
+        .unwrap();
+
+    let status = storage
+        .get_sentinel_status("file1:1")
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(status.has_vector);
+    assert!(status.row.file_complete);
+}

@@ -15,6 +15,7 @@ mod predicate;
 mod rows;
 
 pub use chunks::ChunkStorage;
+pub use chunks::SentinelStatus;
 pub use database::{Database, META_FILE, MetaFile, err_schema_mismatch};
 pub use labels::LabelStorage;
 pub use locks::{
