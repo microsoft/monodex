@@ -82,14 +82,24 @@ fn main() -> anyhow::Result<()> {
             limit,
             label,
             catalog,
-            retrieval: _,
+            retrieval,
         } => {
+            // Normalize retrieval Vec to Option<BTreeSet>
+            // Empty Vec = None (all methods in selection)
+            // Non-empty Vec = Some(BTreeSet) with deduplication
+            let retrieval_set = if retrieval.is_empty() {
+                None
+            } else {
+                Some(retrieval.into_iter().collect())
+            };
+
             monodex::app::commands::run_search(
                 &config,
                 &text,
                 limit,
                 label.as_deref(),
                 catalog.as_deref(),
+                retrieval_set,
                 cli.debug,
             )?;
         }
