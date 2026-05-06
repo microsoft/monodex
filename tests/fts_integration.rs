@@ -576,3 +576,103 @@ fn test_first_time_crawl_fts_only() {
 
     remove_monodex_home();
 }
+
+// =============================================================================
+// Test 5: End-to-end test for purge cleanup
+// =============================================================================
+
+/// Test purge cleanup:
+/// - After a crawl producing FTS state, purge --catalog X removes FTS directory
+/// - purge --all removes entire fts/ directory
+#[test]
+#[serial(monodex_home)]
+fn test_purge_cleanup() {
+    let (_monodex_home, _repo_dir) = {
+        // Set up temp directories
+        let monodex_home = tempfile::TempDir::new().unwrap();
+        let repo_dir = tempfile::TempDir::new().unwrap();
+
+        set_monodex_home(monodex_home.path());
+
+        // Create test git repo
+        let commit_oid = create_test_git_repo(repo_dir.path());
+
+        // Create config pointing to the repo
+        let config = create_test_config(monodex_home.path(), "test-catalog", repo_dir.path());
+
+        // Run init-db
+        run_init_db(&config).expect("init-db failed");
+
+        // Crawl to create FTS state
+        monodex::app::commands::crawl::run_crawl_label(
+            &config,
+            "test-catalog",
+            "main",
+            &commit_oid,
+            false,  // incremental_warnings
+            vec![], // retrieval: empty = all methods
+            false,  // debug
+        )
+        .expect("crawl failed");
+
+        // Get database path
+        let db_path = monodex::app::resolve_database_path(Some(&config)).unwrap();
+        let fts_catalog_path = db_path.join("fts").join("test-catalog");
+
+        // Verify FTS directory exists after crawl
+        assert!(
+            fts_catalog_path.exists(),
+            "FTS catalog directory should exist after crawl"
+        );
+
+        // Test purge --catalog
+        monodex::app::commands::purge::run_purge(&config, Some("test-catalog"), false, false)
+            .expect("purge --catalog failed");
+
+        // Verify FTS catalog directory is gone after purge --catalog
+        assert!(
+            !fts_catalog_path.exists(),
+            "FTS catalog directory should be gone after purge --catalog"
+        );
+
+        // Crawl again to recreate FTS state
+        monodex::app::commands::crawl::run_crawl_label(
+            &config,
+            "test-catalog",
+            "main",
+            &commit_oid,
+            false,
+            vec![],
+            false,
+        )
+        .expect("second crawl failed");
+
+        // Verify FTS directory exists again
+        assert!(
+            fts_catalog_path.exists(),
+            "FTS catalog directory should exist after second crawl"
+        );
+
+        // Test purge --all
+        monodex::app::commands::purge::run_purge(&config, None, true, false)
+            .expect("purge --all failed");
+
+        // Verify entire FTS directory is gone (or empty/recreated) after purge --all
+        let fts_path = db_path.join("fts");
+        // After purge --all, the fts directory should either not exist or be empty
+        if fts_path.exists() {
+            let entries: Vec<_> = std::fs::read_dir(&fts_path)
+                .unwrap()
+                .filter_map(|e| e.ok())
+                .collect();
+            assert!(
+                entries.is_empty(),
+                "FTS directory should be empty after purge --all"
+            );
+        }
+
+        (monodex_home, repo_dir)
+    };
+
+    remove_monodex_home();
+}
