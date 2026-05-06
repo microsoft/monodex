@@ -9,9 +9,11 @@ use arrow_array::{
 use arrow_schema::SchemaRef;
 use futures::TryStreamExt;
 use lancedb::query::{ExecutableQuery, QueryBase};
+use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use crate::engine::retrieval::RetrievalMethod;
 use crate::engine::storage::LabelMetadataRow;
 use crate::engine::storage::locks::acquire_commit_mutex;
 use crate::engine::storage::predicate::eq_str;
@@ -146,6 +148,22 @@ fn parse_label_metadata_row(batch: &RecordBatch, row_idx: usize) -> Result<Label
 
     row.validate()?;
     Ok(row)
+}
+
+/// Read the retrieval selection from a label metadata row.
+///
+/// The selection is derived from which `<method>_source` columns are non-NULL.
+/// A method is in the selection iff its source column is Some.
+/// This is the single source of truth for retrieval selection.
+pub fn read_selection(row: &LabelMetadataRow) -> BTreeSet<RetrievalMethod> {
+    let mut selection = BTreeSet::new();
+    if row.vector_source.is_some() {
+        selection.insert(RetrievalMethod::Vector);
+    }
+    if row.fts_source.is_some() {
+        selection.insert(RetrievalMethod::Fts);
+    }
+    selection
 }
 
 /// Label metadata storage operations for LanceDB.
@@ -480,5 +498,69 @@ mod tests {
         // Verify only one row exists
         let rows = storage.list_for_catalog("test-catalog").await.unwrap();
         assert_eq!(rows.len(), 1);
+    }
+
+    #[test]
+    fn test_read_selection_both_methods() {
+        let row = test_label_metadata_row("main");
+        let selection = read_selection(&row);
+        assert_eq!(selection.len(), 2);
+        assert!(selection.contains(&RetrievalMethod::Fts));
+        assert!(selection.contains(&RetrievalMethod::Vector));
+    }
+
+    #[test]
+    fn test_read_selection_vector_only() {
+        let row = LabelMetadataRow {
+            label_id: "test-catalog:main".to_string(),
+            catalog: "test-catalog".to_string(),
+            label: "main".to_string(),
+            source_kind: SOURCE_KIND_GIT_COMMIT.to_string(),
+            vector_source: Some("abc123".to_string()),
+            vector_complete: true,
+            fts_source: None, // FTS not in selection
+            fts_complete: false,
+            updated_at_unix_secs: 1700000000,
+        };
+        let selection = read_selection(&row);
+        assert_eq!(selection.len(), 1);
+        assert!(selection.contains(&RetrievalMethod::Vector));
+        assert!(!selection.contains(&RetrievalMethod::Fts));
+    }
+
+    #[test]
+    fn test_read_selection_fts_only() {
+        let row = LabelMetadataRow {
+            label_id: "test-catalog:main".to_string(),
+            catalog: "test-catalog".to_string(),
+            label: "main".to_string(),
+            source_kind: SOURCE_KIND_GIT_COMMIT.to_string(),
+            vector_source: None, // Vector not in selection
+            vector_complete: false,
+            fts_source: Some("abc123".to_string()),
+            fts_complete: true,
+            updated_at_unix_secs: 1700000000,
+        };
+        let selection = read_selection(&row);
+        assert_eq!(selection.len(), 1);
+        assert!(selection.contains(&RetrievalMethod::Fts));
+        assert!(!selection.contains(&RetrievalMethod::Vector));
+    }
+
+    #[test]
+    fn test_read_selection_empty() {
+        let row = LabelMetadataRow {
+            label_id: "test-catalog:main".to_string(),
+            catalog: "test-catalog".to_string(),
+            label: "main".to_string(),
+            source_kind: SOURCE_KIND_GIT_COMMIT.to_string(),
+            vector_source: None,
+            vector_complete: false,
+            fts_source: None,
+            fts_complete: false,
+            updated_at_unix_secs: 1700000000,
+        };
+        let selection = read_selection(&row);
+        assert!(selection.is_empty());
     }
 }

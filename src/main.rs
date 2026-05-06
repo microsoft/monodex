@@ -32,7 +32,7 @@ fn main() -> anyhow::Result<()> {
             label,
             source,
             incremental_warnings,
-            retrieval: _,
+            retrieval,
         } => {
             // Resolve label context from explicit flags or default context
             let (_, catalog_name, label) = resolve_label_context(Some(&label), catalog.as_deref())?;
@@ -43,6 +43,7 @@ fn main() -> anyhow::Result<()> {
                     &catalog_name,
                     &label,
                     incremental_warnings,
+                    retrieval,
                     cli.debug,
                 )?;
             } else {
@@ -53,6 +54,7 @@ fn main() -> anyhow::Result<()> {
                     &label,
                     source.commit.as_ref().unwrap(),
                     incremental_warnings,
+                    retrieval,
                     cli.debug,
                 )?;
             }

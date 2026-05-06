@@ -5,7 +5,7 @@
 //! Do not edit here for: Crawl orchestration (see ../commands/crawl.rs), embed/upload pipeline (see pipeline.rs).
 
 use anyhow::Result;
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 use std::sync::Arc;
 
 use crate::app::format_duration;
@@ -15,6 +15,7 @@ use crate::engine::{
     crawl_config::CompiledCrawlConfig,
     git_ops::{BlobSource, FileEntry},
     identifier::LabelId,
+    retrieval::RetrievalMethod,
     storage::{ChunkStorage, LabelMetadataRow, LabelStorage},
     warning::{CrawlWarning, WarningSink},
 };
@@ -37,6 +38,13 @@ pub async fn open_storage(
 }
 
 /// Writes in-progress label metadata before any work begins.
+///
+/// The `selection` parameter specifies which retrieval methods are in the new selection.
+/// For each method in the selection, `<method>_source` is set to `source_value` and
+/// `<method>_complete` is set to `false`. For methods not in the selection,
+/// `<method>_source` is set to `NULL` and `<method>_complete` is set to `false`
+/// (the `_complete` value is a don't-care when source is NULL, but must be written
+/// since the column is non-nullable).
 pub async fn write_in_progress_metadata(
     label_storage: &LabelStorage,
     label_id: &LabelId,
@@ -44,6 +52,7 @@ pub async fn write_in_progress_metadata(
     label: &str,
     source_value: &str,
     source_kind: &str,
+    selection: &BTreeSet<RetrievalMethod>,
     debug: bool,
 ) -> Result<()> {
     let metadata = LabelMetadataRow {
@@ -51,10 +60,17 @@ pub async fn write_in_progress_metadata(
         catalog: catalog_name.to_string(),
         label: label.to_string(),
         source_kind: source_kind.to_string(),
-        // Stage 6 will update these with proper selection handling
-        vector_source: Some(source_value.to_string()),
+        vector_source: if selection.contains(&RetrievalMethod::Vector) {
+            Some(source_value.to_string())
+        } else {
+            None
+        },
         vector_complete: false,
-        fts_source: Some(source_value.to_string()),
+        fts_source: if selection.contains(&RetrievalMethod::Fts) {
+            Some(source_value.to_string())
+        } else {
+            None
+        },
         fts_complete: false,
         updated_at_unix_secs: std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)

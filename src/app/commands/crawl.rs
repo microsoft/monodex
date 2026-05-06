@@ -7,7 +7,7 @@
 
 use anyhow::Result;
 use std::cell::Cell;
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 use std::sync::Arc;
 
 use crate::app::crawl::phases::{
@@ -27,10 +27,30 @@ use crate::engine::git_ops::{
     BlobSource, CommitBlobSource, WorkingDirBlobSource, resolve_commit_oid,
 };
 use crate::engine::identifier::LabelId;
+use crate::engine::retrieval::RetrievalMethod;
 use crate::engine::storage::{
     SOURCE_KIND_GIT_COMMIT, SOURCE_KIND_WORKING_DIRECTORY, acquire_catalog_lock,
     acquire_database_shared,
 };
+
+/// Returns all retrieval methods (used when no explicit --retrieval is specified).
+fn all_retrieval_methods() -> BTreeSet<RetrievalMethod> {
+    let mut methods = BTreeSet::new();
+    methods.insert(RetrievalMethod::Fts);
+    methods.insert(RetrievalMethod::Vector);
+    methods
+}
+
+/// Normalizes `Vec<RetrievalMethod>` to `BTreeSet<RetrievalMethod>`.
+/// Empty vec means all methods; non-empty vec is deduplicated into a set.
+fn normalize_retrieval(retrieval: Vec<RetrievalMethod>) -> BTreeSet<RetrievalMethod> {
+    if retrieval.is_empty() {
+        all_retrieval_methods()
+    } else {
+        // Set semantics: --retrieval vector --retrieval vector collapses to {Vector}
+        retrieval.into_iter().collect()
+    }
+}
 
 /// Run crawl for a git commit label
 #[allow(clippy::too_many_arguments)]
@@ -40,8 +60,10 @@ pub fn run_crawl_label(
     label: &str,
     commit: &str,
     incremental_warnings: bool,
+    retrieval: Vec<RetrievalMethod>,
     debug: bool,
 ) -> Result<()> {
+    let selection = normalize_retrieval(retrieval);
     let total_start = std::time::Instant::now();
     println!("🔍 Starting label-aware crawl...");
     println!("Catalog: {}", catalog_name);
@@ -113,6 +135,7 @@ pub fn run_crawl_label(
         debug,
         &blob_source,
         source_metadata,
+        selection,
     ))
 }
 
@@ -123,8 +146,10 @@ pub fn run_crawl_working_dir(
     catalog_name: &str,
     label: &str,
     incremental_warnings: bool,
+    retrieval: Vec<RetrievalMethod>,
     debug: bool,
 ) -> Result<()> {
+    let selection = normalize_retrieval(retrieval);
     let total_start = std::time::Instant::now();
     println!("🔍 Starting working directory crawl...");
     println!("Catalog: {}", catalog_name);
@@ -191,6 +216,7 @@ pub fn run_crawl_working_dir(
         debug,
         &blob_source,
         source_metadata,
+        selection,
     ))
 }
 
@@ -209,6 +235,7 @@ async fn run_crawl_async(
     debug: bool,
     blob_source: &dyn BlobSource,
     source_metadata: CrawlSourceMetadata,
+    selection: BTreeSet<RetrievalMethod>,
 ) -> Result<()> {
     // Create warning counter and sink for in-flight warnings
     let warning_counter = Cell::new(0usize);
@@ -225,6 +252,7 @@ async fn run_crawl_async(
         label,
         &source_metadata.source_value,
         source_metadata.source_kind,
+        &selection,
         debug,
     )
     .await?;
