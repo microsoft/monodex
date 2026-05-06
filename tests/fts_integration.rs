@@ -738,3 +738,81 @@ fn test_schema_mismatch_error() {
 
     remove_monodex_home();
 }
+
+// =============================================================================
+// Test 7: FTS query parse error
+// =============================================================================
+
+/// Test FTS query parse error (decision #19):
+/// - Index a label with FTS state
+/// - Run search with a syntactically-invalid query for Tantivy's parser
+/// - Confirm output is "Couldn't parse FTS query: <message>" and NOT "No results."
+#[test]
+#[serial(monodex_home)]
+fn test_fts_query_parse_error() {
+    let (_monodex_home, _repo_dir) = {
+        // Set up temp directories
+        let monodex_home = tempfile::TempDir::new().unwrap();
+        let repo_dir = tempfile::TempDir::new().unwrap();
+
+        set_monodex_home(monodex_home.path());
+
+        // Create test git repo
+        let commit_oid = create_test_git_repo(repo_dir.path());
+
+        // Create config pointing to the repo
+        let config = create_test_config(monodex_home.path(), "test-catalog", repo_dir.path());
+
+        // Run init-db
+        run_init_db(&config).expect("init-db failed");
+
+        // Crawl with FTS
+        monodex::app::commands::crawl::run_crawl_label(
+            &config,
+            "test-catalog",
+            "main",
+            &commit_oid,
+            false,                      // incremental_warnings
+            vec![RetrievalMethod::Fts], // retrieval: fts only
+            false,                      // debug
+        )
+        .expect("crawl failed");
+
+        // Search with a syntactically-invalid query
+        // Using unmatched quotes or malformed field syntax that Tantivy's parser rejects
+        let search_result = run_search(
+            &config,
+            "foo:bar:", // Invalid field syntax (field requires a term after colon)
+            10,
+            Some("main"),
+            Some("test-catalog"),
+            Some([RetrievalMethod::Fts].into_iter().collect()),
+            false,
+        );
+
+        // Should error (not return empty results)
+        assert!(
+            search_result.is_err(),
+            "Parse error should return Err, got Ok"
+        );
+        let err_msg = search_result.unwrap_err().to_string();
+
+        // Must contain the parse error message
+        assert!(
+            err_msg.contains("Couldn't parse FTS query"),
+            "Error should mention parse error, got: {}",
+            err_msg
+        );
+
+        // Must NOT contain "No results"
+        assert!(
+            !err_msg.contains("No results"),
+            "Parse error should not mention 'No results', got: {}",
+            err_msg
+        );
+
+        (monodex_home, repo_dir)
+    };
+
+    remove_monodex_home();
+}
