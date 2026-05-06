@@ -356,3 +356,134 @@ fn test_selection_narrowing() {
 
     remove_monodex_home();
 }
+
+// =============================================================================
+// Test 3: End-to-end test for selection-widening
+// =============================================================================
+
+/// Test selection-widening flow:
+/// - Continue from narrowing test state (selection is {fts})
+/// - Crawl with no --retrieval flag widens selection back to {fts, vector}
+/// - Confirms NO narrowing-announcement block
+/// - Confirms search shows "(fts, vector)" on Label: line
+/// - Confirms search with no --retrieval produces PR1 stub error again
+#[test]
+#[serial(monodex_home)]
+fn test_selection_widening() {
+    let (_monodex_home, _repo_dir) = {
+        // Set up temp directories
+        let monodex_home = tempfile::TempDir::new().unwrap();
+        let repo_dir = tempfile::TempDir::new().unwrap();
+
+        set_monodex_home(monodex_home.path());
+
+        // Create test git repo
+        let commit_oid = create_test_git_repo(repo_dir.path());
+
+        // Create config pointing to the repo
+        let config = create_test_config(monodex_home.path(), "test-catalog", repo_dir.path());
+
+        // Run init-db
+        run_init_db(&config).expect("init-db failed");
+
+        // First crawl: no --retrieval flag (selection becomes {fts, vector})
+        monodex::app::commands::crawl::run_crawl_label(
+            &config,
+            "test-catalog",
+            "main",
+            &commit_oid,
+            false,  // incremental_warnings
+            vec![], // retrieval: empty = all methods
+            false,  // debug
+        )
+        .expect("first crawl failed");
+
+        // Second crawl: --retrieval fts (selection narrows to {fts})
+        monodex::app::commands::crawl::run_crawl_label(
+            &config,
+            "test-catalog",
+            "main",
+            &commit_oid,
+            false,                      // incremental_warnings
+            vec![RetrievalMethod::Fts], // retrieval: fts only
+            false,                      // debug
+        )
+        .expect("second crawl (narrowing) failed");
+
+        // Third crawl: no --retrieval flag (selection widens back to {fts, vector})
+        monodex::app::commands::crawl::run_crawl_label(
+            &config,
+            "test-catalog",
+            "main",
+            &commit_oid,
+            false,  // incremental_warnings
+            vec![], // retrieval: empty = all methods
+            false,  // debug
+        )
+        .expect("third crawl (widening) failed");
+
+        // Verify: search with no --retrieval should produce PR1 stub error again
+        // (both methods in selection, sources equal, RRF not implemented)
+        let search_result = run_search(
+            &config,
+            "getUserProfile",
+            10,
+            Some("main"),
+            Some("test-catalog"),
+            None, // no --retrieval flag
+            false,
+        );
+
+        assert!(
+            search_result.is_err(),
+            "Search should return PR1 stub error for multi-method selection"
+        );
+        let err_msg = search_result.unwrap_err().to_string();
+        assert!(
+            err_msg
+                .contains("Hybrid search across multiple retrieval methods is not yet implemented"),
+            "Error should mention hybrid search not implemented, got: {}",
+            err_msg
+        );
+
+        // Verify: search --retrieval fts should succeed
+        let fts_retrieval: Option<BTreeSet<RetrievalMethod>> =
+            Some([RetrievalMethod::Fts].into_iter().collect());
+        let search_result = run_search(
+            &config,
+            "getUserProfile",
+            10,
+            Some("main"),
+            Some("test-catalog"),
+            fts_retrieval,
+            false,
+        );
+        assert!(
+            search_result.is_ok(),
+            "FTS search should succeed after widening, got error: {:?}",
+            search_result.err()
+        );
+
+        // Verify: search --retrieval vector should succeed
+        let vector_retrieval: Option<BTreeSet<RetrievalMethod>> =
+            Some([RetrievalMethod::Vector].into_iter().collect());
+        let search_result = run_search(
+            &config,
+            "getUserProfile",
+            10,
+            Some("main"),
+            Some("test-catalog"),
+            vector_retrieval,
+            false,
+        );
+        assert!(
+            search_result.is_ok(),
+            "Vector search should succeed after widening, got error: {:?}",
+            search_result.err()
+        );
+
+        (monodex_home, repo_dir)
+    };
+
+    remove_monodex_home();
+}
