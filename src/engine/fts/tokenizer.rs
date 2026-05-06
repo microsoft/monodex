@@ -416,4 +416,114 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn test_phrase_query_matches_sequential_tokens() {
+        use tantivy::Index;
+        use tantivy::collector::TopDocs;
+        use tantivy::query::QueryParser;
+
+        // Build schema with our tokenizer
+        let schema = super::super::schema::fts_schema();
+        let row_id_field = schema.get_field("row_id").unwrap();
+        let text_field = schema.get_field("text").unwrap();
+
+        // Create in-memory index
+        let index = Index::create_in_ram(schema);
+
+        // Register our tokenizer
+        index
+            .tokenizers()
+            .register(FTS_TOKENIZER_NAME, MonodexFtsTokenizer);
+
+        // Index a document with "getUserProfile" which produces tokens:
+        // getuserprofile(0), get(1), user(2), profile(3)
+        let mut writer = index.writer(50_000_000).expect("writer should succeed");
+        writer
+            .add_document(tantivy::doc!(
+                row_id_field => "test:1",
+                text_field => "getUserProfile"
+            ))
+            .expect("add_document should succeed");
+        writer.commit().expect("commit should succeed");
+
+        // Create a reader and searcher
+        let reader = index.reader().expect("reader should succeed");
+        reader.reload().expect("reload should succeed");
+        let searcher = reader.searcher();
+
+        // Build a phrase query for "user profile" - these tokens are at positions 2 and 3
+        let query_parser = QueryParser::for_index(&index, vec![text_field]);
+        let query = query_parser
+            .parse_query("\"user profile\"")
+            .expect("parse_query should succeed");
+
+        // Search - the phrase query should match because "user" and "profile"
+        // are at adjacent positions (2 and 3)
+        let top_docs = searcher
+            .search(&query, &TopDocs::with_limit(10))
+            .expect("search should succeed");
+
+        // The document should match the phrase query
+        assert_eq!(
+            top_docs.len(),
+            1,
+            "Phrase query 'user profile' should match document with getUserProfile"
+        );
+    }
+
+    #[test]
+    fn test_cjk_query_parser_respects_tokenizer() {
+        use tantivy::Index;
+        use tantivy::collector::TopDocs;
+        use tantivy::query::QueryParser;
+
+        // Build schema with our tokenizer
+        let schema = super::super::schema::fts_schema();
+        let row_id_field = schema.get_field("row_id").unwrap();
+        let text_field = schema.get_field("text").unwrap();
+
+        // Create in-memory index
+        let index = Index::create_in_ram(schema);
+
+        // Register our tokenizer
+        index
+            .tokenizers()
+            .register(FTS_TOKENIZER_NAME, MonodexFtsTokenizer);
+
+        // Index a document with CJK text
+        let mut writer = index.writer(50_000_000).expect("writer should succeed");
+        writer
+            .add_document(tantivy::doc!(
+                row_id_field => "test:cjk:1",
+                text_field => "我来到北京清华大学"
+            ))
+            .expect("add_document should succeed");
+        writer.commit().expect("commit should succeed");
+
+        // Create a reader and searcher
+        let reader = index.reader().expect("reader should succeed");
+        reader.reload().expect("reload should succeed");
+        let searcher = reader.searcher();
+
+        // Build a query parser that uses our tokenizer for the text field
+        let query_parser = QueryParser::for_index(&index, vec![text_field]);
+
+        // Parse a CJK query - Jieba should segment this
+        // "北京" is one of the segments from "我来到北京清华大学"
+        let query = query_parser
+            .parse_query("北京")
+            .expect("parse_query should succeed");
+
+        // Search
+        let top_docs = searcher
+            .search(&query, &TopDocs::with_limit(10))
+            .expect("search should succeed");
+
+        // The document should match the CJK query
+        assert!(
+            !top_docs.is_empty(),
+            "CJK query '北京' should match document containing '我来到北京清华大学'"
+        );
+    }
 }
