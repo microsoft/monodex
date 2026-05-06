@@ -11,6 +11,9 @@ pub mod schema;
 pub mod search;
 pub mod tokenizer;
 
+#[cfg(test)]
+mod tests;
+
 pub use index::{FTS_HEAP_BUDGET_BYTES, FtsIndex};
 pub use indexing::index_chunks_for_fts;
 pub use manifest::{FtsManifest, ManifestRead};
