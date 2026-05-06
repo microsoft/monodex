@@ -178,7 +178,7 @@ fn check_existing_database_pre_lock(db_path: &Path) -> Result<Option<MetaFile>> 
             return Ok(None);
         }
 
-        // Check if directory is empty (ignoring lockfile and locks/ detritus)
+        // Check if directory is empty (ignoring lockfile, locks/, and fts/ detritus)
         let is_empty = db_path
             .read_dir()
             .map(|mut entries| {
@@ -186,7 +186,7 @@ fn check_existing_database_pre_lock(db_path: &Path) -> Result<Option<MetaFile>> 
                     e.ok()
                         .map(|e| {
                             let name = e.file_name();
-                            name == ".monodex.lock" || name == "locks"
+                            name == ".monodex.lock" || name == "locks" || name == "fts"
                         })
                         .unwrap_or(false)
                 })
@@ -194,7 +194,7 @@ fn check_existing_database_pre_lock(db_path: &Path) -> Result<Option<MetaFile>> 
             .unwrap_or(false);
 
         if is_empty {
-            // Empty directory (or only lockfile/locks), treat as non-existent
+            // Empty directory (or only lockfile/locks/fts), treat as non-existent
             Ok(None)
         } else {
             // Non-empty without meta file or tables
@@ -251,7 +251,7 @@ fn check_existing_database(db_path: &Path) -> Result<Option<MetaFile>> {
             bail!(err_partial_state(db_path));
         }
 
-        // Check if directory is empty (ignoring lockfile and locks/ detritus)
+        // Check if directory is empty (ignoring lockfile, locks/, and fts/ detritus)
         let is_empty = db_path
             .read_dir()
             .map(|mut entries| {
@@ -259,7 +259,7 @@ fn check_existing_database(db_path: &Path) -> Result<Option<MetaFile>> {
                     e.ok()
                         .map(|e| {
                             let name = e.file_name();
-                            name == ".monodex.lock" || name == "locks"
+                            name == ".monodex.lock" || name == "locks" || name == "fts"
                         })
                         .unwrap_or(false)
                 })
@@ -267,7 +267,7 @@ fn check_existing_database(db_path: &Path) -> Result<Option<MetaFile>> {
             .unwrap_or(false);
 
         if is_empty {
-            // Empty directory (or only lockfile/locks), treat as non-existent
+            // Empty directory (or only lockfile/locks/fts), treat as non-existent
             Ok(None)
         } else {
             // Non-empty without meta file or tables
@@ -316,6 +316,11 @@ async fn create_database(db_path: &Path) -> Result<()> {
         .execute()
         .await
         .map_err(|e| anyhow!("Failed to create label_metadata table: {}", e))?;
+
+    // Create fts directory for Tantivy indexes (populated lazily per label)
+    let fts_dir = db_path.join("fts");
+    std::fs::create_dir_all(&fts_dir)
+        .map_err(|e| anyhow!("Failed to create fts directory: {}", e))?;
 
     // Write meta file using shared implementation (with fsync)
     let meta = MetaFile::new();
@@ -386,6 +391,9 @@ mod tests {
             db_path.join("locks").exists(),
             "locks directory should exist"
         );
+
+        // Verify fts directory was created
+        assert!(db_path.join("fts").exists(), "fts directory should exist");
 
         // Cleanup env
         remove_monodex_home();
@@ -627,6 +635,38 @@ mod tests {
         assert!(
             result.is_ok(),
             "init-db should succeed with locks/ detritus: {:?}",
+            result.err()
+        );
+
+        // Verify database was created
+        assert!(db_path.join(META_FILE).exists());
+
+        remove_monodex_home();
+    }
+
+    #[test]
+    #[serial(monodex_home)]
+    fn test_empty_directory_with_fts_dir_succeeds() {
+        // Test that a directory containing only fts/ is treated as empty
+        clear_tool_home_cache();
+        let temp_dir = TempDir::new().unwrap();
+
+        set_monodex_home(temp_dir.path());
+
+        // Create database directory with only fts/
+        let db_path = temp_dir.path().join("default-db");
+        fs::create_dir_all(db_path.join("fts")).unwrap();
+
+        let config_path = temp_dir.path().join("config.json");
+        write_minimal_config(&config_path);
+
+        let config = load_config(&config_path).expect("Config should load");
+        let result = run_init_db(&config);
+
+        // Should succeed - fts/ is treated as detritus
+        assert!(
+            result.is_ok(),
+            "init-db should succeed with fts/ detritus: {:?}",
             result.err()
         );
 

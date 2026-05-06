@@ -764,3 +764,53 @@ async fn test_get_sentinel_status_vector_presence() {
     assert!(status.has_vector);
     assert!(status.row.file_complete);
 }
+
+/// Test that vector_search does not return rows with NULL vectors.
+///
+/// This is important for FTS-only crawls: chunks inserted without vectors
+/// should not appear in vector search results.
+#[tokio::test]
+async fn test_vector_search_excludes_null_vectors() {
+    let (_tmp_dir, storage) = create_test_storage().await;
+
+    // Insert a chunk with a real vector (non-zero for valid cosine similarity)
+    let row_with_vector = test_chunk_row_with_label("file1", 1, "test:label");
+    let mut vec = vec![0.0f32; VECTOR_DIMENSION];
+    vec[0] = 1.0; // Non-zero vector for valid cosine similarity
+    storage
+        .upsert_with_vectors(std::slice::from_ref(&row_with_vector), &[vec.clone()])
+        .await
+        .unwrap();
+
+    // Insert a chunk WITHOUT a vector (FTS-only)
+    let row_without_vector = test_chunk_row_with_label("file2", 1, "test:label");
+    storage
+        .upsert_without_vectors(std::slice::from_ref(&row_without_vector))
+        .await
+        .unwrap();
+
+    // Verify both rows exist
+    assert!(storage.get_by_row_id("file1:1").await.unwrap().is_some());
+    assert!(storage.get_by_row_id("file2:1").await.unwrap().is_some());
+
+    // Verify vector presence
+    let status1 = storage
+        .get_sentinel_status("file1:1")
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(status1.has_vector);
+    let status2 = storage
+        .get_sentinel_status("file2:1")
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(!status2.has_vector);
+
+    // Vector search should only return the row with a vector
+    let results = storage.vector_search(&vec, "test:label", 10).await.unwrap();
+
+    // Should only return file1:1, not file2:1
+    assert_eq!(results.len(), 1, "Should only return rows with vectors");
+    assert_eq!(results[0].chunk.row_id, "file1:1");
+}

@@ -4,6 +4,42 @@
 //! Edit here when: Adding new crawl source types or changing failure tracking fields.
 //! Do not edit here for: Pipeline logic (see pipeline.rs), CLI handlers (see commands/crawl.rs), phase output types (see phases.rs).
 
+use crate::engine::retrieval::RetrievalMethod;
+use std::collections::BTreeSet;
+
+/// Results from each phase of a crawl, used for final metadata update.
+///
+/// Each field tracks whether a phase succeeded. `None` means the phase
+/// wasn't run (method not in selection). `Some(false)` means the phase
+/// ran but failed.
+pub struct PhaseResults {
+    /// Whether the vector/embed phase succeeded. None = vector not in selection.
+    pub vector_succeeded: Option<bool>,
+    /// Whether the FTS indexing phase succeeded. None = fts not in selection.
+    pub fts_succeeded: Option<bool>,
+    /// Whether label reassignment succeeded. Always required for completion.
+    pub label_reassignment_succeeded: bool,
+}
+
+impl PhaseResults {
+    /// Create PhaseResults for a given selection, with pessimistic defaults.
+    pub fn new(selection: &BTreeSet<RetrievalMethod>) -> Self {
+        Self {
+            vector_succeeded: if selection.contains(&RetrievalMethod::Vector) {
+                Some(false)
+            } else {
+                None
+            },
+            fts_succeeded: if selection.contains(&RetrievalMethod::Fts) {
+                Some(false)
+            } else {
+                None
+            },
+            label_reassignment_succeeded: false,
+        }
+    }
+}
+
 /// Metadata about the crawl source that travels alongside a `BlobSource`.
 ///
 /// This struct carries source identity (source_kind, source_value) as pure data.

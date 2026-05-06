@@ -17,7 +17,7 @@ pub use config::{
 pub use context::{
     DefaultContext, load_default_context, resolve_label_context, save_default_context,
 };
-pub use crawl::{CrawlFailures, run_embed_upload_pipeline};
+pub use crawl::{CrawlFailures, run_embed_upload_pipeline, run_upsert_without_vectors};
 pub use util::{
     chrono_timestamp, format_chunk_report, format_duration, format_eta, load_warning_state,
     sanitize_for_terminal, save_warning_state,

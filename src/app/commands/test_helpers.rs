@@ -67,6 +67,9 @@ pub async fn create_test_db_with_chunks(
         .await
         .expect("Failed to create label_metadata table");
 
+    // Create fts directory for Tantivy indexes
+    fs::create_dir_all(db_path.join("fts")).unwrap();
+
     // Write meta file
     let meta = MetaFile::new();
     let meta_file = File::create(db_path.join(META_FILE)).unwrap();

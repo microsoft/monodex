@@ -13,15 +13,15 @@ use std::sync::Arc;
 use crate::app::crawl::phases::{
     add_label_to_existing_files, build_package_index, chunk_new_files, classify_files,
     enumerate_files, filter_files, format_selection_for_display, open_storage,
-    print_narrowing_announcement, print_summary, print_warning_summary, run_label_cleanup,
-    save_warning_state, update_final_metadata, write_in_progress_metadata,
+    print_narrowing_announcement, print_summary, print_warning_summary, run_fts_phase,
+    run_label_cleanup, save_warning_state, update_final_metadata, write_in_progress_metadata,
 };
-use crate::app::crawl::types::CrawlSourceMetadata;
+use crate::app::crawl::types::{CrawlSourceMetadata, PhaseResults};
 use crate::app::crawl::warning::create_warning_sink;
 use crate::app::util::stderr_lock_progress;
 use crate::app::{
     Config, load_warning_state, resolve_database_path, run_embed_upload_pipeline,
-    validate_config_path,
+    run_upsert_without_vectors, validate_config_path,
 };
 use crate::engine::crawl_config::load_compiled_crawl_config;
 use crate::engine::git_ops::{
@@ -250,6 +250,9 @@ async fn run_crawl_async(
     let warning_counter = Cell::new(0usize);
     let mut warning_sink = create_warning_sink(&warning_counter);
 
+    // Determine if this is commit mode (for FTS merging behavior)
+    let is_commit_mode = source_metadata.source_kind == SOURCE_KIND_GIT_COMMIT;
+
     // Phase: Open database and get storage handles
     let (chunk_storage, label_storage) = open_storage(db_path, debug).await?;
 
@@ -276,6 +279,10 @@ async fn run_crawl_async(
     // Print narrowing announcement if this crawl narrows the selection
     print_narrowing_announcement(&previous_selection, &selection);
 
+    // Determine retrieval method presence early (used for fast-path predicate)
+    let vector_in_selection = selection.contains(&RetrievalMethod::Vector);
+    let fts_in_selection = selection.contains(&RetrievalMethod::Fts);
+
     // Phase: Enumerate files from the blob source
     let files = enumerate_files(blob_source)?;
 
@@ -292,6 +299,7 @@ async fn run_crawl_async(
         prior_warning_files,
         incremental_warnings,
         catalog_name,
+        vector_in_selection,
         &mut warning_sink,
     )
     .await?;
@@ -301,7 +309,7 @@ async fn run_crawl_async(
         add_label_to_existing_files(&classify_output.existing_file_ids, &chunk_storage, label_id)
             .await?;
 
-    // Phase: Chunk new files
+    // Phase: Chunk new files (runs whenever any method is in selection)
     let chunking_output = chunk_new_files(
         &classify_output.new_files,
         blob_source,
@@ -315,13 +323,33 @@ async fn run_crawl_async(
         &mut warning_sink,
     )?;
 
-    // Phase: Run embed/upload pipeline
-    let (pipeline_file_ids, pipeline_failures) = run_embed_upload_pipeline(
-        chunking_output.chunks,
-        Arc::clone(&chunk_storage),
-        &config.embedding_model,
-    )
-    .await?;
+    // Initialize phase results with pessimistic defaults
+    let mut phase_results = PhaseResults::new(&selection);
+
+    // Phase 3: Embed-and-upsert (vector) OR upsert-without-vectors (FTS-only)
+    let (pipeline_file_ids, pipeline_failures) = if vector_in_selection {
+        // Vector path: embed and upload (handles both vector-only and {vector, fts} selections)
+        run_embed_upload_pipeline(
+            chunking_output.chunks,
+            Arc::clone(&chunk_storage),
+            &config.embedding_model,
+        )
+        .await?
+    } else if fts_in_selection {
+        // FTS-only path: upload without vectors (no ONNX initialization)
+        run_upsert_without_vectors(chunking_output.chunks, Arc::clone(&chunk_storage)).await?
+    } else {
+        // Empty selection - unreachable (rejected upstream)
+        (HashSet::new(), crate::app::CrawlFailures::default())
+    };
+
+    // Mark vector phase as succeeded if it was in selection
+    if vector_in_selection {
+        phase_results.vector_succeeded = Some(!pipeline_failures.has_failures());
+    } else if fts_in_selection {
+        // FTS-only path: no vector phase, mark as succeeded (no failures possible)
+        phase_results.vector_succeeded = None;
+    }
 
     // Combine touched file IDs
     let mut all_touched_file_ids: HashSet<String> = classify_output.existing_file_ids.clone();
@@ -329,27 +357,50 @@ async fn run_crawl_async(
     all_touched_file_ids.extend(pipeline_file_ids);
 
     let has_existing_file_failures = !label_add_output.failures.is_empty();
-    let had_failures = pipeline_failures.has_failures() || has_existing_file_failures;
+    let had_embed_failures = pipeline_failures.has_failures();
 
-    // Phase: Label reassignment cleanup (conditional)
-    let mut cleanup_failed = false;
-    if had_failures {
-        println!("🧹 Phase 4: SKIPPING label reassignment cleanup (crawl had failures)");
+    // Phase 4: Label reassignment cleanup (conditional)
+    if has_existing_file_failures || had_embed_failures {
+        println!("🔶 Phase 4: SKIPPING label reassignment cleanup (crawl had failures)");
         println!("  This is intentional - cleanup should only run after successful crawls.");
         println!("  Run the crawl again to complete indexing and trigger cleanup.");
+        phase_results.label_reassignment_succeeded = false;
     } else {
         match run_label_cleanup(&chunk_storage, label_id.as_str(), &all_touched_file_ids).await {
-            Ok(_) => {}
+            Ok(_) => {
+                phase_results.label_reassignment_succeeded = true;
+            }
             Err(e) => {
                 eprintln!("  ❌ Label cleanup failed: {}", e);
-                cleanup_failed = true;
+                phase_results.label_reassignment_succeeded = false;
             }
         }
     }
     println!();
 
-    // Phase: Update final label metadata
-    let crawl_complete = !had_failures && !cleanup_failed;
+    // Phase 5: FTS indexing (conditional on selection and prior success)
+    if fts_in_selection && phase_results.label_reassignment_succeeded {
+        match run_fts_phase(
+            db_path,
+            label_id,
+            &chunk_storage,
+            &mut warning_sink,
+            is_commit_mode,
+        )
+        .await
+        {
+            Ok(()) => {
+                phase_results.fts_succeeded = Some(true);
+            }
+            Err(e) => {
+                eprintln!("  ❌ FTS indexing failed: {}", e);
+                phase_results.fts_succeeded = Some(false);
+            }
+        }
+        println!();
+    }
+
+    // Phase: Update final label metadata (with per-method completion)
     update_final_metadata(
         &label_storage,
         label_id,
@@ -357,18 +408,24 @@ async fn run_crawl_async(
         label,
         &source_metadata.source_value,
         source_metadata.source_kind,
-        crawl_complete,
+        &selection,
+        &phase_results,
     )
     .await?;
 
     // Phase: Print summary
+    let had_failures = has_existing_file_failures
+        || had_embed_failures
+        || !phase_results.label_reassignment_succeeded
+        || phase_results.fts_succeeded == Some(false);
+
     print_summary(
         total_start,
         classify_output.new_count,
         classify_output.existing_count,
         label_add_output.success_file_ids.len(),
-        had_failures,
-        cleanup_failed,
+        has_existing_file_failures || had_embed_failures,
+        !phase_results.label_reassignment_succeeded,
         label_add_output.failures.len(),
         pipeline_failures.total(),
     );
@@ -385,7 +442,7 @@ async fn run_crawl_async(
     // Phase: Print warning summary
     print_warning_summary(&chunking_output.warning_files);
 
-    if had_failures || cleanup_failed {
+    if had_failures {
         anyhow::bail!("Crawl completed with errors (see above). Label marked incomplete.");
     }
 

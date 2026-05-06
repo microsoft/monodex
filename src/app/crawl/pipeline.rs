@@ -60,7 +60,7 @@ pub async fn run_embed_upload_pipeline(
     })?;
 
     println!(
-        "⚡ Phase 3: Embedding {} chunks with {} parallel sessions...",
+        "🔶 Phase 3: Embedding {} chunks with {} parallel sessions...",
         total_chunks,
         embedder.num_workers()
     );
@@ -236,6 +236,93 @@ pub async fn run_embed_upload_pipeline(
         );
         println!("      These files may not be searchable. Check logs above for details.");
     }
+    println!();
+
+    Ok((touched_file_ids, failures))
+}
+
+/// Run the FTS-only upsert pipeline (no embedding).
+///
+/// This is used for FTS-only crawls where we don't compute embeddings.
+/// Chunks are written with NULL vectors, preserving any existing vectors.
+///
+/// Returns (touched_file_ids, failures) for the crawl.
+pub async fn run_upsert_without_vectors(
+    all_chunks: Vec<Chunk>,
+    chunk_storage: Arc<ChunkStorage>,
+) -> Result<(HashSet<String>, CrawlFailures)> {
+    let mut touched_file_ids: HashSet<String> = HashSet::new();
+    let failures = CrawlFailures::default();
+
+    if all_chunks.is_empty() {
+        return Ok((touched_file_ids, failures));
+    }
+
+    // Track file IDs from chunks
+    for chunk in &all_chunks {
+        if !chunk.file_id.is_empty() {
+            touched_file_ids.insert(chunk.file_id.clone());
+        }
+    }
+
+    let total_chunks = all_chunks.len();
+
+    println!(
+        "🔶 Phase 3: Storing {} chunks (FTS-only, no embedding)...",
+        total_chunks
+    );
+    let start = std::time::Instant::now();
+
+    // Convert chunks to rows
+    let rows: Vec<ChunkRow> = all_chunks.iter().map(chunk_to_row).collect();
+
+    // Group by file_id for sentinel tracking
+    let mut expected_count: std::collections::HashMap<String, usize> =
+        std::collections::HashMap::new();
+    let mut uploaded_count: std::collections::HashMap<String, usize> =
+        std::collections::HashMap::new();
+
+    for row in &rows {
+        if let std::collections::hash_map::Entry::Vacant(e) =
+            expected_count.entry(row.file_id.clone())
+        {
+            e.insert(row.chunk_count as usize);
+        }
+    }
+
+    // Upsert all chunks without vectors
+    chunk_storage.upsert_without_vectors(&rows).await?;
+
+    // Mark all chunks as uploaded
+    for row in &rows {
+        *uploaded_count.entry(row.file_id.clone()).or_insert(0) += 1;
+    }
+
+    // Flip sentinels for completed files
+    let mut completed_files: Vec<String> = Vec::new();
+    for (file_id, expected) in &expected_count {
+        let uploaded = uploaded_count.get(file_id).copied().unwrap_or(0);
+        if uploaded == *expected {
+            completed_files.push(file_id.clone());
+        }
+    }
+
+    // Set file_complete=true for sentinel rows
+    for file_id in &completed_files {
+        let sentinel_row_id = format!("{}:1", file_id);
+        chunk_storage
+            .update_file_complete(&sentinel_row_id, true)
+            .await?;
+    }
+
+    let elapsed = start.elapsed();
+    let rate = total_chunks as f64 / elapsed.as_secs_f64().max(0.001);
+    println!(
+        "  Storage complete: {} chunks in {} ({:.1} chunks/sec)",
+        total_chunks,
+        format_duration(elapsed.as_secs_f64()),
+        rate
+    );
     println!();
 
     Ok((touched_file_ids, failures))

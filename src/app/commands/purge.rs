@@ -59,6 +59,13 @@ async fn run_purge_all_async(db_path: &std::path::Path) -> anyhow::Result<()> {
     chunk_storage.truncate().await?;
     label_storage.truncate().await?;
 
+    // Delete and recreate FTS directory
+    let fts_dir = db_path.join("fts");
+    if fts_dir.exists() {
+        std::fs::remove_dir_all(&fts_dir)?;
+        std::fs::create_dir_all(&fts_dir)?;
+    }
+
     println!("✅ Database purged successfully");
     Ok(())
 }
@@ -76,6 +83,12 @@ async fn run_purge_catalog_async(
     // Delete chunks and label metadata for this catalog
     let chunks_deleted = chunk_storage.delete_by_catalog(catalog_name).await?;
     let labels_deleted = label_storage.delete_by_catalog(catalog_name).await?;
+
+    // Delete FTS directory for this catalog
+    let fts_catalog_dir = db_path.join("fts").join(catalog_name);
+    if fts_catalog_dir.exists() {
+        std::fs::remove_dir_all(&fts_catalog_dir)?;
+    }
 
     println!(
         "✅ Catalog purged successfully ({} chunks, {} labels deleted)",
