@@ -5,6 +5,7 @@
 pub mod breadcrumb;
 pub mod chunker;
 pub mod crawl_config;
+pub mod fts;
 pub mod git_ops;
 pub mod identifier;
 pub mod markdown_partitioner;
