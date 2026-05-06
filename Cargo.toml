@@ -28,7 +28,7 @@ hf-hub = "0.5.0"
 clap = { version = "4.6.0", features = ["derive"] }
 
 # Git operations
-gix = { version = "0.81", features = ["blob-diff", "revision"] }
+gix = { version = "0.83", features = ["blob-diff", "revision"] }
 
 # File system
 walkdir = "2.5.0"
