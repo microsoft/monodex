@@ -15,10 +15,10 @@ fn main() -> anyhow::Result<()> {
 
     // Load config
     let config_path = match cli.config {
-        Some(path) => path,
-        None => monodex::paths::config_path()?,
+        Some(ref path) => path,
+        None => &monodex::paths::config_path()?,
     };
-    let config = load_config(&config_path)?;
+    let config = load_config(config_path)?;
 
     match cli.command {
         Commands::Use { catalog, label } => {
@@ -32,6 +32,7 @@ fn main() -> anyhow::Result<()> {
             label,
             source,
             incremental_warnings,
+            retrieval: _,
         } => {
             // Resolve label context from explicit flags or default context
             let (_, catalog_name, label) = resolve_label_context(Some(&label), catalog.as_deref())?;
@@ -79,6 +80,7 @@ fn main() -> anyhow::Result<()> {
             limit,
             label,
             catalog,
+            retrieval: _,
         } => {
             monodex::app::commands::run_search(
                 &config,
@@ -108,6 +110,21 @@ fn main() -> anyhow::Result<()> {
         }
         Commands::AuditChunks { count, dir } => {
             monodex::app::commands::run_audit_chunks(count, dir)?;
+        }
+        Commands::DebugFts {
+            id,
+            label,
+            catalog,
+            query,
+        } => {
+            monodex::app::commands::run_debug_fts(
+                &id,
+                label.as_deref(),
+                catalog.as_deref(),
+                query.as_deref(),
+                cli.config.as_ref(),
+                cli.debug,
+            )?;
         }
     }
 

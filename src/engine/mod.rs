@@ -12,6 +12,7 @@ pub mod markdown_partitioner;
 pub mod package_lookup;
 pub mod parallel_embedder;
 pub mod partitioner;
+pub mod retrieval;
 pub mod schema;
 pub mod storage;
 pub mod system_info;
@@ -25,3 +26,4 @@ pub use fts::{FtsHit, FtsIndex, FtsManifest, FtsSearchOutcome, fts_search, index
 pub use parallel_embedder::ParallelConfig;
 pub use parallel_embedder::ParallelEmbedder;
 pub use partitioner::{SMALL_CHUNK_CHARS, TARGET_CHARS};
+pub use retrieval::RetrievalMethod;

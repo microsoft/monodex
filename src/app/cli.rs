@@ -7,6 +7,7 @@
 use clap::{Args, Parser, Subcommand};
 use std::path::PathBuf;
 
+use crate::engine::RetrievalMethod;
 use crate::engine::TARGET_CHARS;
 
 /// Fast, accurate code search for large Rush monorepos
@@ -64,6 +65,11 @@ pub enum Commands {
         /// Allow files with chunking warnings to participate in incremental skipping
         #[arg(long, default_value_t = false)]
         incremental_warnings: bool,
+
+        /// Set retrieval methods to build for this label.
+        /// Repeatable; default is all methods. Values: vector, fts.
+        #[arg(long, value_parser = clap::value_parser!(RetrievalMethod))]
+        retrieval: Vec<RetrievalMethod>,
     },
 
     /// Purge all chunks from a catalog, or the entire database
@@ -121,6 +127,11 @@ pub enum Commands {
         /// Filter by catalog (optional - uses label or default context)
         #[arg(long)]
         catalog: Option<String>,
+
+        /// Limit retrieval methods queried for this search.
+        /// Repeatable; default is all methods in the label's selection. Values: vector, fts.
+        #[arg(long, value_parser = clap::value_parser!(RetrievalMethod))]
+        retrieval: Vec<RetrievalMethod>,
     },
 
     /// View chunks by their file IDs with optional selectors
@@ -162,6 +173,29 @@ pub enum Commands {
         /// Directory to sample from
         #[arg(long)]
         dir: String,
+    },
+
+    /// Diagnose tokenization or ranking for a single chunk.
+    /// Prints the tokens the FTS tokenizer produced for the chunk's text;
+    /// with --query, also runs Tantivy's explain() for that (chunk, query) pair.
+    /// The chunk is identified by the same file_id:ordinal form `view` accepts.
+    /// Unlike `view --id`, `debug-fts --id` requires a single chunk, not a range.
+    DebugFts {
+        /// Chunk identifier in file_id:ordinal form (e.g. 700a4ba232fe9ddc:3)
+        #[arg(long)]
+        id: String,
+
+        /// Filter by label (uses default context if not provided)
+        #[arg(long)]
+        label: Option<String>,
+
+        /// Filter by catalog (uses default context if not provided)
+        #[arg(long)]
+        catalog: Option<String>,
+
+        /// Optional query string to explain ranking for
+        #[arg(long)]
+        query: Option<String>,
     },
 }
 
