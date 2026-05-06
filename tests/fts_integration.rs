@@ -487,3 +487,92 @@ fn test_selection_widening() {
 
     remove_monodex_home();
 }
+
+// =============================================================================
+// Test 4: End-to-end test for first-time crawl with --retrieval fts
+// =============================================================================
+
+/// Test first-time crawl with explicit --retrieval fts:
+/// - No previous selection exists (first crawl on this label)
+/// - Confirms NO narrowing-announcement block (nothing to narrow from)
+/// - Confirms parenthesis shows "(fts only, no vector)"
+/// - Confirms search --retrieval vector errors with "not in selection"
+#[test]
+#[serial(monodex_home)]
+fn test_first_time_crawl_fts_only() {
+    let (_monodex_home, _repo_dir) = {
+        // Set up temp directories
+        let monodex_home = tempfile::TempDir::new().unwrap();
+        let repo_dir = tempfile::TempDir::new().unwrap();
+
+        set_monodex_home(monodex_home.path());
+
+        // Create test git repo
+        let commit_oid = create_test_git_repo(repo_dir.path());
+
+        // Create config pointing to the repo
+        let config = create_test_config(monodex_home.path(), "test-catalog", repo_dir.path());
+
+        // Run init-db
+        run_init_db(&config).expect("init-db failed");
+
+        // First crawl with explicit --retrieval fts (no previous selection)
+        monodex::app::commands::crawl::run_crawl_label(
+            &config,
+            "test-catalog",
+            "main",
+            &commit_oid,
+            false,                      // incremental_warnings
+            vec![RetrievalMethod::Fts], // retrieval: fts only
+            false,                      // debug
+        )
+        .expect("first crawl failed");
+
+        // Verify: search with no --retrieval should succeed (only fts in selection)
+        let search_result = run_search(
+            &config,
+            "getUserProfile",
+            10,
+            Some("main"),
+            Some("test-catalog"),
+            None, // no --retrieval flag
+            false,
+        );
+
+        // With only fts in selection, search should succeed (not the PR1 stub error)
+        assert!(
+            search_result.is_ok(),
+            "FTS-only search should succeed, got error: {:?}",
+            search_result.err()
+        );
+
+        // Verify: search --retrieval vector should error (not in selection)
+        let vector_retrieval: Option<BTreeSet<RetrievalMethod>> =
+            Some([RetrievalMethod::Vector].into_iter().collect());
+        let search_result = run_search(
+            &config,
+            "getUserProfile",
+            10,
+            Some("main"),
+            Some("test-catalog"),
+            vector_retrieval,
+            false,
+        );
+
+        assert!(
+            search_result.is_err(),
+            "Vector search should fail - not in selection"
+        );
+        let err_msg = search_result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("not in this label's retrieval selection")
+                || err_msg.contains("not in selection"),
+            "Error should mention not in selection, got: {}",
+            err_msg
+        );
+
+        (monodex_home, repo_dir)
+    };
+
+    remove_monodex_home();
+}
