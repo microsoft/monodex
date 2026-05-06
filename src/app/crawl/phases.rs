@@ -16,6 +16,7 @@ use crate::engine::{
     git_ops::{BlobSource, FileEntry},
     identifier::LabelId,
     storage::{ChunkStorage, LabelMetadataRow, LabelStorage},
+    warning::{CrawlWarning, WarningSink},
 };
 
 /// Opens the database and returns storage handles.
@@ -120,6 +121,7 @@ pub async fn classify_files(
     prior_warning_files: &HashSet<String>,
     incremental_warnings: bool,
     catalog_name: &str,
+    warnings: WarningSink<'_>,
 ) -> Result<ClassifyOutput> {
     println!("⚡ Phase 1: Checking existing chunks and collecting new files...");
 
@@ -171,10 +173,10 @@ pub async fn classify_files(
                 new_count += 1;
             }
             Err(e) => {
-                eprintln!(
-                    "  ⚠️  Error checking sentinel for {}: {}",
-                    file_entry.relative_path, e
-                );
+                warnings(CrawlWarning::SentinelReadFailed {
+                    relative_path: file_entry.relative_path.clone(),
+                    error: e.to_string(),
+                });
                 new_files.push(file_entry.clone());
                 new_count += 1;
             }
@@ -286,8 +288,6 @@ pub struct ChunkingOutput {
     pub touched_file_ids: HashSet<String>,
     /// Files that had chunking warnings.
     pub warning_files: HashSet<String>,
-    /// Total warning count.
-    pub warning_count: usize,
 }
 
 /// Chunks new files and produces chunks for embedding.
@@ -301,18 +301,18 @@ pub fn chunk_new_files(
     label_id: &LabelId,
     repo_path: &std::path::Path,
     new_count: usize,
+    warning_counter: &std::cell::Cell<usize>,
+    warnings: WarningSink<'_>,
 ) -> Result<ChunkingOutput> {
     let mut chunks: Vec<crate::engine::Chunk> = Vec::new();
     let mut touched_file_ids: HashSet<String> = HashSet::new();
     let mut warning_files: HashSet<String> = HashSet::new();
-    let mut warning_count: usize = 0;
 
     if new_files.is_empty() {
         return Ok(ChunkingOutput {
             chunks,
             touched_file_ids,
             warning_files,
-            warning_count,
         });
     }
 
@@ -324,14 +324,17 @@ pub fn chunk_new_files(
             idx + 1,
             new_count,
             ((idx + 1) as f64 / new_count as f64) * 100.0,
-            warning_count
+            warning_counter.get()
         );
         std::io::Write::flush(&mut std::io::stdout())?;
 
         let content = match blob_source.read_content(file_entry) {
             Ok(c) => c,
             Err(e) => {
-                eprintln!("\n  ⚠️  Failed to read {}: {}", file_entry.relative_path, e);
+                warnings(CrawlWarning::FileReadFailed {
+                    relative_path: file_entry.relative_path.clone(),
+                    error: e.to_string(),
+                });
                 continue;
             }
         };
@@ -361,13 +364,10 @@ pub fn chunk_new_files(
                 // Detect fallback warning: chunk_kind == "fallback-split"
                 let had_warning = file_chunks.iter().any(|c| c.chunk_kind == "fallback-split");
                 if had_warning {
-                    warning_count += 1;
                     warning_files.insert(file_entry.relative_path.clone());
-                    println!();
-                    println!(
-                        "Warning: Couldn't find a splitpoint for {}",
-                        file_entry.relative_path
-                    );
+                    warnings(CrawlWarning::ChunkerFallbackSplit {
+                        relative_path: file_entry.relative_path.clone(),
+                    });
                 }
 
                 if !file_chunks.is_empty() {
@@ -376,10 +376,10 @@ pub fn chunk_new_files(
                 chunks.extend(file_chunks);
             }
             Err(e) => {
-                eprintln!(
-                    "\n  ⚠️  Failed to chunk {}: {}",
-                    file_entry.relative_path, e
-                );
+                warnings(CrawlWarning::ChunkingFailed {
+                    relative_path: file_entry.relative_path.clone(),
+                    error: e.to_string(),
+                });
             }
         }
     }
@@ -392,7 +392,6 @@ pub fn chunk_new_files(
         chunks,
         touched_file_ids,
         warning_files,
-        warning_count,
     })
 }
 

@@ -6,6 +6,7 @@
 //!                       crawl phases (see ../crawl/phases.rs).
 
 use anyhow::Result;
+use std::cell::Cell;
 use std::collections::HashSet;
 use std::sync::Arc;
 
@@ -15,6 +16,7 @@ use crate::app::crawl::phases::{
     run_label_cleanup, save_warning_state, update_final_metadata, write_in_progress_metadata,
 };
 use crate::app::crawl::types::CrawlSourceMetadata;
+use crate::app::crawl::warning::create_warning_sink;
 use crate::app::util::stderr_lock_progress;
 use crate::app::{
     Config, load_warning_state, resolve_database_path, run_embed_upload_pipeline,
@@ -208,6 +210,10 @@ async fn run_crawl_async(
     blob_source: &dyn BlobSource,
     source_metadata: CrawlSourceMetadata,
 ) -> Result<()> {
+    // Create warning counter and sink for in-flight warnings
+    let warning_counter = Cell::new(0usize);
+    let mut warning_sink = create_warning_sink(&warning_counter);
+
     // Phase: Open database and get storage handles
     let (chunk_storage, label_storage) = open_storage(db_path, debug).await?;
 
@@ -239,6 +245,7 @@ async fn run_crawl_async(
         prior_warning_files,
         incremental_warnings,
         catalog_name,
+        &mut warning_sink,
     )
     .await?;
 
@@ -257,6 +264,8 @@ async fn run_crawl_async(
         label_id,
         repo_path,
         classify_output.new_count,
+        &warning_counter,
+        &mut warning_sink,
     )?;
 
     // Phase: Run embed/upload pipeline

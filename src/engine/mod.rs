@@ -15,6 +15,7 @@ pub mod schema;
 pub mod storage;
 pub mod system_info;
 pub mod util;
+pub mod warning;
 
 // Re-export commonly used types for convenience
 pub use chunker::Chunk;

@@ -5,6 +5,7 @@
 pub mod phases;
 pub mod pipeline;
 pub mod types;
+pub mod warning;
 
 pub use pipeline::run_embed_upload_pipeline;
 pub use types::CrawlFailures;
