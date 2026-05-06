@@ -581,6 +581,35 @@ pub struct SentinelStatus {
     pub has_vector: bool,
 }
 
+/// Helper to merge active_label_ids with existing rows.
+///
+/// For each incoming row, if an existing row with the same row_id exists,
+/// union the active_label_ids. This preserves cross-label membership.
+fn merge_active_label_ids<'a>(
+    rows: &[ChunkRow],
+    existing_rows: &'a [ChunkRow],
+) -> Vec<ChunkRow> {
+    let existing_map: std::collections::HashMap<&str, &ChunkRow> = existing_rows
+        .iter()
+        .map(|r| (r.row_id.as_str(), r))
+        .collect();
+
+    rows.iter()
+        .map(|row| {
+            if let Some(existing) = existing_map.get(row.row_id.as_str()) {
+                let mut merged_labels: BTreeSet<String> =
+                    existing.active_label_ids.iter().cloned().collect();
+                merged_labels.extend(row.active_label_ids.iter().cloned());
+                let mut merged = row.clone();
+                merged.active_label_ids = merged_labels.into_iter().collect();
+                merged
+            } else {
+                row.clone()
+            }
+        })
+        .collect()
+}
+
 /// Chunk storage operations for LanceDB.
 pub struct ChunkStorage {
     table: Arc<lancedb::table::Table>,
@@ -592,6 +621,7 @@ impl ChunkStorage {
     pub fn new(table: Arc<lancedb::table::Table>, db_path: PathBuf) -> Self {
         Self { table, db_path }
     }
+
     /// Upsert a batch of chunk rows with their embedding vectors by row_id.
     ///
     /// This is the primary method for writing chunks during crawl, where we have
@@ -626,30 +656,10 @@ impl ChunkStorage {
             row.validate()?;
         }
 
-        // Fetch existing rows to union active_label_ids
+        // Fetch existing rows and merge active_label_ids
         let row_ids: Vec<&str> = rows.iter().map(|r| r.row_id.as_str()).collect();
         let existing_rows = self.get_by_row_ids_inner(&row_ids).await?;
-        let existing_map: std::collections::HashMap<&str, &ChunkRow> = existing_rows
-            .iter()
-            .map(|r| (r.row_id.as_str(), r))
-            .collect();
-
-        // Merge active_label_ids for existing rows
-        let merged_rows: Vec<ChunkRow> = rows
-            .iter()
-            .map(|row| {
-                if let Some(existing) = existing_map.get(row.row_id.as_str()) {
-                    let mut merged_labels: BTreeSet<String> =
-                        existing.active_label_ids.iter().cloned().collect();
-                    merged_labels.extend(row.active_label_ids.iter().cloned());
-                    let mut merged = row.clone();
-                    merged.active_label_ids = merged_labels.into_iter().collect();
-                    merged
-                } else {
-                    row.clone()
-                }
-            })
-            .collect();
+        let merged_rows = merge_active_label_ids(rows, &existing_rows);
 
         let schema = self.table.schema().await?;
 
@@ -705,30 +715,10 @@ impl ChunkStorage {
             row.validate()?;
         }
 
-        // Fetch existing rows to union active_label_ids
+        // Fetch existing rows and merge active_label_ids
         let row_ids: Vec<&str> = rows.iter().map(|r| r.row_id.as_str()).collect();
         let existing_rows = self.get_by_row_ids_inner(&row_ids).await?;
-        let existing_map: std::collections::HashMap<&str, &ChunkRow> = existing_rows
-            .iter()
-            .map(|r| (r.row_id.as_str(), r))
-            .collect();
-
-        // Merge active_label_ids for existing rows
-        let merged_rows: Vec<ChunkRow> = rows
-            .iter()
-            .map(|row| {
-                if let Some(existing) = existing_map.get(row.row_id.as_str()) {
-                    let mut merged_labels: BTreeSet<String> =
-                        existing.active_label_ids.iter().cloned().collect();
-                    merged_labels.extend(row.active_label_ids.iter().cloned());
-                    let mut merged = row.clone();
-                    merged.active_label_ids = merged_labels.into_iter().collect();
-                    merged
-                } else {
-                    row.clone()
-                }
-            })
-            .collect();
+        let merged_rows = merge_active_label_ids(rows, &existing_rows);
 
         let schema = self.table.schema().await?;
 
