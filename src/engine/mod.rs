@@ -21,6 +21,7 @@ pub mod warning;
 // Re-export commonly used types for convenience
 pub use chunker::Chunk;
 pub use crawl_config::ChunkingStrategy;
+pub use fts::{FtsHit, FtsIndex, FtsManifest, FtsSearchOutcome, fts_search, index_chunks_for_fts};
 pub use parallel_embedder::ParallelConfig;
 pub use parallel_embedder::ParallelEmbedder;
 pub use partitioner::{SMALL_CHUNK_CHARS, TARGET_CHARS};

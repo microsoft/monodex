@@ -91,7 +91,7 @@ impl TokenStream for MonodexFtsTokenStream {
 /// Tokenize text into a vector of tokens.
 ///
 /// This is the main entry point for tokenization, handling both CJK and non-CJK text.
-fn tokenize_text(text: &str) -> Vec<String> {
+pub fn tokenize_text(text: &str) -> Vec<String> {
     let mut tokens = Vec::new();
     let chars = text.char_indices().peekable();
     let mut current_segment_start = 0;

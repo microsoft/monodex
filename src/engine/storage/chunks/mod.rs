@@ -719,6 +719,57 @@ impl ChunkStorage {
         Ok(rows)
     }
 
+    /// Get chunks by a list of row_ids for a specific label.
+    ///
+    /// This is used by FTS search to hydrate chunk data from LanceDB after
+    /// getting row_ids from Tantivy search results. The returned chunks are
+    /// in arbitrary order (caller re-orders to match FTS hit order).
+    ///
+    /// # Arguments
+    /// * `label_id` - The label to filter by (must be in active_label_ids)
+    /// * `row_ids` - List of row_ids to fetch
+    ///
+    /// # Returns
+    /// Chunks matching the predicate, in arbitrary order.
+    pub async fn get_chunks_by_row_ids_for_label(
+        &self,
+        label_id: &str,
+        row_ids: &[String],
+    ) -> Result<Vec<ChunkRow>> {
+        if row_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let vals: Vec<&str> = row_ids.iter().map(|s| s.as_str()).collect();
+        let predicate = format!(
+            "{} AND {}",
+            array_contains_str("active_label_ids", label_id),
+            in_quoted_strs("row_id", &vals)
+        );
+
+        let results = self
+            .table
+            .query()
+            .only_if(&predicate)
+            .execute()
+            .await
+            .map_err(|e| anyhow!("Failed to query chunks by row_ids: {}", e))?;
+
+        let batches = results
+            .try_collect::<Vec<_>>()
+            .await
+            .map_err(|e| anyhow!("Failed to collect query results: {}", e))?;
+
+        let mut rows: Vec<ChunkRow> = Vec::new();
+        for batch in &batches {
+            for i in 0..batch.num_rows() {
+                rows.push(parse_chunk_row(batch, i)?);
+            }
+        }
+
+        Ok(rows)
+    }
+
     /// Update the active_label_ids array of a single chunk.
     ///
     /// Uses LanceDB's update() with SQL expression for in-place modification.
