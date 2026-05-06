@@ -12,6 +12,7 @@ readme = "README.md"
 exclude = [
     "test_artifacts/*",
     "scripts/*",
+    "tests/*",
     "*.log",
     "crawl.log",
     "monodex.log",
