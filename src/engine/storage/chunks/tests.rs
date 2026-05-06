@@ -578,7 +578,7 @@ async fn test_upsert_without_vectors_preserves_vectors() {
     let mut vec = vec![0.0f32; VECTOR_DIMENSION];
     vec[0] = 1.0; // Non-zero vector for valid cosine similarity
     storage
-        .upsert_with_vectors(&[row.clone()], &[vec.clone()])
+        .upsert_with_vectors(std::slice::from_ref(&row), &[vec.clone()])
         .await
         .unwrap();
 
@@ -752,7 +752,7 @@ async fn test_get_sentinel_status_vector_presence() {
     // Insert with vector
     let row = test_chunk_row("file1:1", "file1", 1);
     storage
-        .upsert_with_vectors(&[row.clone()], &[zero_vector()])
+        .upsert_with_vectors(std::slice::from_ref(&row), &[zero_vector()])
         .await
         .unwrap();
 

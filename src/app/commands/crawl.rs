@@ -12,8 +12,9 @@ use std::sync::Arc;
 
 use crate::app::crawl::phases::{
     add_label_to_existing_files, build_package_index, chunk_new_files, classify_files,
-    enumerate_files, filter_files, open_storage, print_summary, print_warning_summary,
-    run_label_cleanup, save_warning_state, update_final_metadata, write_in_progress_metadata,
+    enumerate_files, filter_files, format_selection_for_display, open_storage,
+    print_narrowing_announcement, print_summary, print_warning_summary, run_label_cleanup,
+    save_warning_state, update_final_metadata, write_in_progress_metadata,
 };
 use crate::app::crawl::types::CrawlSourceMetadata;
 use crate::app::crawl::warning::create_warning_sink;
@@ -30,7 +31,7 @@ use crate::engine::identifier::LabelId;
 use crate::engine::retrieval::RetrievalMethod;
 use crate::engine::storage::{
     SOURCE_KIND_GIT_COMMIT, SOURCE_KIND_WORKING_DIRECTORY, acquire_catalog_lock,
-    acquire_database_shared,
+    acquire_database_shared, read_selection,
 };
 
 /// Returns all retrieval methods (used when no explicit --retrieval is specified).
@@ -67,7 +68,11 @@ pub fn run_crawl_label(
     let total_start = std::time::Instant::now();
     println!("🔍 Starting label-aware crawl...");
     println!("Catalog: {}", catalog_name);
-    println!("Label: {}", label);
+    println!(
+        "Label: {} {}",
+        label,
+        format_selection_for_display(&selection)
+    );
 
     // Get catalog config
     let catalog_config = config
@@ -153,7 +158,11 @@ pub fn run_crawl_working_dir(
     let total_start = std::time::Instant::now();
     println!("🔍 Starting working directory crawl...");
     println!("Catalog: {}", catalog_name);
-    println!("Label: {}", label);
+    println!(
+        "Label: {} {}",
+        label,
+        format_selection_for_display(&selection)
+    );
 
     // Get catalog config
     let catalog_config = config
@@ -244,6 +253,13 @@ async fn run_crawl_async(
     // Phase: Open database and get storage handles
     let (chunk_storage, label_storage) = open_storage(db_path, debug).await?;
 
+    // Read previous selection (if any) for narrowing announcement
+    let previous_metadata = label_storage.get_by_label_id(label_id.as_str()).await?;
+    let previous_selection = previous_metadata
+        .as_ref()
+        .map(read_selection)
+        .unwrap_or_default();
+
     // Phase: Write in-progress metadata before any work begins
     write_in_progress_metadata(
         &label_storage,
@@ -256,6 +272,9 @@ async fn run_crawl_async(
         debug,
     )
     .await?;
+
+    // Print narrowing announcement if this crawl narrows the selection
+    print_narrowing_announcement(&previous_selection, &selection);
 
     // Phase: Enumerate files from the blob source
     let files = enumerate_files(blob_source)?;

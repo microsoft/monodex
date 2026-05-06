@@ -45,6 +45,7 @@ pub async fn open_storage(
 /// `<method>_source` is set to `NULL` and `<method>_complete` is set to `false`
 /// (the `_complete` value is a don't-care when source is NULL, but must be written
 /// since the column is non-nullable).
+#[allow(clippy::too_many_arguments)]
 pub async fn write_in_progress_metadata(
     label_storage: &LabelStorage,
     label_id: &LabelId,
@@ -515,6 +516,58 @@ pub fn print_summary(
     }
 }
 
+/// Formats the retrieval selection for display in the crawl preamble.
+///
+/// Returns a string like "(fts, vector)", "(fts only, no vector)", "(vector only, no fts)",
+/// or "(no retrieval methods)" for empty selection.
+pub fn format_selection_for_display(selection: &BTreeSet<RetrievalMethod>) -> String {
+    let has_vector = selection.contains(&RetrievalMethod::Vector);
+    let has_fts = selection.contains(&RetrievalMethod::Fts);
+
+    match (has_fts, has_vector) {
+        (true, true) => "(fts, vector)".to_string(),
+        (true, false) => "(fts only, no vector)".to_string(),
+        (false, true) => "(vector only, no fts)".to_string(),
+        (false, false) => "(no retrieval methods)".to_string(),
+    }
+}
+
+/// Prints the selection-narrowing announcement if applicable.
+///
+/// This should be called after the previous label metadata has been read,
+/// which happens after storage is opened. The announcement prints separately
+/// from the main preamble (which prints before storage is open).
+pub fn print_narrowing_announcement(
+    previous_selection: &BTreeSet<RetrievalMethod>,
+    new_selection: &BTreeSet<RetrievalMethod>,
+) {
+    // Only print if this is a strict narrowing (previous is a strict superset of new)
+    if previous_selection.is_superset(new_selection) && previous_selection != new_selection {
+        let has_fts = new_selection.contains(&RetrievalMethod::Fts);
+        let has_vector = new_selection.contains(&RetrievalMethod::Vector);
+
+        match (has_fts, has_vector) {
+            (true, false) => {
+                println!();
+                println!("👉 This crawl narrows retrieval selection to fts only, no vector.");
+                println!(
+                    "   Any vector data from a previous crawl is preserved and will be reused"
+                );
+                println!("   if you re-add vector to the selection.");
+            }
+            (false, true) => {
+                println!();
+                println!("👉 This crawl narrows retrieval selection to vector only, no fts.");
+                println!("   Any fts data from a previous crawl is preserved and will be reused");
+                println!("   if you re-add fts to the selection.");
+            }
+            // Empty selection or other narrowing combinations are not expected in practice,
+            // but if they occur, we don't print a misleading message.
+            _ => {}
+        }
+    }
+}
+
 /// Saves warning state to disk.
 pub fn save_warning_state(
     db_path: &std::path::Path,
@@ -549,5 +602,88 @@ pub fn print_warning_summary(crawl_warning_files: &HashSet<String>) {
     }
     if sorted.len() > 20 {
         println!("  ... and {} more", sorted.len() - 20);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_selection(methods: &[RetrievalMethod]) -> BTreeSet<RetrievalMethod> {
+        methods.iter().cloned().collect()
+    }
+
+    #[test]
+    fn test_format_selection_both_methods() {
+        let selection = make_selection(&[RetrievalMethod::Fts, RetrievalMethod::Vector]);
+        assert_eq!(format_selection_for_display(&selection), "(fts, vector)");
+    }
+
+    #[test]
+    fn test_format_selection_fts_only() {
+        let selection = make_selection(&[RetrievalMethod::Fts]);
+        assert_eq!(
+            format_selection_for_display(&selection),
+            "(fts only, no vector)"
+        );
+    }
+
+    #[test]
+    fn test_format_selection_vector_only() {
+        let selection = make_selection(&[RetrievalMethod::Vector]);
+        assert_eq!(
+            format_selection_for_display(&selection),
+            "(vector only, no fts)"
+        );
+    }
+
+    #[test]
+    fn test_format_selection_empty() {
+        let selection: BTreeSet<RetrievalMethod> = BTreeSet::new();
+        assert_eq!(
+            format_selection_for_display(&selection),
+            "(no retrieval methods)"
+        );
+    }
+
+    #[test]
+    fn test_narrowing_announcement_fts_only() {
+        // Previous: both methods, New: fts only -> should print narrowing announcement
+        let previous = make_selection(&[RetrievalMethod::Fts, RetrievalMethod::Vector]);
+        let new = make_selection(&[RetrievalMethod::Fts]);
+        // This test verifies the function doesn't panic; the actual output goes to stdout
+        print_narrowing_announcement(&previous, &new);
+    }
+
+    #[test]
+    fn test_narrowing_announcement_vector_only() {
+        // Previous: both methods, New: vector only -> should print narrowing announcement
+        let previous = make_selection(&[RetrievalMethod::Fts, RetrievalMethod::Vector]);
+        let new = make_selection(&[RetrievalMethod::Vector]);
+        print_narrowing_announcement(&previous, &new);
+    }
+
+    #[test]
+    fn test_narrowing_announcement_no_narrowing_same() {
+        // Previous and new are the same -> no announcement
+        let previous = make_selection(&[RetrievalMethod::Fts, RetrievalMethod::Vector]);
+        let new = make_selection(&[RetrievalMethod::Fts, RetrievalMethod::Vector]);
+        print_narrowing_announcement(&previous, &new);
+    }
+
+    #[test]
+    fn test_narrowing_announcement_no_narrowing_widening() {
+        // Previous: fts only, New: both -> widening, not narrowing
+        let previous = make_selection(&[RetrievalMethod::Fts]);
+        let new = make_selection(&[RetrievalMethod::Fts, RetrievalMethod::Vector]);
+        print_narrowing_announcement(&previous, &new);
+    }
+
+    #[test]
+    fn test_narrowing_announcement_first_crawl() {
+        // Previous: empty (first crawl), New: both -> no narrowing announcement
+        let previous: BTreeSet<RetrievalMethod> = BTreeSet::new();
+        let new = make_selection(&[RetrievalMethod::Fts, RetrievalMethod::Vector]);
+        print_narrowing_announcement(&previous, &new);
     }
 }

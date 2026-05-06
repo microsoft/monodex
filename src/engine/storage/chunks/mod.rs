@@ -585,7 +585,7 @@ pub struct SentinelStatus {
 ///
 /// For each incoming row, if an existing row with the same row_id exists,
 /// union the active_label_ids. This preserves cross-label membership.
-fn merge_active_label_ids<'a>(rows: &[ChunkRow], existing_rows: &'a [ChunkRow]) -> Vec<ChunkRow> {
+fn merge_active_label_ids(rows: &[ChunkRow], existing_rows: &[ChunkRow]) -> Vec<ChunkRow> {
     let existing_map: std::collections::HashMap<&str, &ChunkRow> = existing_rows
         .iter()
         .map(|r| (r.row_id.as_str(), r))

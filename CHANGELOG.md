@@ -31,6 +31,10 @@ PUBLISHING PROCEDURE:
 
 - **Concurrent monodex invocations now coordinate via file locks.** Two crawls against the same catalog wait for each other; two against different catalogs run in parallel. See `docs/design/concurrency.md` for details.
 
+- **Crawl preamble now shows retrieval selection with `Label:` line.** The `--retrieval` selection is displayed as a suffix like `Label: my-branch (fts, vector)` or `Label: my-branch (fts only, no vector)`.
+
+- **Narrowing announcement printed when crawl selection is a strict subset of previous.** When re-crawling with a narrower selection (e.g., `--retrieval fts` after a full crawl), an informative message explains that data for the excluded method is preserved.
+
 ### Changed
 
 - **Breaking: schema version bumped from 2 to 3.** Catalog name is now part of chunk identity, so the same content at the same path in two different catalogs no longer produces colliding rows. Existing v2 databases are rejected with a schema-mismatch error; the remedy is to delete the database and re-crawl.
