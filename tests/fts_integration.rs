@@ -816,3 +816,82 @@ fn test_fts_query_parse_error() {
 
     remove_monodex_home();
 }
+
+// =============================================================================
+// Test 8: Multi-method explicit search
+// =============================================================================
+
+/// Test multi-method explicit search (PR1 stub error):
+/// - After a --retrieval-less crawl (selection={fts, vector})
+/// - Run `monodex search --retrieval fts --retrieval vector`
+/// - Confirm the PR1 stub error fires (same as no-flag with size-2+ selection)
+#[test]
+#[serial(monodex_home)]
+fn test_multi_method_explicit_search() {
+    let (_monodex_home, _repo_dir) = {
+        // Set up temp directories
+        let monodex_home = tempfile::TempDir::new().unwrap();
+        let repo_dir = tempfile::TempDir::new().unwrap();
+
+        set_monodex_home(monodex_home.path());
+
+        // Create test git repo
+        let commit_oid = create_test_git_repo(repo_dir.path());
+
+        // Create config pointing to the repo
+        let config = create_test_config(monodex_home.path(), "test-catalog", repo_dir.path());
+
+        // Run init-db
+        run_init_db(&config).expect("init-db failed");
+
+        // Crawl with no --retrieval (selection becomes {fts, vector})
+        monodex::app::commands::crawl::run_crawl_label(
+            &config,
+            "test-catalog",
+            "main",
+            &commit_oid,
+            false,  // incremental_warnings
+            vec![], // no --retrieval = all methods
+            false,  // debug
+        )
+        .expect("crawl failed");
+
+        // Search with explicit multi-method: --retrieval fts --retrieval vector
+        let multi_method: Option<BTreeSet<RetrievalMethod>> = Some(
+            [RetrievalMethod::Fts, RetrievalMethod::Vector]
+                .into_iter()
+                .collect(),
+        );
+        let search_result = run_search(
+            &config,
+            "getUserProfile",
+            10,
+            Some("main"),
+            Some("test-catalog"),
+            multi_method,
+            false,
+        );
+
+        // Should error with PR1 stub error (hybrid not implemented)
+        assert!(
+            search_result.is_err(),
+            "Multi-method search should return PR1 stub error"
+        );
+        let err_msg = search_result.unwrap_err().to_string();
+        assert!(
+            err_msg
+                .contains("Hybrid search across multiple retrieval methods is not yet implemented"),
+            "Error should mention hybrid search not implemented, got: {}",
+            err_msg
+        );
+        assert!(
+            err_msg.contains("--retrieval"),
+            "Error should mention --retrieval flag, got: {}",
+            err_msg
+        );
+
+        (monodex_home, repo_dir)
+    };
+
+    remove_monodex_home();
+}
