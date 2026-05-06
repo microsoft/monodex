@@ -95,7 +95,7 @@ pub fn run_crawl_label(
     let blob_source = CommitBlobSource::new(repo_path.clone(), commit_oid.clone());
     let source_metadata = CrawlSourceMetadata {
         source_kind: SOURCE_KIND_GIT_COMMIT,
-        commit_oid,
+        source_value: commit_oid,
     };
 
     let rt = tokio::runtime::Runtime::new()?;
@@ -173,7 +173,7 @@ pub fn run_crawl_working_dir(
     let blob_source = WorkingDirBlobSource::new(repo_path.clone());
     let source_metadata = CrawlSourceMetadata {
         source_kind: SOURCE_KIND_WORKING_DIRECTORY,
-        commit_oid: String::new(),
+        source_value: crate::engine::make_working_dir_source_sentinel(),
     };
 
     let rt = tokio::runtime::Runtime::new()?;
@@ -223,7 +223,7 @@ async fn run_crawl_async(
         label_id,
         catalog_name,
         label,
-        &source_metadata.commit_oid,
+        &source_metadata.source_value,
         source_metadata.source_kind,
         debug,
     )
@@ -308,7 +308,7 @@ async fn run_crawl_async(
         label_id,
         catalog_name,
         label,
-        &source_metadata.commit_oid,
+        &source_metadata.source_value,
         source_metadata.source_kind,
         crawl_complete,
     )
