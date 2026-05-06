@@ -25,7 +25,7 @@ use arrow_schema::{DataType, Field, Schema, SchemaRef};
 use std::sync::Arc;
 
 /// Current schema version. Increment on breaking schema changes.
-pub const MONODEX_SCHEMA_VERSION: u32 = 3;
+pub const MONODEX_SCHEMA_VERSION: u32 = 4;
 
 /// Vector dimension for the embedding model (jina-embeddings-v2-base-code).
 pub const VECTOR_DIMENSION: usize = 768;
@@ -62,7 +62,7 @@ pub fn chunks_schema() -> SchemaRef {
                 Arc::new(Field::new("item", DataType::Float32, true)),
                 VECTOR_DIMENSION as i32,
             ),
-            false, // vectors are mandatory: every chunk has an embedding
+            true, // nullable: FTS-only crawls produce chunks without vectors
         ),
         // Label membership
         Field::new("catalog", DataType::Utf8, false),
@@ -105,6 +105,12 @@ pub fn chunks_schema() -> SchemaRef {
 ///
 /// The `label_id` is the primary key: `"{catalog}:{label}"`. This table has no vector
 /// column because label metadata is not searched by similarity.
+///
+/// Per-method retrieval state:
+/// - `<method>_source`: The commit OID or working-dir sentinel this method was indexed against.
+///   NULL means the method is not in the label's retrieval selection.
+/// - `<method>_complete`: Whether the method's indexing phase completed successfully.
+///   Only meaningful when `<method>_source` is non-NULL.
 pub fn label_metadata_schema() -> SchemaRef {
     Arc::new(Schema::new(vec![
         // Primary key
@@ -113,10 +119,14 @@ pub fn label_metadata_schema() -> SchemaRef {
         Field::new("catalog", DataType::Utf8, false),
         Field::new("label", DataType::Utf8, false),
         // Source info
-        Field::new("commit_oid", DataType::Utf8, false),
         Field::new("source_kind", DataType::Utf8, false),
-        // Crawl state
-        Field::new("crawl_complete", DataType::Boolean, false),
+        // Per-method retrieval state (vector)
+        Field::new("vector_source", DataType::Utf8, true), // nullable
+        Field::new("vector_complete", DataType::Boolean, false),
+        // Per-method retrieval state (fts)
+        Field::new("fts_source", DataType::Utf8, true), // nullable
+        Field::new("fts_complete", DataType::Boolean, false),
+        // Timestamp
         Field::new("updated_at_unix_secs", DataType::Int64, false),
     ]))
 }
@@ -164,11 +174,12 @@ mod tests {
     fn test_label_metadata_schema_constructible() {
         let schema = label_metadata_schema();
 
-        // Verify expected column count
+        // Verify expected column count (8 columns: label_id, catalog, label, source_kind,
+        // vector_source, vector_complete, fts_source, fts_complete, updated_at_unix_secs)
         assert_eq!(
             schema.fields().len(),
-            7,
-            "label_metadata table should have 7 columns"
+            9,
+            "label_metadata table should have 9 columns"
         );
 
         // Verify primary key column exists and is non-nullable
@@ -178,13 +189,21 @@ mod tests {
 
         // Verify no vector column
         assert!(schema.field_with_name("vector").is_err());
+
+        // Verify vector_source is nullable
+        let vector_source_field = schema.field_with_name("vector_source").unwrap();
+        assert!(vector_source_field.is_nullable());
+
+        // Verify fts_source is nullable
+        let fts_source_field = schema.field_with_name("fts_source").unwrap();
+        assert!(fts_source_field.is_nullable());
     }
 
     #[test]
     fn test_schema_version_constant() {
         // This test documents the current schema version. It will need updating
         // when the schema evolves.
-        assert_eq!(MONODEX_SCHEMA_VERSION, 3);
+        assert_eq!(MONODEX_SCHEMA_VERSION, 4);
     }
 
     #[test]

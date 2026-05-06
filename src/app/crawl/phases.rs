@@ -49,9 +49,12 @@ pub async fn write_in_progress_metadata(
         label_id: label_id.to_string(),
         catalog: catalog_name.to_string(),
         label: label.to_string(),
-        commit_oid: commit_oid.to_string(),
         source_kind: source_kind.to_string(),
-        crawl_complete: false,
+        // Stage 6 will update these with proper selection handling
+        vector_source: Some(commit_oid.to_string()),
+        vector_complete: false,
+        fts_source: Some(commit_oid.to_string()),
+        fts_complete: false,
         updated_at_unix_secs: std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
@@ -422,9 +425,12 @@ pub async fn update_final_metadata(
         label_id: label_id.to_string(),
         catalog: catalog_name.to_string(),
         label: label.to_string(),
-        commit_oid: commit_oid.to_string(),
         source_kind: source_kind.to_string(),
-        crawl_complete,
+        // Stage 6 will update these with proper per-method completion handling
+        vector_source: Some(commit_oid.to_string()),
+        vector_complete: crawl_complete,
+        fts_source: Some(commit_oid.to_string()),
+        fts_complete: crawl_complete,
         updated_at_unix_secs: std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
