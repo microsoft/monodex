@@ -62,6 +62,7 @@ rayon = "1.10"
 fs4 = "0.12"
 crossbeam-channel = "0.5"
 sysinfo = "0.33"
+terminal_size = "0.4"
 
 # Tree-sitter for AST parsing
 tree-sitter = "0.26"

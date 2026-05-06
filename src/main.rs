@@ -130,11 +130,11 @@ fn main() -> anyhow::Result<()> {
             query,
         } => {
             monodex::app::commands::run_debug_fts(
+                &config,
                 &id,
                 label.as_deref(),
                 catalog.as_deref(),
                 query.as_deref(),
-                cli.config.as_ref(),
                 cli.debug,
             )?;
         }
