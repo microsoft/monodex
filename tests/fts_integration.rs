@@ -918,6 +918,98 @@ fn test_multi_method_explicit_search() {
     remove_monodex_home();
 }
 
+/// Test that the search preamble appears before the multi-method stub error.
+///
+/// This verifies that the "Catalog: ... / Label: ... / Searching: ..." line
+/// is printed before the PR1 stub error for hybrid search, making the
+/// retrieval-selection concept legible even when errors follow.
+#[test]
+#[serial(monodex_home)]
+fn test_multi_method_search_shows_preamble() {
+    let (_monodex_home, _repo_dir) = {
+        // Set up temp directories
+        let monodex_home = unique_temp_dir();
+        let repo_dir = unique_temp_dir();
+
+        set_monodex_home(monodex_home.path());
+
+        // Create test git repo
+        let commit_oid = create_test_git_repo(repo_dir.path());
+
+        // Create config pointing to the repo
+        let config = create_test_config(monodex_home.path(), "test-catalog", repo_dir.path());
+
+        // Run init-db
+        run_init_db(&config, false).expect("init-db failed");
+
+        // Crawl with no --retrieval (selection becomes {fts, vector})
+        monodex::app::commands::crawl::run_crawl_label(
+            &config,
+            "test-catalog",
+            "main",
+            &commit_oid,
+            false,  // incremental_warnings
+            vec![], // no --retrieval = all methods
+            false,  // debug
+        )
+        .expect("crawl failed");
+
+        // Run monodex search as a subprocess to capture stdout
+        // We use the binary directly since run_search uses println! directly
+        // current_exe() gives us the test binary path; the main binary is in the same parent directory
+        let exe_path = std::env::current_exe().expect("failed to get current exe path");
+        let deps_dir = exe_path.parent().expect("failed to get deps dir");
+        let debug_dir = deps_dir.parent().expect("failed to get debug dir");
+        let binary_path = debug_dir.join("monodex");
+
+        let output = std::process::Command::new(&binary_path)
+            .args([
+                "search",
+                "--text",
+                "getUserProfile",
+                "--label",
+                "main",
+                "--catalog",
+                "test-catalog",
+                "--retrieval",
+                "fts",
+                "--retrieval",
+                "vector",
+            ])
+            .env("MONODEX_HOME", monodex_home.path())
+            .output()
+            .expect("failed to execute monodex search");
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+
+        // The command should fail with PR1 stub error
+        assert!(
+            !output.status.success(),
+            "Multi-method search should fail with PR1 stub error"
+        );
+
+        // The preamble should appear in stdout before the error
+        // Check for "Searching:" and both method names
+        assert!(
+            stdout.contains("Searching:"),
+            "Preamble should contain 'Searching:', got stdout: {:?}, stderr: {:?}",
+            stdout,
+            stderr
+        );
+        assert!(
+            stdout.contains("fts") && stdout.contains("vector"),
+            "Preamble should mention both methods, got stdout: {:?}, stderr: {:?}",
+            stdout,
+            stderr
+        );
+
+        (monodex_home, repo_dir)
+    };
+
+    remove_monodex_home();
+}
+
 // =============================================================================
 // Test: End-to-end cross-label active_label_ids preservation
 // =============================================================================

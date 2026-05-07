@@ -97,7 +97,16 @@ pub fn run_search(
             }
         }
 
-        // Step 6: Apply search decision rules
+        // Step 6: Print preamble before any decision-logic returns
+        // This makes the retrieval-selection concept legible even when errors follow
+        let searching_display = format_active_subset(&active_subset);
+        println!(
+            "Catalog: {} / Label: {} / Searching: {}",
+            catalog_name, label, searching_display
+        );
+        println!();
+
+        // Step 7: Apply search decision rules
         if active_subset.is_empty() {
             if persistent_selection.is_empty() {
                 return Err(anyhow!(
@@ -133,16 +142,8 @@ pub fn run_search(
             ));
         }
 
-        // Step 7: Dispatch to single method
+        // Step 8: Dispatch to single method
         let method = active_subset.iter().next().unwrap();
-
-        // Format the active subset for the Searching: line
-        let searching_display = format_active_subset(&active_subset);
-        println!(
-            "Catalog: {} / Label: {} / Searching: {}",
-            catalog_name, label, searching_display
-        );
-        println!();
 
         match method {
             RetrievalMethod::Vector => {
@@ -159,11 +160,10 @@ pub fn run_search(
 
 /// Format the active subset for the Searching: line.
 ///
-/// In PR1, the active subset always has exactly one method (multi-method is stub-error).
-/// Returns "fts only" or "vector only".
+/// Returns "fts only", "vector only", or "fts, vector" for multi-method.
+/// The preamble is printed before decision-logic returns, so multi-method
+/// cases (stub error in PR1) still show the preamble.
 fn format_active_subset(active_subset: &BTreeSet<RetrievalMethod>) -> String {
-    // In PR1, we only reach this function with exactly one method in active_subset
-    // (multi-method triggers stub error before dispatch)
     if active_subset.len() == 1 {
         let method = active_subset.iter().next().unwrap();
         match method {
