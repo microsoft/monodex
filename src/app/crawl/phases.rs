@@ -467,9 +467,13 @@ pub async fn run_fts_phase(
     warnings: WarningSink<'_>,
     is_commit_mode: bool,
 ) -> Result<()> {
-    println!("🔶 Phase 5: FTS indexing...");
+    use crate::app::util::format_duration;
+    use std::time::Instant;
 
-    crate::engine::fts::index_chunks_for_fts(
+    println!("🔶 Phase 5: FTS indexing...");
+    let start = Instant::now();
+
+    let stats = crate::engine::fts::index_chunks_for_fts(
         db_path,
         label_id,
         chunk_storage,
@@ -478,7 +482,15 @@ pub async fn run_fts_phase(
     )
     .await?;
 
-    println!("  FTS indexing complete.");
+    let elapsed = start.elapsed();
+    println!(
+        "  FTS indexing complete: {} added, {} removed, {} skipped (zero tokens), {} live in {}",
+        stats.added,
+        stats.removed,
+        stats.zero_token_skipped,
+        stats.live_row_ids,
+        format_duration(elapsed.as_secs_f64()),
+    );
     Ok(())
 }
 

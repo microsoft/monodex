@@ -24,6 +24,18 @@ use crate::engine::identifier::LabelId;
 use crate::engine::storage::ChunkStorage;
 use crate::engine::warning::{CrawlWarning, WarningSink};
 
+/// Statistics from an FTS indexing operation.
+pub struct FtsIndexingStats {
+    /// Total number of live row_ids in the index after indexing.
+    pub live_row_ids: usize,
+    /// Number of new documents added during this indexing run.
+    pub added: usize,
+    /// Number of documents removed during this indexing run.
+    pub removed: usize,
+    /// Number of chunks skipped due to producing zero tokens.
+    pub zero_token_skipped: usize,
+}
+
 /// Index chunks for a label into Tantivy.
 ///
 /// This is the main entry point for FTS indexing during a crawl. It:
@@ -41,14 +53,14 @@ use crate::engine::warning::{CrawlWarning, WarningSink};
 /// * `is_commit_mode` - If true, wait for merging threads after commit
 ///
 /// # Returns
-/// Ok(()) on success, or an error if indexing fails.
+/// Ok(FtsIndexingStats) on success with indexing statistics, or an error if indexing fails.
 pub async fn index_chunks_for_fts(
     db_path: &std::path::Path,
     label_id: &LabelId,
     chunk_storage: &ChunkStorage,
     warnings: WarningSink<'_>,
     is_commit_mode: bool,
-) -> Result<()> {
+) -> Result<FtsIndexingStats> {
     // Test hook: simulate FTS failure for testing decision #17
     if std::env::var("MONODEX_TEST_FTS_FAIL").is_ok() {
         return Err(anyhow::anyhow!("Test-induced FTS failure"));
@@ -128,16 +140,25 @@ pub async fn index_chunks_for_fts(
 
     // Step 10: Compute post-commit indexed set and write manifest
     // The manifest contains: currently_indexed - removals + successfully_added
+    let added_count = successfully_added.len();
+    let removed_count = removals.len();
+    let zero_token_skipped = additions.len() - added_count;
+
     let final_indexed: BTreeSet<String> = currently_indexed
         .difference(&removals)
         .cloned()
         .chain(successfully_added)
         .collect();
 
-    let manifest = FtsManifest::with_row_ids(final_indexed);
+    let manifest = FtsManifest::with_row_ids(final_indexed.clone());
     fts_index.write_manifest(&manifest)?;
 
-    Ok(())
+    Ok(FtsIndexingStats {
+        live_row_ids: final_indexed.len(),
+        added: added_count,
+        removed: removed_count,
+        zero_token_skipped,
+    })
 }
 
 /// Get the currently indexed row_ids from the FTS index.
