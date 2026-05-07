@@ -19,6 +19,7 @@ use tantivy::collector::TopDocs;
 use tantivy::query::QueryParser;
 use tantivy::schema::Value;
 
+use crate::engine::fts::error::is_not_found_error;
 use crate::engine::fts::index::FtsIndex;
 use crate::engine::identifier::LabelId;
 
@@ -92,7 +93,16 @@ pub async fn fts_search(
     };
 
     // Step 4: Execute the search
-    let top_docs = searcher.search(&query, &TopDocs::with_limit(limit))?;
+    let top_docs = match searcher.search(&query, &TopDocs::with_limit(limit)) {
+        Ok(docs) => docs,
+        Err(e) => {
+            // NotFound errors (concurrent purge) map to NoIndex
+            if is_not_found_error(&e) {
+                return Ok(FtsSearchOutcome::NoIndex);
+            }
+            return Err(e.into());
+        }
+    };
 
     // Step 5: Build hits from results
     let mut hits = Vec::new();
@@ -101,7 +111,15 @@ pub async fn fts_search(
         // Retrieve the document to get the row_id
         let doc: TantivyDocument = match searcher.doc(doc_address) {
             Ok(d) => d,
-            Err(_) => continue, // Skip documents we can't retrieve
+            Err(e) => {
+                // NotFound errors (concurrent purge) map to NoIndex for the whole query
+                // Do not partially collect hits - user gets one controlled outcome
+                if is_not_found_error(&e) {
+                    return Ok(FtsSearchOutcome::NoIndex);
+                }
+                // Other errors are real problems, propagate them
+                return Err(e.into());
+            }
         };
 
         // Extract the row_id from the stored field

@@ -19,6 +19,7 @@ use std::path::{Path, PathBuf};
 use tantivy::directory::MmapDirectory;
 use tantivy::{Index, IndexSettings};
 
+use crate::engine::fts::error::is_not_found_error;
 use crate::engine::fts::manifest::{FtsManifest, ManifestRead, read_manifest, write_manifest};
 use crate::engine::fts::schema::{FtsSchemaFields, fts_schema, get_fts_fields};
 use crate::engine::fts::tokenizer::{FTS_TOKENIZER_NAME, MonodexFtsTokenizer};
@@ -145,10 +146,11 @@ impl FtsIndex {
         // Try to open the index
         let directory = match MmapDirectory::open(&index_dir) {
             Ok(d) => d,
-            Err(tantivy::directory::error::OpenDirectoryError::DoesNotExist(_)) => {
-                return Ok(None);
-            }
             Err(e) => {
+                // Use typed error discrimination for NotFound
+                if is_not_found_error(&tantivy::TantivyError::OpenDirectoryError(e.clone())) {
+                    return Ok(None);
+                }
                 return Err(anyhow!("Failed to open MmapDirectory: {}", e));
             }
         };
@@ -156,10 +158,8 @@ impl FtsIndex {
         let index = match Index::open(directory) {
             Ok(i) => i,
             Err(e) => {
-                // For Index::open errors, we don't have a simple DoesNotExist variant
-                // Check if the error message contains "not found" as a heuristic
-                let err_string = e.to_string().to_lowercase();
-                if err_string.contains("not found") || err_string.contains("does not exist") {
+                // Use typed error discrimination for NotFound
+                if is_not_found_error(&e) {
                     return Ok(None);
                 }
                 return Err(anyhow!("Failed to open existing Tantivy index: {}", e));

@@ -149,6 +149,9 @@ pub fn write_manifest(path: &Path, manifest: &FtsManifest) -> Result<()> {
 ///
 /// This is used when the manifest is missing or invalid, to derive the current
 /// indexed set from Tantivy's on-disk state.
+///
+/// NotFound errors (from concurrent purge) are handled gracefully: returns an empty
+/// or partial set, consistent with the function's contract for missing-segment cases.
 pub fn reconcile_from_index(
     searcher: &tantivy::Searcher,
     row_id_field: tantivy::schema::Field,
@@ -156,12 +159,22 @@ pub fn reconcile_from_index(
     use tantivy::TantivyDocument;
     use tantivy::schema::Value;
 
+    use crate::engine::fts::error::is_io_not_found;
+
     let mut row_ids = BTreeSet::new();
 
     for segment_reader in searcher.segment_readers().iter() {
-        let store_reader = segment_reader
-            .get_store_reader(0)
-            .map_err(|e| anyhow!("Failed to get store reader: {}", e))?;
+        let store_reader = match segment_reader.get_store_reader(0) {
+            Ok(r) => r,
+            Err(e) => {
+                // NotFound errors (concurrent purge) are handled gracefully
+                if is_io_not_found(&e) {
+                    // Return what we have so far; the segment is gone
+                    return Ok(row_ids);
+                }
+                return Err(anyhow!("Failed to get store reader: {}", e));
+            }
+        };
 
         // Get the alive bitset to skip tombstoned documents
         let alive_bitset = segment_reader.alive_bitset();
@@ -179,9 +192,20 @@ pub fn reconcile_from_index(
             }
 
             // Retrieve the stored document
-            let doc: TantivyDocument = store_reader
-                .get(doc_id)
-                .map_err(|e| anyhow!("Failed to get document: {}", e))?;
+            // NotFound errors during doc retrieval are also handled gracefully
+            let doc: TantivyDocument = match store_reader.get(doc_id) {
+                Ok(d) => d,
+                Err(e) => {
+                    // Check if this is a NotFound-related error
+                    // store_reader.get returns various error types; check the error string
+                    // as a fallback since the exact type varies by Tantivy version
+                    let err_str = e.to_string().to_lowercase();
+                    if err_str.contains("not found") || err_str.contains("does not exist") {
+                        return Ok(row_ids);
+                    }
+                    return Err(anyhow!("Failed to get document: {}", e));
+                }
+            };
 
             // Extract the row_id field
             if let Some(value) = doc.get_first(row_id_field)

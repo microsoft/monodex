@@ -15,12 +15,10 @@
 
 use anyhow::Result;
 use std::collections::BTreeSet;
-use tantivy::TantivyDocument;
 use tantivy::doc;
-use tantivy::schema::Value;
 
 use crate::engine::fts::index::FtsIndex;
-use crate::engine::fts::manifest::{FtsManifest, ManifestRead};
+use crate::engine::fts::manifest::{FtsManifest, ManifestRead, reconcile_from_index};
 use crate::engine::fts::tokenizer::tokenize_text;
 use crate::engine::identifier::LabelId;
 use crate::engine::storage::ChunkStorage;
@@ -146,76 +144,42 @@ pub async fn index_chunks_for_fts(
 ///
 /// Uses the manifest fast path when available, falling back to scanning
 /// Tantivy segments when the manifest is missing or invalid.
+///
+/// ## Crash-window handling
+///
+/// A process crash between Tantivy commit and manifest write can leave the manifest
+/// stale (having fewer row_ids than Tantivy). We detect this by checking if the
+/// manifest count differs significantly from Tantivy's live doc count. If so, we
+/// discard the manifest and reconcile from Tantivy.
+///
+/// Note: This detection is not perfect - a manifest with the same cardinality but
+/// different row_ids would pass. This is an acceptable limitation for the MVP.
 fn get_currently_indexed_row_ids(fts_index: &FtsIndex) -> Result<BTreeSet<String>> {
+    let reader = fts_index.reader()?;
+    let searcher = reader.searcher();
+    let num_docs = searcher.num_docs() as usize;
+
     match fts_index.read_manifest() {
         ManifestRead::Present(manifest) if !manifest.row_ids.is_empty() => {
-            // Manifest fast path: trust the stored row_ids
-            // Sanity check: verify count is approximately correct
-            let reader = fts_index.reader()?;
-            let searcher = reader.searcher();
-            let num_docs = searcher.num_docs() as usize;
+            // Manifest fast path: trust the stored row_ids with sanity check
+            let manifest_count = manifest.row_ids.len();
 
-            // Tolerance for tombstoned docs: manifest count should be within 10x of num_docs
-            // (tombstoned docs count in num_docs but not in manifest)
-            if manifest.row_ids.len() > num_docs * 10 {
-                // Sanity check failed, fall back to scanning
-                return scan_tantivy_for_row_ids(fts_index);
+            // Two-sided tolerance check: manifest count should be close to num_docs
+            // tolerance = max(100, 5% of num_docs) to avoid false positives on small indexes
+            let tolerance = std::cmp::max(100, num_docs / 20);
+
+            if manifest_count.abs_diff(num_docs) > tolerance {
+                // Sanity check failed: manifest disagrees with Tantivy, reconcile from index
+                return reconcile_from_index(&searcher, fts_index.fields.row_id);
             }
 
             Ok(manifest.row_ids_set())
         }
         _ => {
-            // Missing, empty, IdMismatch, or Unreadable: scan Tantivy
-            scan_tantivy_for_row_ids(fts_index)
+            // Missing, empty, IdMismatch, or Unreadable: reconcile from Tantivy
+            reconcile_from_index(&searcher, fts_index.fields.row_id)
         }
     }
-}
-
-/// Scan Tantivy segments to determine the currently indexed row_ids.
-///
-/// This is the fallback when the manifest is not available or fails validation.
-fn scan_tantivy_for_row_ids(fts_index: &FtsIndex) -> Result<BTreeSet<String>> {
-    let reader = fts_index.reader()?;
-    let searcher = reader.searcher();
-
-    let mut row_ids = BTreeSet::new();
-
-    for segment_reader in searcher.segment_readers().iter() {
-        let store_reader = segment_reader
-            .get_store_reader(0)
-            .map_err(|e| anyhow::anyhow!("Failed to get store reader: {}", e))?;
-
-        // Get the alive bitset to skip tombstoned documents
-        let alive_bitset = segment_reader.alive_bitset();
-
-        for doc_id in 0..segment_reader.max_doc() {
-            // Skip deleted documents
-            let is_alive = if let Some(bitset) = alive_bitset {
-                bitset.is_alive(doc_id)
-            } else {
-                true
-            };
-
-            if !is_alive {
-                continue;
-            }
-
-            // Retrieve the stored document
-            let doc: TantivyDocument = match store_reader.get(doc_id) {
-                Ok(d) => d,
-                Err(_) => continue, // Skip documents we can't read
-            };
-
-            // Extract the row_id field
-            if let Some(value) = doc.get_first(fts_index.fields.row_id)
-                && let Some(row_id) = value.as_str()
-            {
-                row_ids.insert(row_id.to_string());
-            }
-        }
-    }
-
-    Ok(row_ids)
 }
 
 #[cfg(test)]

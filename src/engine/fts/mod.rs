@@ -4,6 +4,7 @@
 //! Edit here when: Changing FTS indexing logic, tokenizer behavior, schema, or search semantics.
 //! Do not edit here for: Vector search (see `engine/storage/chunks/`), CLI handlers (see `app/commands/`).
 
+mod error;
 pub mod index;
 pub mod indexing;
 pub mod manifest;
