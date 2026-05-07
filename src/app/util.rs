@@ -1,6 +1,6 @@
-//! Purpose: App-wide formatting and display utilities — timestamps, durations, byte sizes, terminal-output sanitization for `>`-prefixed search lines.
-//! Edit here when: Adding or modifying user-facing formatting helpers.
-//! Do not edit here for: Engine-wide utilities (see `engine/util.rs`).
+//! Purpose: App-wide formatting and display utilities — timestamps, durations, byte sizes, terminal-output sanitization for `>`-prefixed search lines, chunk selector parsing.
+//! Edit here when: Adding or modifying user-facing formatting helpers, or chunk selector parsing logic.
+//! Do not edit here for: Engine-wide utilities (see `engine/util.rs`), view command output (see `app/commands/view.rs`).
 
 use std::collections::HashSet;
 
@@ -263,5 +263,96 @@ pub fn format_source_pointer(row: &crate::engine::storage::LabelMetadataRow) -> 
             .unwrap_or_else(|| "--commit <commit>".to_string()),
         "working-directory" => "--working-dir".to_string(),
         _ => "[source]".to_string(),
+    }
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // =========================================================================
+    // parse_chunk_selector tests
+    // =========================================================================
+
+    #[test]
+    fn test_parse_file_id_all_chunks() {
+        let (file_id, selector) = parse_chunk_selector("abcd1234efab5678").unwrap();
+        assert_eq!(file_id, "abcd1234efab5678");
+        assert!(matches!(selector, ChunkSelector::All));
+    }
+
+    #[test]
+    fn test_parse_file_id_single_chunk() {
+        let (file_id, selector) = parse_chunk_selector("abcd1234efab5678:3").unwrap();
+        assert_eq!(file_id, "abcd1234efab5678");
+        assert!(matches!(selector, ChunkSelector::Single(3)));
+    }
+
+    #[test]
+    fn test_parse_file_id_range() {
+        let (file_id, selector) = parse_chunk_selector("abcd1234efab5678:2-4").unwrap();
+        assert_eq!(file_id, "abcd1234efab5678");
+        assert!(matches!(selector, ChunkSelector::Range(2, 4)));
+    }
+
+    #[test]
+    fn test_parse_file_id_to_end() {
+        let (file_id, selector) = parse_chunk_selector("abcd1234efab5678:3-end").unwrap();
+        assert_eq!(file_id, "abcd1234efab5678");
+        assert!(matches!(selector, ChunkSelector::ToEnd(3)));
+    }
+
+    #[test]
+    fn test_parse_file_id_invalid_file_id() {
+        let result = parse_chunk_selector("invalid");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Invalid file ID"));
+    }
+
+    #[test]
+    fn test_parse_file_id_invalid_selector() {
+        let result = parse_chunk_selector("abcd1234efab5678:abc");
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Invalid chunk number")
+        );
+    }
+
+    #[test]
+    fn test_parse_file_id_end_without_start() {
+        let result = parse_chunk_selector("abcd1234efab5678:end");
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Invalid selector ':end'")
+        );
+    }
+
+    #[test]
+    fn test_parse_file_id_zero_chunk_number() {
+        let result = parse_chunk_selector("abcd1234efab5678:0");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("1-indexed"));
+    }
+
+    #[test]
+    fn test_parse_file_id_reversed_range() {
+        let result = parse_chunk_selector("abcd1234efab5678:5-2");
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Start chunk 5 > end chunk 2")
+        );
     }
 }
