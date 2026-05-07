@@ -2,7 +2,10 @@
 //! Edit here when: Modifying search output, result formatting, or the `>`-prefixed line shape.
 //! Do not edit here for: Vector search logic (see `engine/storage/chunks/mod.rs`), embedding (see `engine/parallel_embedder.rs`), FTS search (see `engine/fts/search.rs`).
 
-use crate::app::{Config, format_chunk_report, resolve_database_path, resolve_label_context};
+use crate::app::{
+    Config, format_chunk_report, format_source_pointer, resolve_database_path,
+    resolve_label_context,
+};
 use crate::engine::{
     ParallelEmbedder, RetrievalMethod,
     fts::{FtsSearchOutcome, fts_search},
@@ -45,14 +48,16 @@ pub fn run_search(
         let persistent_selection = crate::engine::storage::read_selection(&label_metadata);
 
         // Step 3: Compute requested methods (explicit flags or all in selection)
+        let explicit_retrieval = retrieval.is_some();
         let requested_methods = retrieval.unwrap_or_else(|| persistent_selection.clone());
 
         // Step 4: Validate requested methods are in selection
         for method in &requested_methods {
             if !persistent_selection.contains(method) {
+                let source_pointer = format_source_pointer(&label_metadata);
                 return Err(anyhow!(
-                    "Method {} is not in this label's retrieval selection. Re-run `monodex crawl --label {} --retrieval {}` to add it.",
-                    method, label, method
+                    "Method {} is not in this label's retrieval selection. Re-run `monodex crawl --label {} {} --retrieval {}` to add it.",
+                    method, label, source_pointer, method
                 ));
             }
         }
@@ -83,6 +88,10 @@ pub fn run_search(
                     "   To complete: monodex crawl --label {} {} --retrieval {}",
                     label, source_pointer, method
                 );
+                // If the user explicitly requested this method via --retrieval, proceed anyway
+                if explicit_retrieval {
+                    active_subset.insert(*method);
+                }
             } else {
                 active_subset.insert(*method);
             }
@@ -95,9 +104,10 @@ pub fn run_search(
                     "This label has no retrieval methods in its selection. Re-run `monodex crawl` to populate it."
                 ));
             } else {
+                let source_pointer = format_source_pointer(&label_metadata);
                 return Err(anyhow!(
-                    "All retrieval methods in this label's selection are incomplete (vector_complete = false, fts_complete = false).\nRe-run `monodex crawl --label {} [source]` to complete indexing.",
-                    label
+                    "All retrieval methods in this label's selection are incomplete (vector_complete = false, fts_complete = false).\nRe-run `monodex crawl --label {} {}` to complete indexing.",
+                    label, source_pointer
                 ));
             }
         }
@@ -110,9 +120,10 @@ pub fn run_search(
             if let (Some(vs), Some(fs)) = (vector_source, fts_source)
                 && vs != fs
             {
+                let source_pointer = format_source_pointer(&label_metadata);
                 return Err(anyhow!(
-                    "This label's retrieval methods have inconsistent source state:\n  vector indexed against: {}\n  fts indexed against: {}\nRe-run `monodex crawl --label {} [source]` to bring them back in sync.",
-                    vs, fs, label
+                    "This label's retrieval methods have inconsistent source state:\n  vector indexed against: {}\n  fts indexed against: {}\nRe-run `monodex crawl --label {} {}` to bring them back in sync.",
+                    vs, fs, label, source_pointer
                 ));
             }
 
@@ -159,20 +170,6 @@ fn format_selection_display(selection: &BTreeSet<RetrievalMethod>) -> String {
         // Two methods, alphabetical order
         let methods: Vec<String> = selection.iter().map(|m| m.to_string()).collect();
         methods.join(", ")
-    }
-}
-
-/// Format source pointer for remediation messages.
-fn format_source_pointer(row: &crate::engine::storage::LabelMetadataRow) -> String {
-    match row.source_kind.as_str() {
-        "git-commit" => row
-            .vector_source
-            .as_ref()
-            .or(row.fts_source.as_ref())
-            .map(|s| format!("--commit {}", s))
-            .unwrap_or_else(|| "--commit <commit>".to_string()),
-        "working-directory" => "--working-dir".to_string(),
-        _ => "[source]".to_string(),
     }
 }
 

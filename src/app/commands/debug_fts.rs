@@ -7,7 +7,7 @@
 
 use anyhow::{Result, anyhow};
 
-use crate::app::{Config, resolve_database_path, resolve_label_context};
+use crate::app::{Config, format_source_pointer, resolve_database_path, resolve_label_context};
 use crate::engine::fts::index::FtsIndex;
 use crate::engine::fts::tokenizer::tokenize_text;
 use crate::engine::storage::Database;
@@ -46,6 +46,7 @@ pub fn run_debug_fts(
         // Open database
         let db = Database::open(&db_path).await?;
         let chunk_storage = db.chunks_storage().await?;
+        let label_storage = db.label_storage().await?;
 
         // Compute row_id from file_id and ordinal
         let row_id = compute_row_id(&file_id, ordinal);
@@ -109,10 +110,16 @@ pub fn run_debug_fts(
                     explain_query(&fts_index, &row_id, query_text, &chunk.text)?;
                 }
                 None => {
+                    // Load label metadata to format source pointer, with fallback
+                    let label_metadata = label_storage.get_by_label_id(label_id.as_str()).await?;
+                    let source_pointer = label_metadata
+                        .as_ref()
+                        .map(format_source_pointer)
+                        .unwrap_or_else(|| "--commit <commit>".to_string());
                     println!();
                     println!(
-                        "No FTS index for label {}/{}. Run `monodex crawl --label {} [source] --retrieval fts` to build it.",
-                        catalog_name, label_name, label_name
+                        "No FTS index for label {}/{}. Run `monodex crawl --label {} {} --retrieval fts` to build it.",
+                        catalog_name, label_name, label_name, source_pointer
                     );
                 }
             }

@@ -954,9 +954,9 @@ fn test_cross_label_active_labels_preserved() {
             "test-catalog",
             "label-a",
             &commit_oid,
-            false, // incremental_warnings
+            false,                      // incremental_warnings
             vec![RetrievalMethod::Fts], // FTS-only
-            false, // debug
+            false,                      // debug
         )
         .expect("crawl label-a failed");
 
@@ -966,9 +966,9 @@ fn test_cross_label_active_labels_preserved() {
             "test-catalog",
             "label-b",
             &commit_oid,
-            false, // incremental_warnings
+            false,  // incremental_warnings
             vec![], // empty = all methods
-            false, // debug
+            false,  // debug
         )
         .expect("crawl label-b failed");
 
@@ -1060,9 +1060,9 @@ fn test_working_dir_remediation_message() {
             &config,
             "test-catalog",
             "working-label",
-            false, // incremental_warnings
+            false,                      // incremental_warnings
             vec![RetrievalMethod::Fts], // FTS-only
-            false, // debug
+            false,                      // debug
         )
         .expect("working-dir crawl failed");
 
@@ -1080,7 +1080,10 @@ fn test_working_dir_remediation_message() {
         );
 
         // Should error because vector is not in selection
-        assert!(search_result.is_err(), "Should error when method not in selection");
+        assert!(
+            search_result.is_err(),
+            "Should error when method not in selection"
+        );
         let err_msg = search_result.unwrap_err().to_string();
 
         // The error should suggest re-crawling, and since this is a working-dir
@@ -1088,7 +1091,8 @@ fn test_working_dir_remediation_message() {
         // Note: The actual message format is "Re-run `monodex crawl --label <label> [source] --retrieval X`"
         // where [source] is determined by the source_kind. For working-dir, it should be --working-dir.
         assert!(
-            err_msg.contains("--retrieval vector") || err_msg.contains("not in this label's retrieval selection"),
+            err_msg.contains("--retrieval vector")
+                || err_msg.contains("not in this label's retrieval selection"),
             "Error should mention the retrieval method issue, got: {}",
             err_msg
         );
@@ -1142,9 +1146,9 @@ fn test_fts_phase_failure_preserves_vector_completion() {
             "test-catalog",
             "test-label",
             &commit_oid,
-            false, // incremental_warnings
+            false,  // incremental_warnings
             vec![], // empty = all methods
-            false, // debug
+            false,  // debug
         );
 
         // Clean up the environment variable
@@ -1161,9 +1165,9 @@ fn test_fts_phase_failure_preserves_vector_completion() {
             "test-catalog",
             "test-label",
             &commit_oid,
-            false, // incremental_warnings
+            false,                      // incremental_warnings
             vec![RetrievalMethod::Fts], // FTS-only
-            false, // debug
+            false,                      // debug
         )
         .expect("FTS-only crawl should succeed");
 

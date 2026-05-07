@@ -129,3 +129,24 @@ pub fn save_warning_state(
 pub fn stderr_lock_progress(msg: &str) {
     eprintln!("{}", msg);
 }
+
+// ============================================================================
+// Source Pointer Formatting
+// ============================================================================
+
+/// Format source pointer for remediation messages.
+///
+/// Produces a `--commit <oid>` or `--working-dir` argument string suitable for
+/// suggested crawl commands in error/warning messages.
+pub fn format_source_pointer(row: &crate::engine::storage::LabelMetadataRow) -> String {
+    match row.source_kind.as_str() {
+        "git-commit" => row
+            .vector_source
+            .as_ref()
+            .or(row.fts_source.as_ref())
+            .map(|s| format!("--commit {}", s))
+            .unwrap_or_else(|| "--commit <commit>".to_string()),
+        "working-directory" => "--working-dir".to_string(),
+        _ => "[source]".to_string(),
+    }
+}
