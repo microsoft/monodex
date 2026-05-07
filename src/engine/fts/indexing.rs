@@ -61,11 +61,6 @@ pub async fn index_chunks_for_fts(
     warnings: WarningSink<'_>,
     is_commit_mode: bool,
 ) -> Result<FtsIndexingStats> {
-    // Test hook: simulate FTS failure for testing decision #17
-    if std::env::var("MONODEX_TEST_FTS_FAIL").is_ok() {
-        return Err(anyhow::anyhow!("Test-induced FTS failure"));
-    }
-
     // Step 1: Open or create the FTS index
     let fts_index = FtsIndex::open_or_create(db_path, label_id)?;
 

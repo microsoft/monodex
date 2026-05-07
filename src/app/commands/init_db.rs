@@ -91,59 +91,69 @@ pub fn run_init_db(config: &Config, delete_everything: bool) -> Result<()> {
         fs::create_dir_all(&db_path)?;
     }
 
-    // Step 4: Handle --delete-everything flag
-    // If the flag is set and the database exists, delete its contents (except locks/)
-    // before proceeding with normal initialization.
-    if delete_everything && db_path.exists() {
-        // Acquire exclusive lock before deleting
+    // Step 4: Handle --delete-everything flag (separate branch with lock held through create)
+    // This branch acquires the lock, deletes if needed, creates the database, and returns.
+    // The lock guard stays in scope through create_database, preventing concurrent races.
+    if delete_everything {
         let _guard = acquire_database_exclusive(&db_path, &stderr_lock_progress)?;
 
-        // Check if there's anything to delete
-        let has_content = db_path
-            .read_dir()
-            .map(|mut entries| {
-                entries.any(|e| {
-                    e.ok()
-                        .map(|e| {
-                            let name = e.file_name();
-                            // Ignore locks directory - we hold a lock under it
-                            name != "locks"
-                        })
-                        .unwrap_or(false)
+        if db_path.exists() {
+            // Check if there's anything to delete
+            let has_content = db_path
+                .read_dir()
+                .map(|mut entries| {
+                    entries.any(|e| {
+                        e.ok()
+                            .map(|e| {
+                                let name = e.file_name();
+                                // Ignore locks directory - we hold a lock under it
+                                name != "locks"
+                            })
+                            .unwrap_or(false)
+                    })
                 })
-            })
-            .unwrap_or(false);
+                .unwrap_or(false);
 
-        if has_content {
-            println!("Deleted contents of {}; reinitializing.", db_path.display());
-            delete_database_contents(&db_path)?;
-        } else {
-            println!("Note: --delete-everything specified but no existing database to delete.");
-        }
-        // Fall through to normal initialization (create_database handles the fresh state)
-    } else {
-        // Step 5: Pre-lock existence check (short-circuit if already initialized)
-        // Use the tolerant check that falls through to lock acquisition for transient mid-init states
-        if let Some(meta) = check_existing_database_pre_lock(&db_path)? {
-            println!(
-                "{}",
-                log_already_initialized(&db_path, meta.monodex_schema_version)
-            );
-            return Ok(());
+            if has_content {
+                println!("Deleted contents of {}; reinitializing.", db_path.display());
+                delete_database_contents(&db_path)?;
+            } else {
+                println!("Note: --delete-everything specified but no existing database to delete.");
+            }
         }
 
-        // Step 6: Acquire exclusive database lock
-        // The lock module creates <db>/locks/ and the lockfile lazily
-        let _guard = acquire_database_exclusive(&db_path, &stderr_lock_progress)?;
+        // Create the database while still holding the lock
+        let rt = tokio::runtime::Runtime::new()
+            .map_err(|e| anyhow!("Failed to create tokio runtime: {}", e))?;
+        rt.block_on(create_database(&db_path))?;
 
-        // Step 7: Under-lock recheck (double-checked init pattern)
-        if let Some(meta) = check_existing_database(&db_path)? {
-            println!(
-                "{}",
-                log_already_initialized(&db_path, meta.monodex_schema_version)
-            );
-            return Ok(());
-        }
+        println!("Created monodex database at {}", db_path.display());
+        return Ok(());
+    }
+
+    // Non-delete path: existing logic unchanged.
+
+    // Step 5: Pre-lock existence check (short-circuit if already initialized)
+    // Use the tolerant check that falls through to lock acquisition for transient mid-init states
+    if let Some(meta) = check_existing_database_pre_lock(&db_path)? {
+        println!(
+            "{}",
+            log_already_initialized(&db_path, meta.monodex_schema_version)
+        );
+        return Ok(());
+    }
+
+    // Step 6: Acquire exclusive database lock
+    // The lock module creates <db>/locks/ and the lockfile lazily
+    let _guard = acquire_database_exclusive(&db_path, &stderr_lock_progress)?;
+
+    // Step 7: Under-lock recheck (double-checked init pattern)
+    if let Some(meta) = check_existing_database(&db_path)? {
+        println!(
+            "{}",
+            log_already_initialized(&db_path, meta.monodex_schema_version)
+        );
+        return Ok(());
     }
 
     // Step 8: Create the database
@@ -885,6 +895,60 @@ mod tests {
 
         // Verify database was recreated
         assert!(db_path.join(META_FILE).exists());
+
+        remove_monodex_home();
+    }
+
+    #[test]
+    #[serial(monodex_home)]
+    fn test_delete_everything_with_v3_database() {
+        // Test that --delete-everything works on a database with an older schema version (v3)
+        // This verifies the delete path correctly wipes and recreates even when the schema
+        // version doesn't match the current version.
+        clear_tool_home_cache();
+        let temp_dir = TempDir::new().unwrap();
+
+        set_monodex_home(temp_dir.path());
+
+        let config_path = temp_dir.path().join("config.json");
+        write_minimal_config(&config_path);
+
+        let config = load_config(&config_path).expect("Config should load");
+
+        // Create a database directory with a hand-written v3 meta file
+        let db_path = temp_dir.path().join("default-db");
+        fs::create_dir_all(&db_path).unwrap();
+
+        // Write a v3 meta file (mock the v3 state without actually building v3 tables)
+        let meta_content = r#"{
+  "monodex_schema_version": 3
+}"#;
+        std::fs::write(db_path.join(META_FILE), meta_content).unwrap();
+
+        // Also create minimal table directories so it looks like a real database
+        fs::create_dir_all(db_path.join("chunks.lance")).unwrap();
+        fs::create_dir_all(db_path.join("label_metadata.lance")).unwrap();
+
+        // Run init-db --delete-everything
+        clear_tool_home_cache();
+        let result = run_init_db(&config, true);
+        assert!(
+            result.is_ok(),
+            "init-db --delete-everything should succeed on v3 database: {:?}",
+            result.err()
+        );
+
+        // Verify the resulting meta file shows schema version 4 (current version)
+        let meta_path = db_path.join(META_FILE);
+        assert!(meta_path.exists(), "Meta file should exist");
+
+        let meta_json: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&meta_path).unwrap()).unwrap();
+        assert_eq!(
+            meta_json["monodex_schema_version"].as_u64().unwrap(),
+            crate::engine::schema::MONODEX_SCHEMA_VERSION as u64,
+            "Schema version should be upgraded to current version"
+        );
 
         remove_monodex_home();
     }

@@ -1107,20 +1107,19 @@ fn test_working_dir_remediation_message() {
 }
 
 // =============================================================================
-// Test: FTS phase failure after vector success
+// Test: Post-finalize error propagation
 // =============================================================================
 
-/// Test that when FTS phase fails after vector phase succeeds, the metadata
-/// correctly reflects `vector_complete=true` and `fts_complete=false`.
+/// Test that post-finalize errors propagate when no phase error was captured.
 ///
-/// This verifies decision #17: FTS phase failure must still finalize metadata.
-/// The orchestrator catches the FTS phase result, threads it into PhaseResults,
-/// calls finalize, then propagates the error.
+/// This test injects a failure into save_warning_state by pre-creating a
+/// directory at the path where the warning state file would be written.
+/// The OS then rejects the write with "is a directory" error.
 ///
-/// The test uses a test hook environment variable to simulate FTS failure.
+/// The crawl should fail with an error referencing the warning state.
 #[test]
 #[serial(monodex_home)]
-fn test_fts_phase_failure_preserves_vector_completion() {
+fn test_post_finalize_error_propagates_when_no_phase_error() {
     let (_monodex_home, _repo_dir) = {
         // Set up temp directories
         let monodex_home = unique_temp_dir();
@@ -1137,13 +1136,15 @@ fn test_fts_phase_failure_preserves_vector_completion() {
         // Run init-db
         run_init_db(&config, false).expect("init-db failed");
 
-        // Set environment variable to trigger FTS failure
-        // SAFETY: Test is serialized via #[serial(monodex_home)]
-        unsafe {
-            std::env::set_var("MONODEX_TEST_FTS_FAIL", "1");
-        }
+        // Resolve the database path
+        let db_path = monodex::app::resolve_database_path(Some(&config)).unwrap();
 
-        // Crawl with both methods - FTS should fail, vector should succeed
+        // Create a directory at the path where save_warning_state would write its file.
+        // This causes the write to fail with "is a directory" error.
+        let warning_state_path = db_path.join("warnings-test-catalog.json");
+        std::fs::create_dir_all(&warning_state_path).expect("Failed to create blocking directory");
+
+        // Run a crawl - it should succeed through all phases but fail at warning-state save
         let crawl_result = monodex::app::commands::crawl::run_crawl_label(
             &config,
             "test-catalog",
@@ -1154,40 +1155,20 @@ fn test_fts_phase_failure_preserves_vector_completion() {
             false,  // debug
         );
 
-        // Clean up the environment variable
-        unsafe {
-            std::env::remove_var("MONODEX_TEST_FTS_FAIL");
-        }
+        // The crawl should have failed due to warning-state persistence error
+        assert!(
+            crawl_result.is_err(),
+            "Crawl should fail due to warning-state error"
+        );
 
-        // The crawl should have failed due to FTS error
-        assert!(crawl_result.is_err(), "Crawl should fail due to FTS error");
-
-        // Now re-crawl with FTS only to complete the FTS phase
-        monodex::app::commands::crawl::run_crawl_label(
-            &config,
-            "test-catalog",
-            "test-label",
-            &commit_oid,
-            false,                      // incremental_warnings
-            vec![RetrievalMethod::Fts], // FTS-only
-            false,                      // debug
-        )
-        .expect("FTS-only crawl should succeed");
-
-        // Verify both methods work now
-        let fts_only: Option<BTreeSet<RetrievalMethod>> =
-            Some(std::iter::once(RetrievalMethod::Fts).collect());
-        run_search(
-            &config,
-            "getUserProfile",
-            10,
-            Some("test-label"),
-            Some("test-catalog"),
-            fts_only,
-            false,
-        )
-        .expect("FTS search should work after recovery");
-        // run_search returns Ok(()) on success; result count is printed to stdout
+        // Verify the error chain references warning state
+        let err = crawl_result.expect_err("Expected error");
+        let err_msg = err.to_string();
+        assert!(
+            err_msg.contains("warning state"),
+            "Error should reference warning state, got: {}",
+            err_msg
+        );
 
         (monodex_home, repo_dir)
     };

@@ -382,7 +382,14 @@ async fn run_crawl_async(
     let had_embed_failures = pipeline_failures.has_failures();
 
     // Phase 4: Label reassignment cleanup (conditional)
-    if has_existing_file_failures || had_embed_failures {
+    // Skip cleanup if: per-chunk failures, embed failures, OR structural phase errors.
+    // Structural errors (from run_embed_upload_pipeline or run_upsert_without_vectors)
+    // are captured in vector_phase_error but weren't gating cleanup - this is the bug fix.
+    if should_skip_label_cleanup(
+        has_existing_file_failures,
+        had_embed_failures,
+        vector_phase_error.is_some(),
+    ) {
         println!("🔶 Phase 4: SKIPPING label reassignment cleanup (crawl had failures)");
         println!("  This is intentional - cleanup should only run after successful crawls.");
         println!("  Run the crawl again to complete indexing and trigger cleanup.");
@@ -426,7 +433,7 @@ async fn run_crawl_async(
 
     // Phase: Update final label metadata (with per-method completion)
     // Always call this even if phases failed, so partial state is persisted
-    if let Err(e) = update_final_metadata(
+    let final_metadata_result = update_final_metadata(
         &label_storage,
         label_id,
         catalog_name,
@@ -436,16 +443,17 @@ async fn run_crawl_async(
         &selection,
         &phase_results,
     )
-    .await
-    {
-        eprintln!("  Warning: Failed to update label metadata: {}", e);
-    }
+    .await;
 
     // Phase: Print summary
     let had_failures = has_existing_file_failures
         || had_embed_failures
         || !phase_results.label_reassignment_succeeded
         || phase_results.fts_succeeded == Some(false);
+
+    // Determine phase failure states for summary
+    let vector_phase_failed = vector_phase_error.is_some();
+    let fts_phase_failed = fts_phase_error.is_some();
 
     print_summary(
         total_start,
@@ -456,33 +464,59 @@ async fn run_crawl_async(
         !phase_results.label_reassignment_succeeded,
         label_add_output.failures.len(),
         pipeline_failures.total(),
+        vector_phase_failed,
+        fts_phase_failed,
     );
 
     // Phase: Save warning state
-    // Log errors but don't let them mask phase errors
-    if let Err(e) = save_warning_state(
+    let warning_state_result = save_warning_state(
         db_path,
         catalog_name,
         &chunking_output.warning_files,
         prior_warning_files,
         incremental_warnings,
-    ) {
-        eprintln!("  Warning: Failed to save warning state: {}", e);
-    }
+    );
 
     // Phase: Print warning summary
     print_warning_summary(&chunking_output.warning_files);
 
     // Return the most-specific captured error (vector > reassignment > fts priority)
-    // An earlier-phase error is the root cause of any subsequent skipped work
+    // An earlier-phase error is the root cause of any subsequent skipped work.
+    // When returning a phase error, log any post-finalize errors to stderr.
     if let Some(e) = vector_phase_error {
+        if let Err(ref we) = warning_state_result {
+            eprintln!("  Warning: Failed to save warning state: {}", we);
+        }
+        if let Err(ref me) = final_metadata_result {
+            eprintln!("  Warning: Failed to update label metadata: {}", me);
+        }
         return Err(e);
     }
     if let Some(e) = label_reassignment_error {
+        if let Err(ref we) = warning_state_result {
+            eprintln!("  Warning: Failed to save warning state: {}", we);
+        }
+        if let Err(ref me) = final_metadata_result {
+            eprintln!("  Warning: Failed to update label metadata: {}", me);
+        }
         return Err(e);
     }
     if let Some(e) = fts_phase_error {
+        if let Err(ref we) = warning_state_result {
+            eprintln!("  Warning: Failed to save warning state: {}", we);
+        }
+        if let Err(ref me) = final_metadata_result {
+            eprintln!("  Warning: Failed to update label metadata: {}", me);
+        }
         return Err(e);
+    }
+
+    // No captured phase error: post-finalize errors propagate normally.
+    if let Err(e) = final_metadata_result {
+        return Err(e.context("Failed to update label metadata"));
+    }
+    if let Err(e) = warning_state_result {
+        return Err(e.context("Failed to save warning state"));
     }
 
     // No captured phase error, but had per-chunk failures or other issues
@@ -491,4 +525,66 @@ async fn run_crawl_async(
     }
 
     Ok(())
+}
+
+/// Determines whether label cleanup should be skipped due to failures.
+///
+/// Label cleanup (Phase 4) should only run after fully successful crawls.
+/// This predicate gates cleanup on:
+/// - Per-chunk label-add failures (existing files that couldn't be updated)
+/// - Per-chunk embed failures (individual chunks that failed to embed)
+/// - Structural phase errors (pipeline failures that abort the entire phase)
+///
+/// # Arguments
+/// * `has_existing_file_failures` - True if any existing-file label-add failed
+/// * `had_embed_failures` - True if any per-chunk embedding failed
+/// * `vector_phase_error_present` - True if a structural error occurred in Phase 3
+///
+/// # Returns
+/// `true` if cleanup should be skipped, `false` if it should proceed.
+fn should_skip_label_cleanup(
+    has_existing_file_failures: bool,
+    had_embed_failures: bool,
+    vector_phase_error_present: bool,
+) -> bool {
+    has_existing_file_failures || had_embed_failures || vector_phase_error_present
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_should_skip_label_cleanup_no_failures() {
+        // No failures of any kind: cleanup should run
+        assert!(!should_skip_label_cleanup(false, false, false));
+    }
+
+    #[test]
+    fn test_should_skip_label_cleanup_existing_file_failures() {
+        // Existing-file failures only: skip cleanup
+        assert!(should_skip_label_cleanup(true, false, false));
+    }
+
+    #[test]
+    fn test_should_skip_label_cleanup_embed_failures() {
+        // Per-chunk embed failures only: skip cleanup
+        assert!(should_skip_label_cleanup(false, true, false));
+    }
+
+    #[test]
+    fn test_should_skip_label_cleanup_structural_error() {
+        // Structural vector_phase_error present: skip cleanup
+        // This is the new case this jobsheet is fixing
+        assert!(should_skip_label_cleanup(false, false, true));
+    }
+
+    #[test]
+    fn test_should_skip_label_cleanup_multiple_failures() {
+        // Multiple failure types: skip cleanup
+        assert!(should_skip_label_cleanup(true, true, false));
+        assert!(should_skip_label_cleanup(true, false, true));
+        assert!(should_skip_label_cleanup(false, true, true));
+        assert!(should_skip_label_cleanup(true, true, true));
+    }
 }

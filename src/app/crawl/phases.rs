@@ -574,9 +574,12 @@ pub fn print_summary(
     cleanup_failed: bool,
     existing_file_failures_count: usize,
     pipeline_failures_count: usize,
+    // Phase failure indicators for the summary
+    vector_phase_failed: bool,
+    fts_phase_failed: bool,
 ) {
     let total_elapsed = total_start.elapsed();
-    if had_failures || cleanup_failed {
+    if had_failures || cleanup_failed || vector_phase_failed || fts_phase_failed {
         println!("⚠️  Crawl completed with errors!");
         println!(
             "  Total time: {}",
@@ -598,6 +601,12 @@ pub fn print_summary(
         }
         if cleanup_failed {
             println!("  - Label cleanup failed (crawl not marked complete)");
+        }
+        if vector_phase_failed {
+            println!("  - Vector phase: failed (see error above)");
+        }
+        if fts_phase_failed {
+            println!("  - FTS phase: failed (see error above)");
         }
         println!();
         println!("  This crawl is marked as incomplete. Re-run to complete indexing.");

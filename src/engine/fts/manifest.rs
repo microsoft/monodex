@@ -159,7 +159,7 @@ pub fn reconcile_from_index(
     use tantivy::TantivyDocument;
     use tantivy::schema::Value;
 
-    use crate::engine::fts::error::is_io_not_found;
+    use crate::engine::fts::error::{is_io_not_found, is_not_found_error};
 
     let mut row_ids = BTreeSet::new();
 
@@ -196,11 +196,8 @@ pub fn reconcile_from_index(
             let doc: TantivyDocument = match store_reader.get(doc_id) {
                 Ok(d) => d,
                 Err(e) => {
-                    // Check if this is a NotFound-related error
-                    // store_reader.get returns various error types; check the error string
-                    // as a fallback since the exact type varies by Tantivy version
-                    let err_str = e.to_string().to_lowercase();
-                    if err_str.contains("not found") || err_str.contains("does not exist") {
+                    // Use typed error discrimination per feedback1 #3 contract
+                    if is_not_found_error(&e) {
                         return Ok(row_ids);
                     }
                     return Err(anyhow!("Failed to get document: {}", e));
