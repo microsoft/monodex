@@ -218,6 +218,14 @@ fn is_ascii_punctuation(ch: char) -> bool {
 /// Split an identifier on case transitions, underscores, dots, and digit boundaries.
 ///
 /// Returns a list of lowercase parts.
+///
+/// ## Acronym handling
+///
+/// When an acronym (run of uppercase letters) is followed by a lowercase letter,
+/// the last uppercase letter joins the following word:
+/// - `HTTPServer` → `["http", "server"]`
+/// - `URLParser` → `["url", "parser"]`
+/// - `XMLHttpRequest` → `["xml", "http", "request"]`
 fn split_identifier(ident: &str) -> Vec<String> {
     let mut parts = Vec::new();
     let mut current_part = String::new();
@@ -235,30 +243,42 @@ fn split_identifier(ident: &str) -> Vec<String> {
             is_separator
                 // Split on transition from lowercase to uppercase (camelCase)
                 || (!prev_was_upper && is_upper)
-                // Split on transition from uppercase to lowercase when previous was uppercase
-                // (handles "HTTPServer" -> "HTTP", "Server")
-                || (prev_was_upper && !is_upper && current_part.len() > 1)
                 // Split on digit boundary
                 || (prev_was_digit != is_digit)
         } else {
             false
         };
 
-        if should_split {
-            // Push current part if non-empty
-            if !current_part.is_empty() {
-                let part = current_part.to_lowercase();
-                if !parts.contains(&part) {
-                    parts.push(part);
-                }
-            }
-            current_part.clear();
+        // Acronym-to-word transition: split BEFORE the last uppercase
+        // This happens when we see lowercase after a run of 2+ uppercase letters
+        let is_acronym_transition = prev_was_upper && !is_upper && current_part.len() > 1;
 
-            // Skip separators entirely
-            if is_separator {
-                prev_was_upper = is_upper;
-                prev_was_digit = is_digit;
-                continue;
+        if should_split || is_acronym_transition {
+            if is_acronym_transition {
+                // Acronym case: remove last char from current_part - it belongs to next word
+                let last_char = current_part.pop().unwrap();
+                let rest = current_part.to_lowercase();
+                if !rest.is_empty() && !parts.contains(&rest) {
+                    parts.push(rest);
+                }
+                current_part.clear();
+                current_part.push(last_char);
+            } else {
+                // Normal split: push current part
+                if !current_part.is_empty() {
+                    let part = current_part.to_lowercase();
+                    if !parts.contains(&part) {
+                        parts.push(part);
+                    }
+                }
+                current_part.clear();
+
+                // Skip separators entirely
+                if is_separator {
+                    prev_was_upper = is_upper;
+                    prev_was_digit = is_digit;
+                    continue;
+                }
             }
         }
 
@@ -312,6 +332,48 @@ mod tests {
         // "parses" should not be collapsed to "parse"
         let parts = split_identifier("parses");
         assert_eq!(parts, vec!["parses"]);
+    }
+
+    #[test]
+    fn test_split_identifier_acronym_http_server() {
+        // HTTPServer → ["http", "server"]
+        let parts = split_identifier("HTTPServer");
+        assert_eq!(parts, vec!["http", "server"]);
+    }
+
+    #[test]
+    fn test_split_identifier_acronym_url_parser() {
+        // URLParser → ["url", "parser"]
+        let parts = split_identifier("URLParser");
+        assert_eq!(parts, vec!["url", "parser"]);
+    }
+
+    #[test]
+    fn test_split_identifier_acronym_xml_http_request() {
+        // XMLHttpRequest → ["xml", "http", "request"]
+        let parts = split_identifier("XMLHttpRequest");
+        assert_eq!(parts, vec!["xml", "http", "request"]);
+    }
+
+    #[test]
+    fn test_split_identifier_acronym_get_http_response() {
+        // getHTTPResponse → ["get", "http", "response"]
+        let parts = split_identifier("getHTTPResponse");
+        assert_eq!(parts, vec!["get", "http", "response"]);
+    }
+
+    #[test]
+    fn test_split_identifier_acronym_parse_xml() {
+        // parseXML → ["parse", "xml"]
+        let parts = split_identifier("parseXML");
+        assert_eq!(parts, vec!["parse", "xml"]);
+    }
+
+    #[test]
+    fn test_split_identifier_acronym_rush_stack_json() {
+        // RushStackJSON → ["rush", "stack", "json"]
+        let parts = split_identifier("RushStackJSON");
+        assert_eq!(parts, vec!["rush", "stack", "json"]);
     }
 
     #[test]
