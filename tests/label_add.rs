@@ -7,6 +7,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use lancedb::connect;
+use serial_test::serial;
 
 use monodex::engine::{
     Chunk,
@@ -96,6 +97,7 @@ async fn create_test_storage() -> (tempfile::TempDir, ChunkStorage) {
 /// crawling it under label B should add label B to the active_label_ids array
 /// without re-embedding.
 #[tokio::test]
+#[serial(monodex_home)]
 async fn test_label_add_makes_chunks_searchable() {
     // Use a blocking scope to set up the test environment, then drop the lock
     // before any async operations
@@ -219,6 +221,7 @@ async fn test_label_add_makes_chunks_searchable() {
 /// This verifies the sentinel check: when a sentinel chunk exists but
 /// file_complete is false, the file should be treated as new and re-crawled.
 #[tokio::test]
+#[serial(monodex_home)]
 async fn test_incomplete_file_is_recrawled() {
     // Use a blocking scope to set up the test environment, then drop the lock
     // before any async operations

@@ -223,9 +223,11 @@ pub fn warning_state_path(catalog_name: &str) -> Result<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
     use std::env;
 
     #[test]
+    #[serial(monodex_home)]
     fn test_tool_home_uses_env_var() {
         let temp_dir = tempfile::tempdir().unwrap();
         clear_tool_home_cache();
@@ -241,6 +243,7 @@ mod tests {
     }
 
     #[test]
+    #[serial(monodex_home)]
     fn test_tool_home_falls_back_to_home() {
         clear_tool_home_cache();
         unsafe {
@@ -252,6 +255,7 @@ mod tests {
     }
 
     #[test]
+    #[serial(monodex_home)]
     fn test_clear_tool_home_cache_works() {
         let temp_dir1 = tempfile::tempdir().unwrap();
         let temp_dir2 = tempfile::tempdir().unwrap();
