@@ -1088,6 +1088,18 @@ fn test_working_dir_remediation_message() {
             err_msg
         );
 
+        // Verify the source pointer shows --working-dir, not the sentinel prefix
+        assert!(
+            err_msg.contains("--working-dir"),
+            "Error should contain '--working-dir' for working-dir labels, got: {}",
+            err_msg
+        );
+        assert!(
+            !err_msg.contains("working-dir:"),
+            "Error should NOT contain 'working-dir:' sentinel prefix, got: {}",
+            err_msg
+        );
+
         (monodex_home, repo_dir)
     };
 

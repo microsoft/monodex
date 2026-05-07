@@ -775,4 +775,112 @@ mod tests {
         let new = make_selection(&[RetrievalMethod::Fts, RetrievalMethod::Vector]);
         print_narrowing_announcement(&previous, &new);
     }
+
+    /// Test that update_final_metadata correctly maps PhaseResults to per-method completion flags.
+    ///
+    /// This verifies decision #17: when FTS phase fails but vector phase succeeds,
+    /// the finalizer must set vector_complete=true and fts_complete=false.
+    #[tokio::test]
+    async fn test_finalize_metadata_phase_results_mapping() {
+        use crate::engine::schema::{chunks_schema, label_metadata_schema};
+        use crate::engine::storage::{Database, META_FILE, MetaFile};
+        use lancedb::connect;
+        use std::fs::File;
+        use tempfile::TempDir;
+
+        // Create a temp database
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path();
+
+        // Create database directory
+        std::fs::create_dir_all(db_path).expect("Failed to create db directory");
+
+        // Create LanceDB tables
+        let conn = connect(db_path.to_str().unwrap())
+            .execute()
+            .await
+            .expect("Failed to create database");
+
+        conn.create_empty_table("chunks", chunks_schema())
+            .execute()
+            .await
+            .expect("Failed to create chunks table");
+
+        conn.create_empty_table("label_metadata", label_metadata_schema())
+            .execute()
+            .await
+            .expect("Failed to create label_metadata table");
+
+        // Write meta file (required by Database::open)
+        let meta = MetaFile::new();
+        let meta_file = File::create(db_path.join(META_FILE)).expect("Failed to create meta file");
+        serde_json::to_writer_pretty(meta_file, &meta).expect("Failed to write meta file");
+
+        // Create FTS directory (normally done by init-db)
+        std::fs::create_dir_all(db_path.join("fts")).expect("Failed to create fts directory");
+
+        // Open database
+        let db = Database::open(db_path)
+            .await
+            .expect("Failed to open database");
+        let label_storage = db
+            .label_storage()
+            .await
+            .expect("Failed to get label storage");
+
+        let catalog = "test-catalog";
+        let label = "main";
+        let label_id = LabelId::new(catalog, label).expect("valid label id");
+        let selection = make_selection(&[RetrievalMethod::Fts, RetrievalMethod::Vector]);
+
+        // Construct PhaseResults: vector succeeded, FTS failed, reassignment succeeded
+        let phase_results = PhaseResults {
+            vector_succeeded: Some(true),
+            fts_succeeded: Some(false),
+            label_reassignment_succeeded: true,
+        };
+
+        // Call update_final_metadata
+        update_final_metadata(
+            &label_storage,
+            &label_id,
+            catalog,
+            label,
+            "abc123def456",
+            "git-commit",
+            &selection,
+            &phase_results,
+        )
+        .await
+        .expect("update_final_metadata should succeed");
+
+        // Read back the metadata
+        let metadata = label_storage
+            .get_by_label_id(label_id.as_ref())
+            .await
+            .expect("Failed to read metadata")
+            .expect("Metadata should exist");
+
+        // Verify: vector_complete=true, fts_complete=false
+        assert!(
+            metadata.vector_complete,
+            "vector_complete should be true when vector phase succeeded"
+        );
+        assert!(
+            !metadata.fts_complete,
+            "fts_complete should be false when FTS phase failed"
+        );
+
+        // Verify sources are set correctly
+        assert_eq!(
+            metadata.vector_source,
+            Some("abc123def456".to_string()),
+            "vector_source should be set"
+        );
+        assert_eq!(
+            metadata.fts_source,
+            Some("abc123def456".to_string()),
+            "fts_source should be set"
+        );
+    }
 }

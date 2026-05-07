@@ -2,22 +2,27 @@
 //! Edit here when: Adding or modifying end-to-end search decision rule tests.
 //! Do not edit here for: Production search code (see `app/commands/search.rs`); per-module unit tests (see the relevant module's `tests.rs` or inline `#[cfg(test)]` block).
 
+use std::collections::BTreeSet;
 use std::path::Path;
 use std::sync::Arc;
 
 use lancedb::connect;
 use serial_test::serial;
 
+use monodex::app::commands::init_db::run_init_db;
+use monodex::app::commands::search::run_search;
+use monodex::app::config::Config;
 use monodex::engine::{
+    fts::index_chunks_for_fts,
+    identifier::LabelId,
     retrieval::RetrievalMethod,
-    schema::chunks_schema,
-    storage::{
-        ChunkRow, ChunkStorage, LabelMetadataRow, LabelStorage, SOURCE_KIND_GIT_COMMIT,
-        read_selection,
-    },
+    storage::{ChunkRow, ChunkStorage, LabelMetadataRow, LabelStorage, SOURCE_KIND_GIT_COMMIT},
 };
 
 fn set_monodex_home(tmp_dir: &Path) {
+    // Clear any cached tool_home from previous tests
+    monodex::paths::clear_tool_home_cache();
+
     // SAFETY: Tests are serialized via #[serial_test::serial(monodex_home)] attribute
     unsafe {
         std::env::set_var("MONODEX_HOME", tmp_dir);
@@ -29,6 +34,9 @@ fn remove_monodex_home() {
     unsafe {
         std::env::remove_var("MONODEX_HOME");
     }
+
+    // Clear the cache so the next test starts fresh
+    monodex::paths::clear_tool_home_cache();
 }
 
 fn write_minimal_config(monodex_home: &Path) {
@@ -106,175 +114,219 @@ fn test_label_metadata_row_with_selection(
     }
 }
 
-async fn create_test_storage() -> (tempfile::TempDir, ChunkStorage, LabelStorage) {
-    let tmp_dir = tempfile::TempDir::new().unwrap();
-    let db_path = tmp_dir.path().join("test_db");
+/// Set up a test database at the default location under MONODEX_HOME.
+/// Returns the database path and storage handles.
+fn setup_test_db(monodex_home: &Path) -> (tempfile::TempDir, ChunkStorage, LabelStorage) {
+    // Run init-db to create the database at the default location
+    let config = Config {
+        catalogs: std::collections::HashMap::new(),
+        database: None,
+        embedding_model: Default::default(),
+    };
+    run_init_db(&config, false).expect("init-db failed");
 
-    // Create fts directory as init-db would
-    std::fs::create_dir_all(db_path.join("fts")).ok();
+    // The database is now at <monodex_home>/default-db
+    let db_path = monodex_home.join("default-db");
 
-    let db = connect(db_path.to_str().unwrap())
-        .execute()
-        .await
-        .expect("Failed to create database");
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    rt.block_on(async {
+        let db = connect(db_path.to_str().unwrap())
+            .execute()
+            .await
+            .expect("Failed to open database");
 
-    let chunks_schema = chunks_schema();
-    let chunks_table = db
-        .create_empty_table("chunks", chunks_schema)
-        .execute()
-        .await
-        .expect("Failed to create chunks table");
+        let chunks_table = db
+            .open_table("chunks")
+            .execute()
+            .await
+            .expect("Failed to open chunks table");
 
-    let labels_table = db
-        .create_empty_table(
-            "label_metadata",
-            monodex::engine::schema::label_metadata_schema(),
+        let labels_table = db
+            .open_table("label_metadata")
+            .execute()
+            .await
+            .expect("Failed to open label_metadata table");
+
+        // Create a temp dir that will clean up, but the actual db is under monodex_home
+        let tmp_dir = tempfile::TempDir::new().unwrap();
+
+        (
+            tmp_dir,
+            ChunkStorage::new(Arc::new(chunks_table), monodex_home.join("default-db")),
+            LabelStorage::new(Arc::new(labels_table), monodex_home.join("default-db")),
         )
-        .execute()
-        .await
-        .expect("Failed to create label_metadata table");
-
-    (
-        tmp_dir,
-        ChunkStorage::new(Arc::new(chunks_table), db_path.clone()),
-        LabelStorage::new(Arc::new(labels_table), db_path),
-    )
+    })
 }
 
 /// Test that search with both methods in selection produces PR1 stub error.
 ///
 /// This verifies the decision table: when active subset has 2+ methods with equal sources,
 /// PR1 should stub-error pointing at --retrieval.
-#[tokio::test]
+#[test]
 #[serial(monodex_home)]
-async fn test_search_both_methods_stub_error() {
-    let (_monodex_home, _tmp_dir) = {
-        let tmp_dir = tempfile::TempDir::new().unwrap();
-        let monodex_home = tmp_dir.path().to_path_buf();
-        set_monodex_home(&monodex_home);
-        write_minimal_config(&monodex_home);
-        (monodex_home, tmp_dir)
-    };
+fn test_search_both_methods_stub_error() {
+    let monodex_home = tempfile::TempDir::new().unwrap();
+    set_monodex_home(monodex_home.path());
+    write_minimal_config(monodex_home.path());
 
-    let (_db_dir, chunk_storage, label_storage) = create_test_storage().await;
+    let (_tmp_dir, chunk_storage, label_storage) = setup_test_db(monodex_home.path());
 
     let catalog = "test-catalog";
     let label = "main";
     let label_id = format!("{}:{}", catalog, label);
 
-    // Create a chunk with a vector
+    // Create a chunk with a vector (needed for storage but not for decision-rule error)
     let chunk = test_chunk_row("aaaabbbbcccc1111:1", "aaaabbbbcccc1111", 1, &label_id);
     let vector = vec![0.0f32; 768];
-    chunk_storage
-        .upsert_with_vectors(&[chunk], &[vector])
-        .await
-        .unwrap();
 
-    // Create label metadata with both methods complete at same commit
-    let label_row = test_label_metadata_row(catalog, label);
-    label_storage.upsert(&label_row).await.unwrap();
+    // Use a runtime for async storage operations
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    rt.block_on(async {
+        chunk_storage
+            .upsert_with_vectors(&[chunk], &[vector])
+            .await
+            .unwrap();
 
-    // Read the selection back and verify both methods are present
-    let retrieved = label_storage.get_by_label_id(&label_id).await.unwrap();
-    assert!(retrieved.is_some(), "Label metadata should exist");
-    let retrieved = retrieved.unwrap();
-    assert!(
-        retrieved.vector_source.is_some(),
-        "vector_source should be set"
+        // Create label metadata with both methods complete at same commit
+        let label_row = test_label_metadata_row(catalog, label);
+        label_storage.upsert(&label_row).await.unwrap();
+    });
+
+    // Build a minimal Config
+    let config = Config {
+        catalogs: std::collections::HashMap::new(),
+        database: None,
+        embedding_model: Default::default(),
+    };
+
+    // Run search without --retrieval (should trigger stub error)
+    let result = run_search(
+        &config,
+        "test query",
+        10,
+        Some(label),
+        Some(catalog),
+        None, // no --retrieval flag = all methods
+        false,
     );
-    assert!(retrieved.fts_source.is_some(), "fts_source should be set");
-    assert!(retrieved.vector_complete, "vector_complete should be true");
-    assert!(retrieved.fts_complete, "fts_complete should be true");
 
-    // Verify the selection has both methods
-    let selection = read_selection(&retrieved);
-    assert_eq!(selection.len(), 2, "Selection should have both methods");
     assert!(
-        selection.contains(&RetrievalMethod::Vector),
-        "Should contain Vector"
+        result.is_err(),
+        "Search should return error for multi-method in PR1"
+    );
+    let err_msg = result.unwrap_err().to_string();
+    assert!(
+        err_msg.contains("Hybrid search across multiple retrieval methods is not yet implemented"),
+        "Error should mention hybrid search not implemented, got: {}",
+        err_msg
     );
     assert!(
-        selection.contains(&RetrievalMethod::Fts),
-        "Should contain Fts"
+        err_msg.contains("--retrieval"),
+        "Error should suggest --retrieval flag, got: {}",
+        err_msg
     );
 
+    // Explicitly drop to release file handles before cleanup
+    drop(chunk_storage);
+    drop(label_storage);
     remove_monodex_home();
 }
 
 /// Test that search with fts-only selection succeeds.
 ///
 /// This verifies that when selection has only fts, search proceeds without stub error.
-#[tokio::test]
+#[test]
 #[serial(monodex_home)]
-async fn test_search_fts_only_selection() {
-    let (_monodex_home, _tmp_dir) = {
-        let tmp_dir = tempfile::TempDir::new().unwrap();
-        let monodex_home = tmp_dir.path().to_path_buf();
-        set_monodex_home(&monodex_home);
-        write_minimal_config(&monodex_home);
-        (monodex_home, tmp_dir)
-    };
+fn test_search_fts_only_selection() {
+    let monodex_home = tempfile::TempDir::new().unwrap();
+    set_monodex_home(monodex_home.path());
+    write_minimal_config(monodex_home.path());
 
-    let (_db_dir, chunk_storage, label_storage) = create_test_storage().await;
+    let (_tmp_dir, chunk_storage, label_storage) = setup_test_db(monodex_home.path());
+    let db_path = monodex_home.path().join("default-db");
 
     let catalog = "test-catalog";
     let label = "main";
     let label_id = format!("{}:{}", catalog, label);
 
-    // Create a chunk
+    // Create a chunk with searchable text
     let chunk = test_chunk_row("aaaabbbbcccc1111:1", "aaaabbbbcccc1111", 1, &label_id);
-    chunk_storage
-        .upsert_with_vectors(&[chunk], &[vec![0.0f32; 768]])
+
+    // Use a runtime for async storage operations
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    rt.block_on(async {
+        chunk_storage
+            .upsert_with_vectors(&[chunk.clone()], &[vec![0.0f32; 768]])
+            .await
+            .unwrap();
+
+        // Create label metadata with only fts in selection (vector_source = None)
+        let label_row = test_label_metadata_row_with_selection(
+            catalog,
+            label,
+            None,                 // vector_source
+            false,                // vector_complete (don't care)
+            Some("abc123def456"), // fts_source
+            true,                 // fts_complete
+        );
+        label_storage.upsert(&label_row).await.unwrap();
+
+        // Build the FTS index so search can actually query it
+        let mut warnings: Vec<monodex::engine::warning::CrawlWarning> = Vec::new();
+        let fts_label_id = LabelId::new(catalog, label).expect("valid label id");
+        index_chunks_for_fts(
+            &db_path,
+            &fts_label_id,
+            &chunk_storage,
+            &mut |w| warnings.push(w),
+            true, // is_commit_mode
+        )
         .await
-        .unwrap();
+        .expect("FTS indexing should succeed");
+    });
 
-    // Create label metadata with only fts in selection (vector_source = None)
-    let label_row = test_label_metadata_row_with_selection(
-        catalog,
-        label,
-        None,                 // vector_source
-        false,                // vector_complete (don't care)
-        Some("abc123def456"), // fts_source
-        true,                 // fts_complete
+    // Build a minimal Config
+    let config = Config {
+        catalogs: std::collections::HashMap::new(),
+        database: None,
+        embedding_model: Default::default(),
+    };
+
+    // Run search - should succeed (FTS-only selection)
+    let result = run_search(
+        &config,
+        "test content",
+        10,
+        Some(label),
+        Some(catalog),
+        None, // no --retrieval flag = use selection (fts only)
+        false,
     );
-    label_storage.upsert(&label_row).await.unwrap();
 
-    // Read the selection back and verify only fts is present
-    let retrieved = label_storage
-        .get_by_label_id(&label_id)
-        .await
-        .unwrap()
-        .unwrap();
-    let selection = read_selection(&retrieved);
-    assert_eq!(selection.len(), 1, "Selection should have only fts");
     assert!(
-        selection.contains(&RetrievalMethod::Fts),
-        "Should contain Fts"
-    );
-    assert!(
-        !selection.contains(&RetrievalMethod::Vector),
-        "Should not contain Vector"
+        result.is_ok(),
+        "FTS-only search should succeed, got error: {:?}",
+        result.err()
     );
 
+    // Explicitly drop to release file handles before cleanup
+    drop(chunk_storage);
+    drop(label_storage);
     remove_monodex_home();
 }
 
 /// Test that search --retrieval vector errors when vector not in selection.
 ///
 /// This verifies the explicit-flag form: requesting a method not in selection
-/// produces a clear error message.
-#[tokio::test]
+/// produces a clear error message with a substituted source pointer.
+#[test]
 #[serial(monodex_home)]
-async fn test_search_vector_not_in_selection_error() {
-    let (_monodex_home, _tmp_dir) = {
-        let tmp_dir = tempfile::TempDir::new().unwrap();
-        let monodex_home = tmp_dir.path().to_path_buf();
-        set_monodex_home(&monodex_home);
-        write_minimal_config(&monodex_home);
-        (monodex_home, tmp_dir)
-    };
+fn test_search_vector_not_in_selection_error() {
+    let monodex_home = tempfile::TempDir::new().unwrap();
+    set_monodex_home(monodex_home.path());
+    write_minimal_config(monodex_home.path());
 
-    let (_db_dir, chunk_storage, label_storage) = create_test_storage().await;
+    let (_tmp_dir, chunk_storage, label_storage) = setup_test_db(monodex_home.path());
 
     let catalog = "test-catalog";
     let label = "main";
@@ -282,53 +334,87 @@ async fn test_search_vector_not_in_selection_error() {
 
     // Create a chunk
     let chunk = test_chunk_row("aaaabbbbcccc1111:1", "aaaabbbbcccc1111", 1, &label_id);
-    chunk_storage
-        .upsert_with_vectors(&[chunk], &[vec![0.0f32; 768]])
-        .await
-        .unwrap();
 
-    // Create label metadata with only fts in selection
-    let label_row = test_label_metadata_row_with_selection(
-        catalog,
-        label,
-        None,                 // vector_source
-        false,                // vector_complete (don't care)
-        Some("abc123def456"), // fts_source
-        true,                 // fts_complete
+    // Use a runtime for async storage operations
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    rt.block_on(async {
+        chunk_storage
+            .upsert_with_vectors(&[chunk], &[vec![0.0f32; 768]])
+            .await
+            .unwrap();
+
+        // Create label metadata with only fts in selection
+        let label_row = test_label_metadata_row_with_selection(
+            catalog,
+            label,
+            None,                 // vector_source
+            false,                // vector_complete (don't care)
+            Some("abc123def456"), // fts_source
+            true,                 // fts_complete
+        );
+        label_storage.upsert(&label_row).await.unwrap();
+    });
+
+    // Build a minimal Config
+    let config = Config {
+        catalogs: std::collections::HashMap::new(),
+        database: None,
+        embedding_model: Default::default(),
+    };
+
+    // Run search with --retrieval vector (not in selection)
+    let retrieval: Option<BTreeSet<RetrievalMethod>> =
+        Some([RetrievalMethod::Vector].into_iter().collect());
+    let result = run_search(
+        &config,
+        "test query",
+        10,
+        Some(label),
+        Some(catalog),
+        retrieval,
+        false,
     );
-    label_storage.upsert(&label_row).await.unwrap();
 
-    // Verify vector is not in selection
-    let retrieved = label_storage
-        .get_by_label_id(&label_id)
-        .await
-        .unwrap()
-        .unwrap();
-    let selection = read_selection(&retrieved);
     assert!(
-        !selection.contains(&RetrievalMethod::Vector),
-        "Vector should not be in selection"
+        result.is_err(),
+        "Search should error when requesting method not in selection"
+    );
+    let err_msg = result.unwrap_err().to_string();
+    assert!(
+        err_msg.contains("is not in this label's retrieval selection"),
+        "Error should mention method not in selection, got: {}",
+        err_msg
+    );
+    // Verify the source pointer is substituted (not literal [source])
+    assert!(
+        err_msg.contains("--commit abc123def456"),
+        "Error should contain substituted source pointer '--commit abc123def456', got: {}",
+        err_msg
+    );
+    assert!(
+        !err_msg.contains("[source]"),
+        "Error should NOT contain literal '[source]' token, got: {}",
+        err_msg
     );
 
+    // Explicitly drop to release file handles before cleanup
+    drop(chunk_storage);
+    drop(label_storage);
     remove_monodex_home();
 }
 
 /// Test that search with sources disagree produces hard error.
 ///
 /// This verifies the decision table: when vector and fts have different source commits,
-/// search errors with clear message about the mismatch.
-#[tokio::test]
+/// search errors with clear message about the mismatch including substituted source pointer.
+#[test]
 #[serial(monodex_home)]
-async fn test_search_sources_disagree_error() {
-    let (_monodex_home, _tmp_dir) = {
-        let tmp_dir = tempfile::TempDir::new().unwrap();
-        let monodex_home = tmp_dir.path().to_path_buf();
-        set_monodex_home(&monodex_home);
-        write_minimal_config(&monodex_home);
-        (monodex_home, tmp_dir)
-    };
+fn test_search_sources_disagree_error() {
+    let monodex_home = tempfile::TempDir::new().unwrap();
+    set_monodex_home(monodex_home.path());
+    write_minimal_config(monodex_home.path());
 
-    let (_db_dir, chunk_storage, label_storage) = create_test_storage().await;
+    let (_tmp_dir, chunk_storage, label_storage) = setup_test_db(monodex_home.path());
 
     let catalog = "test-catalog";
     let label = "main";
@@ -336,90 +422,158 @@ async fn test_search_sources_disagree_error() {
 
     // Create a chunk
     let chunk = test_chunk_row("aaaabbbbcccc1111:1", "aaaabbbbcccc1111", 1, &label_id);
-    chunk_storage
-        .upsert_with_vectors(&[chunk], &[vec![0.0f32; 768]])
-        .await
-        .unwrap();
 
-    // Create label metadata with different sources for vector and fts
-    let label_row = test_label_metadata_row_with_selection(
-        catalog,
-        label,
-        Some("commit_aaa111"), // vector_source
-        true,                  // vector_complete
-        Some("commit_bbb222"), // fts_source (different!)
-        true,                  // fts_complete
+    // Use a runtime for async storage operations
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    rt.block_on(async {
+        chunk_storage
+            .upsert_with_vectors(&[chunk], &[vec![0.0f32; 768]])
+            .await
+            .unwrap();
+
+        // Create label metadata with different sources for vector and fts
+        let label_row = test_label_metadata_row_with_selection(
+            catalog,
+            label,
+            Some("commit_aaa111"), // vector_source
+            true,                  // vector_complete
+            Some("commit_bbb222"), // fts_source (different!)
+            true,                  // fts_complete
+        );
+        label_storage.upsert(&label_row).await.unwrap();
+    });
+
+    // Build a minimal Config
+    let config = Config {
+        catalogs: std::collections::HashMap::new(),
+        database: None,
+        embedding_model: Default::default(),
+    };
+
+    // Run search without --retrieval (should detect source mismatch)
+    let result = run_search(
+        &config,
+        "test query",
+        10,
+        Some(label),
+        Some(catalog),
+        None,
+        false,
     );
-    label_storage.upsert(&label_row).await.unwrap();
 
-    // Verify both methods are in selection but with different sources
-    let retrieved = label_storage
-        .get_by_label_id(&label_id)
-        .await
-        .unwrap()
-        .unwrap();
-    assert_ne!(
-        retrieved.vector_source, retrieved.fts_source,
-        "Sources should be different"
+    assert!(result.is_err(), "Search should error when sources disagree");
+    let err_msg = result.unwrap_err().to_string();
+    // Should mention both sources
+    assert!(
+        err_msg.contains("commit_aaa111"),
+        "Error should mention vector source commit_aaa111, got: {}",
+        err_msg
+    );
+    assert!(
+        err_msg.contains("commit_bbb222"),
+        "Error should mention fts source commit_bbb222, got: {}",
+        err_msg
+    );
+    // Should have substituted source pointer (not literal [source])
+    assert!(
+        !err_msg.contains("[source]"),
+        "Error should NOT contain literal '[source]' token, got: {}",
+        err_msg
     );
 
-    let selection = read_selection(&retrieved);
-    assert_eq!(selection.len(), 2, "Both methods should be in selection");
-
+    // Explicitly drop to release file handles before cleanup
+    drop(chunk_storage);
+    drop(label_storage);
     remove_monodex_home();
 }
 
-/// Test that incomplete method emits warning but search proceeds.
+/// Test that incomplete method with explicit --retrieval warns but proceeds.
 ///
-/// This verifies the preprocessing step: incomplete methods are warned and excluded
-/// from the active subset.
-#[tokio::test]
+/// This verifies the explicit-flag bug fix from item #1: when the user explicitly
+/// requests an incomplete method via --retrieval, the search should warn and proceed,
+/// NOT hard-error with "all in-selection methods incomplete".
+#[test]
 #[serial(monodex_home)]
-async fn test_search_incomplete_method_warning() {
-    let (_monodex_home, _tmp_dir) = {
-        let tmp_dir = tempfile::TempDir::new().unwrap();
-        let monodex_home = tmp_dir.path().to_path_buf();
-        set_monodex_home(&monodex_home);
-        write_minimal_config(&monodex_home);
-        (monodex_home, tmp_dir)
-    };
+fn test_search_incomplete_method_warning() {
+    let monodex_home = tempfile::TempDir::new().unwrap();
+    set_monodex_home(monodex_home.path());
+    write_minimal_config(monodex_home.path());
 
-    let (_db_dir, chunk_storage, label_storage) = create_test_storage().await;
+    let (_tmp_dir, chunk_storage, label_storage) = setup_test_db(monodex_home.path());
+    let db_path = monodex_home.path().join("default-db");
 
     let catalog = "test-catalog";
     let label = "main";
     let label_id = format!("{}:{}", catalog, label);
 
-    // Create a chunk
+    // Create a chunk with searchable text
     let chunk = test_chunk_row("aaaabbbbcccc1111:1", "aaaabbbbcccc1111", 1, &label_id);
-    chunk_storage
-        .upsert_with_vectors(&[chunk], &[vec![0.0f32; 768]])
-        .await
-        .unwrap();
 
-    // Create label metadata with both methods but fts incomplete
-    let label_row = test_label_metadata_row_with_selection(
-        catalog,
-        label,
-        Some("abc123def456"), // vector_source
-        true,                 // vector_complete
-        Some("abc123def456"), // fts_source
-        false,                // fts_complete = false (incomplete)
+    // Use a runtime for async storage operations
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    rt.block_on(async {
+        chunk_storage
+            .upsert_with_vectors(&[chunk.clone()], &[vec![0.0f32; 768]])
+            .await
+            .unwrap();
+
+        // Create label metadata with FTS in selection but incomplete
+        let label_row = test_label_metadata_row_with_selection(
+            catalog,
+            label,
+            None,                 // vector_source (not in selection)
+            false,                // vector_complete (don't care)
+            Some("abc123def456"), // fts_source
+            false,                // fts_complete = false (incomplete!)
+        );
+        label_storage.upsert(&label_row).await.unwrap();
+
+        // Build the FTS index so search can actually query it
+        // (even though it's marked incomplete, we need an actual index for the test)
+        let mut warnings: Vec<monodex::engine::warning::CrawlWarning> = Vec::new();
+        let fts_label_id = LabelId::new(catalog, label).expect("valid label id");
+        index_chunks_for_fts(
+            &db_path,
+            &fts_label_id,
+            &chunk_storage,
+            &mut |w| warnings.push(w),
+            true, // is_commit_mode
+        )
+        .await
+        .expect("FTS indexing should succeed");
+    });
+
+    // Build a minimal Config
+    let config = Config {
+        catalogs: std::collections::HashMap::new(),
+        database: None,
+        embedding_model: Default::default(),
+    };
+
+    // Run search with explicit --retrieval fts (incomplete method)
+    // This is the key test: pre-fix, this would hard-error
+    // Post-fix, it should warn and proceed
+    let retrieval: Option<BTreeSet<RetrievalMethod>> =
+        Some([RetrievalMethod::Fts].into_iter().collect());
+    let result = run_search(
+        &config,
+        "test content",
+        10,
+        Some(label),
+        Some(catalog),
+        retrieval,
+        false,
     );
-    label_storage.upsert(&label_row).await.unwrap();
 
-    // Verify fts is in selection but incomplete
-    let retrieved = label_storage
-        .get_by_label_id(&label_id)
-        .await
-        .unwrap()
-        .unwrap();
-    assert!(retrieved.fts_source.is_some(), "fts should be in selection");
-    assert!(!retrieved.fts_complete, "fts should be incomplete");
+    // Post-fix: should succeed (warns on stdout, returns Ok)
+    assert!(
+        result.is_ok(),
+        "Search with explicit --retrieval on incomplete method should succeed, got error: {:?}",
+        result.err()
+    );
 
-    // Active subset should be just vector (fts excluded due to incomplete)
-    let selection = read_selection(&retrieved);
-    assert_eq!(selection.len(), 2, "Selection has both methods");
-
+    // Explicitly drop to release file handles before cleanup
+    drop(chunk_storage);
+    drop(label_storage);
     remove_monodex_home();
 }
