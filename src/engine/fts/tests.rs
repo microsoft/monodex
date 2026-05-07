@@ -12,12 +12,14 @@ use anyhow::Result;
 use tempfile::TempDir;
 
 use crate::engine::fts::index::FtsIndex;
+use crate::engine::fts::indexing::index_chunks_for_fts;
 use crate::engine::fts::manifest::{FtsManifest, ManifestRead, read_manifest, write_manifest};
 use crate::engine::fts::search::{FtsSearchOutcome, fts_search};
 use crate::engine::identifier::LabelId;
 use crate::engine::schema::{chunks_schema, label_metadata_schema};
 use crate::engine::storage::{ChunkRow, ChunkStorage, Database, META_FILE, MetaFile};
 use crate::engine::util::{FTS_SCHEMA_ID, FTS_TOKENIZER_ID};
+use crate::engine::warning::CrawlWarning;
 
 // =============================================================================
 // Test helpers
@@ -327,44 +329,92 @@ fn test_unreadable_manifest_with_tantivy_state_errors() -> Result<()> {
 // Test 4: Zero-token chunk excluded from manifest
 // =============================================================================
 
-#[test]
-fn test_zero_token_chunk_excluded_from_manifest() -> Result<()> {
+#[tokio::test]
+async fn test_zero_token_chunk_excluded_from_manifest() -> Result<()> {
     let temp_dir = TempDir::new()?;
     let db_path = temp_dir.path();
     let label_id = make_label_id("test-catalog", "main");
 
-    // Create FTS index
-    let fts_index = FtsIndex::open_or_create(db_path, &label_id)?;
-    let mut writer = fts_index.writer()?;
+    // Create database and get chunk storage
+    let db = create_test_db_with_fts(db_path).await;
+    let chunk_storage = db.chunks_storage().await?;
 
-    // Add a document with normal text
-    use tantivy::doc;
-    writer.add_document(doc!(
-        fts_index.fields.row_id => "good-row:1",
-        fts_index.fields.text => "getUserProfile fetches user data",
-    ))?;
+    // Create two chunks: one with normal text, one that produces zero tokens
+    // (text consisting only of ASCII punctuation and whitespace)
+    let normal_chunk = test_chunk_row(
+        "aaaabbbbcccc1111:1",
+        "aaaabbbbcccc1111",
+        1,
+        label_id.as_ref(),
+        "getUserProfile fetches user data", // normal text with tokens
+    );
+    let zero_token_chunk = test_chunk_row(
+        "aaaabbbbcccc2222:1",
+        "aaaabbbbcccc2222",
+        1,
+        label_id.as_ref(),
+        "!?;:, ", // punctuation that IS treated as split chars + whitespace = zero tokens
+    );
 
-    // Note: Zero-token chunks are handled by index_chunks_for_fts, not by
-    // directly adding to Tantivy. The tokenizer handles edge cases.
-    // Here we test that when we write a manifest, it only includes
-    // row_ids that were actually indexed.
+    // Insert both chunks into storage
+    insert_test_chunks(
+        &chunk_storage,
+        &[normal_chunk.clone(), zero_token_chunk.clone()],
+    )
+    .await?;
 
-    writer.commit()?;
+    // Collect warnings during FTS indexing
+    let mut warnings: Vec<CrawlWarning> = Vec::new();
 
-    // Write manifest with only the good row
-    let mut row_ids = BTreeSet::new();
-    row_ids.insert("good-row:1".to_string());
-    // Note: We deliberately don't include any zero-token row_ids
-    let manifest = FtsManifest::with_row_ids(row_ids);
-    fts_index.write_manifest(&manifest)?;
+    // Run FTS indexing
+    let stats = index_chunks_for_fts(
+        db_path,
+        &label_id,
+        &chunk_storage,
+        &mut |w| warnings.push(w),
+        true, // is_commit_mode
+    )
+    .await?;
 
-    // Read back and verify
+    // Verify stats: one chunk added (normal), one skipped (zero-token)
+    assert_eq!(stats.added, 1, "Expected 1 chunk added (the normal one)");
+    assert_eq!(
+        stats.zero_token_skipped, 1,
+        "Expected 1 chunk skipped due to zero tokens"
+    );
+    assert_eq!(stats.live_row_ids, 1, "Expected 1 live row_id in the index");
+
+    // Verify the manifest contains only the normal chunk's row_id
+    let fts_index = FtsIndex::open_existing(db_path, &label_id)?
+        .expect("FTS index should exist after indexing");
     match fts_index.read_manifest() {
         ManifestRead::Present(m) => {
-            assert_eq!(m.row_ids.len(), 1);
-            assert_eq!(m.row_ids[0], "good-row:1");
+            assert_eq!(m.row_ids.len(), 1, "Manifest should have exactly 1 row_id");
+            assert_eq!(
+                m.row_ids[0], "aaaabbbbcccc1111:1",
+                "Manifest should contain the normal chunk's row_id"
+            );
         }
         other => panic!("Expected Present, got {:?}", other),
+    }
+
+    // Verify a FtsZeroTokens warning was emitted for the zero-token chunk
+    let zero_token_warnings: Vec<_> = warnings
+        .iter()
+        .filter(|w| matches!(w, CrawlWarning::FtsZeroTokens { .. }))
+        .collect();
+    assert_eq!(
+        zero_token_warnings.len(),
+        1,
+        "Expected exactly one FtsZeroTokens warning"
+    );
+    if let CrawlWarning::FtsZeroTokens { row_id } = &zero_token_warnings[0] {
+        assert_eq!(
+            row_id, "aaaabbbbcccc2222:1",
+            "Warning should reference the zero-token chunk's row_id"
+        );
+    } else {
+        panic!("Expected FtsZeroTokens warning");
     }
 
     Ok(())
@@ -395,37 +445,24 @@ async fn test_fts_search_parse_error() -> Result<()> {
     let manifest = FtsManifest::new();
     fts_index.write_manifest(&manifest)?;
 
-    // Search with invalid query syntax (unbalanced quotes, invalid field syntax, etc.)
-    // Tantivy's QueryParser rejects malformed queries
-    let result = fts_search(db_path, &label_id, "foo:bar:", 10).await?;
+    // Test with an invalid query that Tantivy's QueryParser will definitely reject.
+    // We use a query with invalid field syntax: a field name followed by a colon
+    // and colon (not a valid term). Tantivy's QueryParser rejects this with ParseError.
+    // Note: Some queries like "foo:bar:" might parse as term queries, so we use
+    // a query that is definitively malformed.
+    // The query `nonexistent_field:` (field with empty value after colon) produces
+    // a ParseError because there's no term to search for after the field specifier.
+    let result = fts_search(db_path, &label_id, "nonexistent_field:", 10).await?;
 
     match result {
         FtsSearchOutcome::ParseError(msg) => {
             // Should have an error message
             assert!(!msg.is_empty(), "Parse error should have a message");
-            // Should NOT be empty results
-            assert!(!msg.contains("No results"));
-        }
-        FtsSearchOutcome::Found(hits) => {
-            // Some queries that look invalid might actually parse
-            // (Tantivy's QueryParser is lenient with some inputs)
-            // But if we get results, that's also valid behavior
-            println!("Query parsed successfully with {} hits", hits.len());
-        }
-        FtsSearchOutcome::NoIndex => panic!("Expected ParseError or Found, got NoIndex"),
-    }
-
-    // Try another definitely invalid query: unbalanced quotes
-    let result = fts_search(db_path, &label_id, "\"unbalanced quote", 10).await?;
-
-    match result {
-        FtsSearchOutcome::ParseError(_) => {
-            // This is the expected path for truly invalid queries
         }
         FtsSearchOutcome::Found(_) => {
-            // Tantivy might still parse this as a literal string
+            panic!("Expected ParseError for invalid query, got Found with results");
         }
-        FtsSearchOutcome::NoIndex => panic!("Expected ParseError or Found, got NoIndex"),
+        FtsSearchOutcome::NoIndex => panic!("Expected ParseError, got NoIndex"),
     }
 
     Ok(())
@@ -454,47 +491,113 @@ fn test_open_existing_returns_none_for_missing() -> Result<()> {
 // Additional test: Manifest sanity check fallback
 // =============================================================================
 
-#[test]
-fn test_manifest_sanity_check_on_scan() -> Result<()> {
-    // This tests that when the manifest is wildly off from num_docs,
-    // the system falls back to scanning Tantivy.
-    // The actual logic is in get_currently_indexed_row_ids in indexing.rs,
-    // but we can test the threshold check in isolation.
-
+/// This test verifies that when the manifest disagrees with Tantivy's num_docs
+/// by more than the tolerance threshold, the system reconciles from Tantivy
+/// rather than trusting the bogus manifest.
+///
+/// The crash-window scenario: a process crashes between Tantivy commit and
+/// manifest write, leaving Tantivy with more docs than the stale manifest knows.
+/// The tolerance check catches this and forces a full scan.
+#[tokio::test]
+async fn test_manifest_sanity_check_on_scan() -> Result<()> {
     let temp_dir = TempDir::new()?;
     let db_path = temp_dir.path();
     let label_id = make_label_id("test-catalog", "main");
 
-    // Create FTS index
-    let fts_index = FtsIndex::open_or_create(db_path, &label_id)?;
+    // Create database and get chunk storage
+    let db = create_test_db_with_fts(db_path).await;
+    let chunk_storage = db.chunks_storage().await?;
 
-    // Add one document
-    use tantivy::doc;
-    let mut writer = fts_index.writer()?;
-    writer.add_document(doc!(
-        fts_index.fields.row_id => "only-row:1",
-        fts_index.fields.text => "single document",
-    ))?;
-    writer.commit()?;
-
-    // Write a manifest claiming 1000 row_ids (wildly inflated)
-    let mut row_ids = BTreeSet::new();
+    // Create 1000 chunks - enough to exceed the absolute-floor threshold of 100
+    // This ensures the 5% tolerance applies, not the floor.
+    let mut chunks: Vec<ChunkRow> = Vec::new();
     for i in 0..1000 {
-        row_ids.insert(format!("fake-row:{}", i));
+        let row_id = format!("aaaa{:04x}cccc1111:1", i);
+        let file_id = format!("aaaa{:04x}cccc1111", i);
+        chunks.push(test_chunk_row(
+            &row_id,
+            &file_id,
+            1,
+            label_id.as_ref(),
+            &format!("document number {} with some content", i),
+        ));
     }
-    let inflated_manifest = FtsManifest {
+
+    // Insert all chunks into storage
+    insert_test_chunks(&chunk_storage, &chunks).await?;
+
+    // First, do an initial FTS indexing to build a correct index
+    let mut warnings: Vec<CrawlWarning> = Vec::new();
+    let stats = index_chunks_for_fts(
+        db_path,
+        &label_id,
+        &chunk_storage,
+        &mut |w| warnings.push(w),
+        true, // is_commit_mode
+    )
+    .await?;
+
+    assert_eq!(stats.added, 1000, "Expected 1000 chunks added");
+    assert_eq!(stats.live_row_ids, 1000, "Expected 1000 live row_ids");
+
+    // Now write a BOGUS manifest with only 100 row_ids
+    // This is well outside the 5% tolerance (abs(100 - 1000) = 900 > max(100, 50) = 100)
+    let mut bogus_row_ids = BTreeSet::new();
+    for i in 0..100 {
+        bogus_row_ids.insert(format!("fake-row-{}", i));
+    }
+    let bogus_manifest = FtsManifest {
         fts_schema_id: FTS_SCHEMA_ID.to_string(),
         fts_tokenizer_id: FTS_TOKENIZER_ID.to_string(),
-        row_ids: row_ids.into_iter().collect(),
+        row_ids: bogus_row_ids.into_iter().collect(),
     };
-    fts_index.write_manifest(&inflated_manifest)?;
+    let fts_index = FtsIndex::open_existing(db_path, &label_id)?.expect("index exists");
+    fts_index.write_manifest(&bogus_manifest)?;
 
-    // Read manifest - should get Present (sanity check happens at usage time)
+    // Verify the bogus manifest was written
     match fts_index.read_manifest() {
         ManifestRead::Present(m) => {
-            // The manifest is read as-is; the sanity check is in
-            // get_currently_indexed_row_ids which would trigger a scan
-            assert_eq!(m.row_ids.len(), 1000);
+            assert_eq!(
+                m.row_ids.len(),
+                100,
+                "Bogus manifest should have 100 row_ids"
+            );
+        }
+        other => panic!("Expected Present, got {:?}", other),
+    }
+
+    // Now run FTS indexing again with no changes
+    // The sanity check should fire because manifest count (100) differs from
+    // Tantivy num_docs (1000) by more than tolerance
+    warnings.clear();
+    let stats = index_chunks_for_fts(
+        db_path,
+        &label_id,
+        &chunk_storage,
+        &mut |w| warnings.push(w),
+        true, // is_commit_mode
+    )
+    .await?;
+
+    // The reconciliation should have discovered all 1000 docs from Tantivy
+    // Since nothing changed, added/removed should be 0
+    assert_eq!(stats.added, 0, "Expected 0 chunks added (nothing new)");
+    assert_eq!(stats.removed, 0, "Expected 0 chunks removed");
+    assert_eq!(
+        stats.live_row_ids, 1000,
+        "Expected 1000 live row_ids after reconciliation"
+    );
+
+    // Verify the manifest now reflects the actual indexed set
+    match fts_index.read_manifest() {
+        ManifestRead::Present(m) => {
+            // The manifest should now have ~1000 row_ids, not 100
+            assert_eq!(
+                m.row_ids.len(),
+                1000,
+                "Manifest should have 1000 row_ids after reconciliation, not {}",
+                m.row_ids.len()
+            );
         }
         other => panic!("Expected Present, got {:?}", other),
     }
