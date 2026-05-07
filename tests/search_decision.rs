@@ -272,13 +272,11 @@ fn test_search_fts_only_selection() {
         label_storage.upsert(&label_row).await.unwrap();
 
         // Build the FTS index so search can actually query it
-        let mut warnings: Vec<monodex::engine::warning::CrawlWarning> = Vec::new();
         let fts_label_id = LabelId::new(catalog, label).expect("valid label id");
         index_chunks_for_fts(
             &db_path,
             &fts_label_id,
             &chunk_storage,
-            &mut |w| warnings.push(w),
             true, // is_commit_mode
         )
         .await
@@ -530,13 +528,11 @@ fn test_search_incomplete_method_warning() {
 
         // Build the FTS index so search can actually query it
         // (even though it's marked incomplete, we need an actual index for the test)
-        let mut warnings: Vec<monodex::engine::warning::CrawlWarning> = Vec::new();
         let fts_label_id = LabelId::new(catalog, label).expect("valid label id");
         index_chunks_for_fts(
             &db_path,
             &fts_label_id,
             &chunk_storage,
-            &mut |w| warnings.push(w),
             true, // is_commit_mode
         )
         .await

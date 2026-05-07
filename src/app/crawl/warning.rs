@@ -67,15 +67,6 @@ where
             )
             .expect("Failed to write warning to stderr");
         }
-        CrawlWarning::FtsZeroTokens { row_id } => {
-            // New in FTS PR1 - will be used in Stage 4
-            writeln!(
-                stderr,
-                "  ⚠️  FTS tokenizer produced zero tokens for chunk {}",
-                row_id
-            )
-            .expect("Failed to write warning to stderr");
-        }
     }
 }
 
@@ -189,26 +180,6 @@ mod tests {
         assert_eq!(
             stderr_str,
             "  ⚠️  Error checking sentinel for src/example.ts: io error\n"
-        );
-    }
-
-    #[test]
-    fn test_fts_zero_tokens_goes_to_stderr() {
-        let warning = CrawlWarning::FtsZeroTokens {
-            row_id: "abc123:3".to_string(),
-        };
-        let mut stdout = Vec::new();
-        let mut stderr = Vec::new();
-
-        render_warning_to(&warning, &mut stdout, &mut stderr);
-
-        let stdout_str = String::from_utf8(stdout).unwrap();
-        let stderr_str = String::from_utf8(stderr).unwrap();
-
-        assert!(stdout_str.is_empty());
-        assert_eq!(
-            stderr_str,
-            "  ⚠️  FTS tokenizer produced zero tokens for chunk abc123:3\n"
         );
     }
 

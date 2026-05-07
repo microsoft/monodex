@@ -22,8 +22,6 @@ use crate::engine::fts::manifest::{FtsManifest, ManifestRead, reconcile_from_ind
 use crate::engine::fts::tokenizer::tokenize_text;
 use crate::engine::identifier::LabelId;
 use crate::engine::storage::ChunkStorage;
-use crate::engine::warning::{CrawlWarning, WarningSink};
-
 /// Statistics from an FTS indexing operation.
 pub struct FtsIndexingStats {
     /// Total number of live row_ids in the index after indexing.
@@ -34,6 +32,8 @@ pub struct FtsIndexingStats {
     pub removed: usize,
     /// Number of chunks skipped due to producing zero tokens.
     pub zero_token_skipped: usize,
+    /// Row IDs of chunks that produced zero tokens (for diagnostics).
+    pub zero_token_row_ids: Vec<String>,
 }
 
 /// Index chunks for a label into Tantivy.
@@ -49,7 +49,6 @@ pub struct FtsIndexingStats {
 /// * `db_path` - Path to the Monodex database root
 /// * `label_id` - The label to index
 /// * `chunk_storage` - ChunkStorage instance for reading LanceDB chunks
-/// * `warnings` - Warning sink for emitting FTS-specific warnings
 /// * `is_commit_mode` - If true, wait for merging threads after commit
 ///
 /// # Returns
@@ -58,7 +57,6 @@ pub async fn index_chunks_for_fts(
     db_path: &std::path::Path,
     label_id: &LabelId,
     chunk_storage: &ChunkStorage,
-    warnings: WarningSink<'_>,
     is_commit_mode: bool,
 ) -> Result<FtsIndexingStats> {
     // Step 1: Open or create the FTS index
@@ -100,6 +98,7 @@ pub async fn index_chunks_for_fts(
 
     // Step 7: Apply additions, tracking which were successfully added
     let mut successfully_added: BTreeSet<String> = BTreeSet::new();
+    let mut zero_token_row_ids: Vec<String> = Vec::new();
 
     for row_id in &additions {
         if let Some(chunk) = chunk_map.get(row_id) {
@@ -107,10 +106,8 @@ pub async fn index_chunks_for_fts(
             let tokens = tokenize_text(&chunk.text);
 
             if tokens.is_empty() {
-                // Emit warning and skip
-                warnings(CrawlWarning::FtsZeroTokens {
-                    row_id: row_id.clone(),
-                });
+                // Track zero-token chunks for diagnostics, skip indexing
+                zero_token_row_ids.push(row_id.clone());
                 continue;
             }
 
@@ -153,6 +150,7 @@ pub async fn index_chunks_for_fts(
         added: added_count,
         removed: removed_count,
         zero_token_skipped,
+        zero_token_row_ids,
     })
 }
 

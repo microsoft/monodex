@@ -471,32 +471,58 @@ pub async fn run_fts_phase(
     db_path: &std::path::Path,
     label_id: &LabelId,
     chunk_storage: &ChunkStorage,
-    warnings: WarningSink<'_>,
     is_commit_mode: bool,
+    debug: bool,
 ) -> Result<()> {
-    use crate::app::util::format_duration;
+    use crate::app::util::{format_count, format_duration};
     use std::time::Instant;
 
     println!("🔶 Phase 5: FTS indexing...");
     let start = Instant::now();
 
-    let stats = crate::engine::fts::index_chunks_for_fts(
-        db_path,
-        label_id,
-        chunk_storage,
-        warnings,
-        is_commit_mode,
-    )
-    .await?;
+    let stats =
+        crate::engine::fts::index_chunks_for_fts(db_path, label_id, chunk_storage, is_commit_mode)
+            .await?;
 
     let elapsed = start.elapsed();
     println!(
         "  Tantivy FTS indexing complete: {} added, {} removed, {} live in {}",
-        stats.added,
-        stats.removed,
-        stats.live_row_ids,
+        format_count(stats.added as u64),
+        format_count(stats.removed as u64),
+        format_count(stats.live_row_ids as u64),
         format_duration(elapsed.as_secs_f64()),
     );
+
+    // Print zero-token summary block if any chunks were skipped
+    if stats.zero_token_skipped > 0 {
+        let total_attempted = stats.added + stats.zero_token_skipped;
+        let percentage = (stats.zero_token_skipped as f64 / total_attempted as f64) * 100.0;
+        println!(
+            "  {} chunks ({:.2}%) contained no searchable text and were skipped.",
+            format_count(stats.zero_token_skipped as u64),
+            percentage
+        );
+
+        // Show up to 3 example row_ids
+        let example_count = stats.zero_token_row_ids.len().min(3);
+        let examples: Vec<&str> = stats
+            .zero_token_row_ids
+            .iter()
+            .take(example_count)
+            .map(|s| s.as_str())
+            .collect();
+        println!("    Examples: {}", examples.join(", "));
+
+        // Print debug lines after the summary (if debug mode)
+        if debug {
+            for row_id in &stats.zero_token_row_ids {
+                eprintln!("[DEBUG] FTS zero tokens: {}", row_id);
+            }
+        }
+
+        println!("    Use `monodex view --id <id>` or `monodex debug-fts --id <id>` to inspect.");
+    }
+
     Ok(())
 }
 

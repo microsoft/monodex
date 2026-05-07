@@ -412,15 +412,7 @@ async fn run_crawl_async(
 
     // Phase 5: FTS indexing (conditional on selection and prior success)
     if fts_in_selection && phase_results.label_reassignment_succeeded {
-        match run_fts_phase(
-            db_path,
-            label_id,
-            &chunk_storage,
-            &mut warning_sink,
-            is_commit_mode,
-        )
-        .await
-        {
+        match run_fts_phase(db_path, label_id, &chunk_storage, is_commit_mode, debug).await {
             Ok(()) => {
                 phase_results.fts_succeeded = Some(true);
             }

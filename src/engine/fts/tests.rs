@@ -19,7 +19,6 @@ use crate::engine::identifier::LabelId;
 use crate::engine::schema::{chunks_schema, label_metadata_schema};
 use crate::engine::storage::{ChunkRow, ChunkStorage, Database, META_FILE, MetaFile};
 use crate::engine::util::{FTS_SCHEMA_ID, FTS_TOKENIZER_ID};
-use crate::engine::warning::CrawlWarning;
 
 // =============================================================================
 // Test helpers
@@ -363,15 +362,11 @@ async fn test_zero_token_chunk_excluded_from_manifest() -> Result<()> {
     )
     .await?;
 
-    // Collect warnings during FTS indexing
-    let mut warnings: Vec<CrawlWarning> = Vec::new();
-
-    // Run FTS indexing
+    // Run FTS indexing (no warning sink needed - stats carry zero-token info)
     let stats = index_chunks_for_fts(
         db_path,
         &label_id,
         &chunk_storage,
-        &mut |w| warnings.push(w),
         true, // is_commit_mode
     )
     .await?;
@@ -383,6 +378,17 @@ async fn test_zero_token_chunk_excluded_from_manifest() -> Result<()> {
         "Expected 1 chunk skipped due to zero tokens"
     );
     assert_eq!(stats.live_row_ids, 1, "Expected 1 live row_id in the index");
+
+    // Verify zero_token_row_ids contains the skipped chunk's row_id
+    assert_eq!(
+        stats.zero_token_row_ids.len(),
+        1,
+        "Expected exactly one zero_token_row_id"
+    );
+    assert_eq!(
+        stats.zero_token_row_ids[0], "aaaabbbbcccc2222:1",
+        "zero_token_row_ids should contain the zero-token chunk's row_id"
+    );
 
     // Verify the manifest contains only the normal chunk's row_id
     let fts_index = FtsIndex::open_existing(db_path, &label_id)?
@@ -396,25 +402,6 @@ async fn test_zero_token_chunk_excluded_from_manifest() -> Result<()> {
             );
         }
         other => panic!("Expected Present, got {:?}", other),
-    }
-
-    // Verify a FtsZeroTokens warning was emitted for the zero-token chunk
-    let zero_token_warnings: Vec<_> = warnings
-        .iter()
-        .filter(|w| matches!(w, CrawlWarning::FtsZeroTokens { .. }))
-        .collect();
-    assert_eq!(
-        zero_token_warnings.len(),
-        1,
-        "Expected exactly one FtsZeroTokens warning"
-    );
-    if let CrawlWarning::FtsZeroTokens { row_id } = &zero_token_warnings[0] {
-        assert_eq!(
-            row_id, "aaaabbbbcccc2222:1",
-            "Warning should reference the zero-token chunk's row_id"
-        );
-    } else {
-        panic!("Expected FtsZeroTokens warning");
     }
 
     Ok(())
@@ -526,12 +513,10 @@ async fn test_manifest_reconciles_when_set_differs() -> Result<()> {
     insert_test_chunks(&chunk_storage, &chunks).await?;
 
     // First, do an initial FTS indexing to build a correct index
-    let mut warnings: Vec<CrawlWarning> = Vec::new();
     let stats = index_chunks_for_fts(
         db_path,
         &label_id,
         &chunk_storage,
-        &mut |w| warnings.push(w),
         true, // is_commit_mode
     )
     .await?;
@@ -567,12 +552,10 @@ async fn test_manifest_reconciles_when_set_differs() -> Result<()> {
 
     // Now run FTS indexing again with no changes
     // The set comparison detects the manifest disagrees with Tantivy and reconciles
-    warnings.clear();
     let stats = index_chunks_for_fts(
         db_path,
         &label_id,
         &chunk_storage,
-        &mut |w| warnings.push(w),
         true, // is_commit_mode
     )
     .await?;
@@ -636,12 +619,10 @@ async fn test_manifest_reconciles_same_cardinality_different_rows() -> Result<()
     insert_test_chunks(&chunk_storage, &chunks).await?;
 
     // First, do an initial FTS indexing to build a correct index with 10 docs
-    let mut warnings: Vec<CrawlWarning> = Vec::new();
     let stats = index_chunks_for_fts(
         db_path,
         &label_id,
         &chunk_storage,
-        &mut |w| warnings.push(w),
         true, // is_commit_mode
     )
     .await?;
@@ -674,12 +655,10 @@ async fn test_manifest_reconciles_same_cardinality_different_rows() -> Result<()
     // Now run FTS indexing again with no changes to LanceDB chunks
     // The set comparison should detect that the manifest's row_ids don't match
     // Tantivy's actual row_ids, even though counts are equal.
-    warnings.clear();
     let stats = index_chunks_for_fts(
         db_path,
         &label_id,
         &chunk_storage,
-        &mut |w| warnings.push(w),
         true, // is_commit_mode
     )
     .await?;
