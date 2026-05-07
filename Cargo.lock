@@ -5127,7 +5127,6 @@ dependencies = [
  "sha2 0.11.0",
  "sysinfo",
  "tantivy",
- "tantivy-jieba",
  "tempfile",
  "terminal_size",
  "thiserror 2.0.18",
@@ -7145,17 +7144,6 @@ dependencies = [
  "byteorder",
  "regex-syntax",
  "utf8-ranges",
-]
-
-[[package]]
-name = "tantivy-jieba"
-version = "0.16.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3b08147cc130e323ecc522117927b198bec617fe1df562a0b6449905858d0363"
-dependencies = [
- "jieba-rs",
- "lazy_static",
- "tantivy-tokenizer-api",
 ]
 
 [[package]]

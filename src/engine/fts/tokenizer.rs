@@ -195,11 +195,12 @@ fn tokenize_non_cjk_segment(segment: &str, tokens: &mut Vec<String>) {
     }
 }
 
+/// Process-singleton Jieba instance to avoid reloading the 5MB dictionary on each call.
+static JIEBA: std::sync::OnceLock<jieba_rs::Jieba> = std::sync::OnceLock::new();
+
 /// Tokenize a CJK segment using Jieba word-segmentation.
 fn tokenize_cjk_segment(segment: &str, tokens: &mut Vec<String>) {
-    use jieba_rs::Jieba;
-
-    let jieba = Jieba::new();
+    let jieba = JIEBA.get_or_init(jieba_rs::Jieba::new);
     let words = jieba.cut(segment, false); // false = not HMM mode
 
     for word in words {

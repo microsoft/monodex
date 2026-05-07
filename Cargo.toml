@@ -72,7 +72,6 @@ rand = "0.10"
 
 # Full-text search (Tantivy)
 tantivy = "0.24"
-tantivy-jieba = "0.16"
 jieba-rs = "0.8"
 
 [dev-dependencies]
