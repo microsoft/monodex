@@ -326,27 +326,49 @@ async fn run_crawl_async(
     // Initialize phase results with pessimistic defaults
     let mut phase_results = PhaseResults::new(&selection);
 
+    // Track phase errors for proper error propagation (vector > reassignment > fts priority)
+    let mut vector_phase_error: Option<anyhow::Error> = None;
+    let mut label_reassignment_error: Option<anyhow::Error> = None;
+    let mut fts_phase_error: Option<anyhow::Error> = None;
+
     // Phase 3: Embed-and-upsert (vector) OR upsert-without-vectors (FTS-only)
     let (pipeline_file_ids, pipeline_failures) = if vector_in_selection {
         // Vector path: embed and upload (handles both vector-only and {vector, fts} selections)
-        run_embed_upload_pipeline(
+        match run_embed_upload_pipeline(
             chunking_output.chunks,
             Arc::clone(&chunk_storage),
             &config.embedding_model,
         )
-        .await?
+        .await
+        {
+            Ok(result) => result,
+            Err(e) => {
+                eprintln!("  ❌ Vector phase failed: {}", e);
+                phase_results.vector_succeeded = Some(false);
+                vector_phase_error = Some(e);
+                (HashSet::new(), crate::app::CrawlFailures::default())
+            }
+        }
     } else if fts_in_selection {
         // FTS-only path: upload without vectors (no ONNX initialization)
-        run_upsert_without_vectors(chunking_output.chunks, Arc::clone(&chunk_storage)).await?
+        match run_upsert_without_vectors(chunking_output.chunks, Arc::clone(&chunk_storage)).await {
+            Ok(result) => result,
+            Err(e) => {
+                eprintln!("  ❌ Upsert phase failed: {}", e);
+                phase_results.vector_succeeded = Some(false);
+                vector_phase_error = Some(e);
+                (HashSet::new(), crate::app::CrawlFailures::default())
+            }
+        }
     } else {
         // Empty selection - unreachable (rejected upstream)
         (HashSet::new(), crate::app::CrawlFailures::default())
     };
 
-    // Mark vector phase as succeeded if it was in selection
-    if vector_in_selection {
+    // Mark vector phase as succeeded if it was in selection and no error was captured
+    if vector_in_selection && vector_phase_error.is_none() {
         phase_results.vector_succeeded = Some(!pipeline_failures.has_failures());
-    } else if fts_in_selection {
+    } else if fts_in_selection && vector_phase_error.is_none() {
         // FTS-only path: no vector phase, mark as succeeded (no failures possible)
         phase_results.vector_succeeded = None;
     }
@@ -373,6 +395,7 @@ async fn run_crawl_async(
             Err(e) => {
                 eprintln!("  ❌ Label cleanup failed: {}", e);
                 phase_results.label_reassignment_succeeded = false;
+                label_reassignment_error = Some(e);
             }
         }
     }
@@ -395,13 +418,15 @@ async fn run_crawl_async(
             Err(e) => {
                 eprintln!("  ❌ FTS indexing failed: {}", e);
                 phase_results.fts_succeeded = Some(false);
+                fts_phase_error = Some(e);
             }
         }
         println!();
     }
 
     // Phase: Update final label metadata (with per-method completion)
-    update_final_metadata(
+    // Always call this even if phases failed, so partial state is persisted
+    if let Err(e) = update_final_metadata(
         &label_storage,
         label_id,
         catalog_name,
@@ -411,7 +436,10 @@ async fn run_crawl_async(
         &selection,
         &phase_results,
     )
-    .await?;
+    .await
+    {
+        eprintln!("  Warning: Failed to update label metadata: {}", e);
+    }
 
     // Phase: Print summary
     let had_failures = has_existing_file_failures
@@ -431,17 +459,33 @@ async fn run_crawl_async(
     );
 
     // Phase: Save warning state
-    let _sorted_warning_files = save_warning_state(
+    // Log errors but don't let them mask phase errors
+    if let Err(e) = save_warning_state(
         db_path,
         catalog_name,
         &chunking_output.warning_files,
         prior_warning_files,
         incremental_warnings,
-    )?;
+    ) {
+        eprintln!("  Warning: Failed to save warning state: {}", e);
+    }
 
     // Phase: Print warning summary
     print_warning_summary(&chunking_output.warning_files);
 
+    // Return the most-specific captured error (vector > reassignment > fts priority)
+    // An earlier-phase error is the root cause of any subsequent skipped work
+    if let Some(e) = vector_phase_error {
+        return Err(e);
+    }
+    if let Some(e) = label_reassignment_error {
+        return Err(e);
+    }
+    if let Some(e) = fts_phase_error {
+        return Err(e);
+    }
+
+    // No captured phase error, but had per-chunk failures or other issues
     if had_failures {
         anyhow::bail!("Crawl completed with errors (see above). Label marked incomplete.");
     }

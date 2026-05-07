@@ -537,17 +537,10 @@ pub async fn update_final_metadata(
     label_storage.upsert(&metadata).await?;
 
     // Print appropriate message based on completion state
-    let all_in_selection_complete = selection.contains(&RetrievalMethod::Vector) && vector_complete
-        || !selection.contains(&RetrievalMethod::Vector)
-            && selection.contains(&RetrievalMethod::Fts)
-            && fts_complete
-        || !selection.contains(&RetrievalMethod::Fts)
-            && selection.contains(&RetrievalMethod::Vector)
-            && vector_complete
-        || selection.contains(&RetrievalMethod::Vector)
-            && selection.contains(&RetrievalMethod::Fts)
-            && vector_complete
-            && fts_complete;
+    let all_in_selection_complete = selection.iter().all(|m| match m {
+        RetrievalMethod::Vector => vector_complete,
+        RetrievalMethod::Fts => fts_complete,
+    });
 
     if all_in_selection_complete {
         println!("  Label metadata saved.");
