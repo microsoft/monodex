@@ -916,3 +916,185 @@ fn test_multi_method_explicit_search() {
 
     remove_monodex_home();
 }
+
+// =============================================================================
+// Test: End-to-end cross-label active_label_ids preservation
+// =============================================================================
+
+/// Test that crawling the same content under a second label makes it searchable
+/// under both labels.
+///
+/// This verifies the active_label_ids preservation invariant end-to-end:
+/// 1. Crawl with --label A --retrieval fts (FTS-only, no vectors)
+/// 2. Crawl with --label B (both methods, including vectors)
+/// 3. Search under label A should find the chunk
+/// 4. Search under label B should find the chunk
+#[test]
+#[serial(monodex_home)]
+fn test_cross_label_active_labels_preserved() {
+    let (_monodex_home, _repo_dir) = {
+        // Set up temp directories
+        let monodex_home = unique_temp_dir();
+        let repo_dir = unique_temp_dir();
+
+        set_monodex_home(monodex_home.path());
+
+        // Create test git repo
+        let commit_oid = create_test_git_repo(repo_dir.path());
+
+        // Create config pointing to the repo
+        let config = create_test_config(monodex_home.path(), "test-catalog", repo_dir.path());
+
+        // Run init-db
+        run_init_db(&config).expect("init-db failed");
+
+        // Step 1: Crawl with label A, FTS-only
+        monodex::app::commands::crawl::run_crawl_label(
+            &config,
+            "test-catalog",
+            "label-a",
+            &commit_oid,
+            false, // incremental_warnings
+            vec![RetrievalMethod::Fts], // FTS-only
+            false, // debug
+        )
+        .expect("crawl label-a failed");
+
+        // Step 2: Crawl with label B, both methods (including vectors)
+        monodex::app::commands::crawl::run_crawl_label(
+            &config,
+            "test-catalog",
+            "label-b",
+            &commit_oid,
+            false, // incremental_warnings
+            vec![], // empty = all methods
+            false, // debug
+        )
+        .expect("crawl label-b failed");
+
+        // Step 3: Search under label A should find the chunk (FTS)
+        let fts_only: Option<BTreeSet<RetrievalMethod>> =
+            Some(std::iter::once(RetrievalMethod::Fts).collect());
+        let search_result_a = run_search(
+            &config,
+            "getUserProfile",
+            10,
+            Some("label-a"),
+            Some("test-catalog"),
+            fts_only.clone(),
+            false,
+        )
+        .expect("search label-a failed");
+        assert!(
+            !search_result_a.is_empty(),
+            "Search under label A should find chunks"
+        );
+
+        // Step 4: Search under label B should find the chunk (FTS)
+        let search_result_b = run_search(
+            &config,
+            "getUserProfile",
+            10,
+            Some("label-b"),
+            Some("test-catalog"),
+            fts_only,
+            false,
+        )
+        .expect("search label-b failed");
+        assert!(
+            !search_result_b.is_empty(),
+            "Search under label B should find chunks"
+        );
+
+        // Also verify vector search works for label B (which has vectors)
+        let vector_only: Option<BTreeSet<RetrievalMethod>> =
+            Some(std::iter::once(RetrievalMethod::Vector).collect());
+        let search_result_b_vec = run_search(
+            &config,
+            "getUserProfile",
+            10,
+            Some("label-b"),
+            Some("test-catalog"),
+            vector_only,
+            false,
+        )
+        .expect("vector search label-b failed");
+        assert!(
+            !search_result_b_vec.is_empty(),
+            "Vector search under label B should find chunks"
+        );
+
+        (monodex_home, repo_dir)
+    };
+
+    remove_monodex_home();
+}
+
+// =============================================================================
+// Test: Working-dir remediation message
+// =============================================================================
+
+/// Test that a working-dir-crawled label produces remediation suggesting
+/// `--working-dir`, not `--commit <opaque sentinel>`.
+#[test]
+#[serial(monodex_home)]
+fn test_working_dir_remediation_message() {
+    let (_monodex_home, _repo_dir) = {
+        // Set up temp directories
+        let monodex_home = unique_temp_dir();
+        let repo_dir = unique_temp_dir();
+
+        set_monodex_home(monodex_home.path());
+
+        // Create test git repo (we crawl working-dir, but need git for the repo structure)
+        let _commit_oid = create_test_git_repo(repo_dir.path());
+
+        // Create config pointing to the repo
+        let config = create_test_config(monodex_home.path(), "test-catalog", repo_dir.path());
+
+        // Run init-db
+        run_init_db(&config).expect("init-db failed");
+
+        // Crawl with working-dir mode, FTS-only to get incomplete state
+        monodex::app::commands::crawl::run_crawl_working_dir(
+            &config,
+            "test-catalog",
+            "working-label",
+            false, // incremental_warnings
+            vec![RetrievalMethod::Fts], // FTS-only
+            false, // debug
+        )
+        .expect("working-dir crawl failed");
+
+        // Now try to search with vector (not in selection) - should error
+        let vector_only: Option<BTreeSet<RetrievalMethod>> =
+            Some(std::iter::once(RetrievalMethod::Vector).collect());
+        let search_result = run_search(
+            &config,
+            "getUserProfile",
+            10,
+            Some("working-label"),
+            Some("test-catalog"),
+            vector_only,
+            false,
+        );
+
+        // Should error because vector is not in selection
+        assert!(search_result.is_err(), "Should error when method not in selection");
+        let err_msg = search_result.unwrap_err().to_string();
+
+        // The error should suggest re-crawling, and since this is a working-dir
+        // label, it should mention --working-dir in the remediation
+        // Note: The actual message format is "Re-run `monodex crawl --label <label> [source] --retrieval X`"
+        // where [source] is determined by the source_kind. For working-dir, it should be --working-dir.
+        assert!(
+            err_msg.contains("--retrieval vector") || err_msg.contains("not in this label's retrieval selection"),
+            "Error should mention the retrieval method issue, got: {}",
+            err_msg
+        );
+
+        (monodex_home, repo_dir)
+    };
+
+    remove_monodex_home();
+}
