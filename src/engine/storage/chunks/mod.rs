@@ -673,8 +673,11 @@ impl ChunkStorage {
     /// The vector column is omitted from the merge_insert, which preserves
     /// any existing vectors on matched rows.
     ///
-    /// **Preserves existing vectors**: Matched rows keep their existing vector
-    /// values because the vector column is not included in the merge batch.
+    /// **Preserves existing vectors at the storage layer**: Matched rows keep
+    /// their existing vector values because the vector column is not included
+    /// in the merge batch. Callers responsible for maintaining the per-file
+    /// vector-presence invariant must clear vectors separately using
+    /// `null_vectors_for_row_ids` when the situation requires it.
     ///
     /// **Preserves existing active_label_ids**: When a row already exists, the
     /// incoming `active_label_ids` is unioned with the existing labels, never
@@ -1122,6 +1125,41 @@ impl ChunkStorage {
             .execute()
             .await
             .map_err(|e| anyhow!("Failed to update file_complete: {}", e))?;
+
+        Ok(())
+    }
+
+    /// Set the vector column to NULL for multiple chunks.
+    ///
+    /// This is used by FTS-only crawls to clear stale vectors when reprocessing
+    /// files that were partially indexed by a previous interrupted vector crawl.
+    /// The per-file vector-presence invariant requires that all chunks of a file
+    /// have the same vector presence (all NULL or all non-NULL) when file_complete=true.
+    ///
+    /// Batching is handled internally using the same UPSERT_BATCH_SIZE as upsert operations.
+    /// The commit mutex is acquired once at function entry, then released on drop.
+    pub async fn null_vectors_for_row_ids(&self, row_ids: &[&str]) -> Result<()> {
+        if row_ids.is_empty() {
+            return Ok(());
+        }
+
+        let _commit_guard = acquire_commit_mutex(&self.db_path)?;
+
+        // Process in batches to keep the IN(...) predicate bounded
+        for batch_start in (0..row_ids.len()).step_by(UPSERT_BATCH_SIZE) {
+            let batch_end = std::cmp::min(batch_start + UPSERT_BATCH_SIZE, row_ids.len());
+            let batch_ids = &row_ids[batch_start..batch_end];
+
+            let predicate = in_quoted_strs("row_id", batch_ids);
+
+            self.table
+                .update()
+                .only_if(&predicate)
+                .column("vector", "null")
+                .execute()
+                .await
+                .map_err(|e| anyhow!("Failed to null vectors: {}", e))?;
+        }
 
         Ok(())
     }

@@ -678,19 +678,20 @@ fn test_purge_cleanup() {
         monodex::app::commands::purge::run_purge(&config, None, true, false)
             .expect("purge --all failed");
 
-        // Verify entire FTS directory is gone (or empty/recreated) after purge --all
+        // Verify entire FTS directory exists and is empty after purge --all
         let fts_path = db_path.join("fts");
-        // After purge --all, the fts directory should either not exist or be empty
-        if fts_path.exists() {
-            let entries: Vec<_> = std::fs::read_dir(&fts_path)
-                .unwrap()
-                .filter_map(|e| e.ok())
-                .collect();
-            assert!(
-                entries.is_empty(),
-                "FTS directory should be empty after purge --all"
-            );
-        }
+        assert!(
+            fts_path.exists(),
+            "FTS directory should exist after purge --all (implementation recreates it)"
+        );
+        let entries: Vec<_> = std::fs::read_dir(&fts_path)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .collect();
+        assert!(
+            entries.is_empty(),
+            "FTS directory should be empty after purge --all"
+        );
 
         (monodex_home, repo_dir)
     };

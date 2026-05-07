@@ -244,7 +244,12 @@ pub async fn run_embed_upload_pipeline(
 /// Run the FTS-only upsert pipeline (no embedding).
 ///
 /// This is used for FTS-only crawls where we don't compute embeddings.
-/// Chunks are written with NULL vectors, preserving any existing vectors.
+/// Chunks are written with NULL vectors. Before upserting, any existing vectors
+/// on matched rows are cleared to maintain the per-file vector-presence invariant
+/// (all chunks of a file must have the same vector presence when file_complete=true).
+///
+/// The storage primitive `upsert_without_vectors` preserves vectors at the row level;
+/// this function clears vectors separately before calling it.
 ///
 /// Returns (touched_file_ids, failures) for the crawl.
 pub async fn run_upsert_without_vectors(
@@ -275,6 +280,14 @@ pub async fn run_upsert_without_vectors(
 
     // Convert chunks to rows
     let rows: Vec<ChunkRow> = all_chunks.iter().map(chunk_to_row).collect();
+
+    // Clear any existing vectors on these rows to maintain the per-file
+    // vector-presence invariant. This handles the case where a previous
+    // vector-phase crawl was interrupted mid-file, leaving some chunks with
+    // vectors and others without. The FTS-only slow path must produce a
+    // uniform NULL-vector state for the whole file.
+    let row_ids: Vec<&str> = rows.iter().map(|r| r.row_id.as_str()).collect();
+    chunk_storage.null_vectors_for_row_ids(&row_ids).await?;
 
     // Group by file_id for sentinel tracking
     let mut expected_count: std::collections::HashMap<String, usize> =

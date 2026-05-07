@@ -563,9 +563,13 @@ pub async fn update_final_metadata(
     Ok(())
 }
 
-/// Prints the crawl summary.
+/// Writes the crawl summary to the given writer.
+///
+/// This is the core implementation that can be used with any `Write` sink.
+/// The `print_summary` function wraps this with stdout.
 #[allow(clippy::too_many_arguments)]
-pub fn print_summary(
+pub fn write_summary(
+    mut out: impl std::io::Write,
     total_start: std::time::Instant,
     new_count: usize,
     existing_count: usize,
@@ -580,49 +584,94 @@ pub fn print_summary(
 ) {
     let total_elapsed = total_start.elapsed();
     if had_failures || cleanup_failed || vector_phase_failed || fts_phase_failed {
-        println!("⚠️  Crawl completed with errors!");
-        println!(
+        writeln!(out, "⚠️  Crawl completed with errors!").unwrap();
+        writeln!(
+            out,
             "  Total time: {}",
             format_duration(total_elapsed.as_secs_f64())
-        );
-        println!("  New files indexed: {}", new_count);
-        println!("  Existing files detected: {}", existing_count);
-        println!(
+        )
+        .unwrap();
+        writeln!(out, "  New files indexed: {}", new_count).unwrap();
+        writeln!(out, "  Existing files detected: {}", existing_count).unwrap();
+        writeln!(
+            out,
             "  Existing files updated successfully: {}",
             existing_success_count
-        );
+        )
+        .unwrap();
         let total_failures = pipeline_failures_count + existing_file_failures_count;
-        println!("  Total failures: {}", total_failures);
+        writeln!(out, "  Total failures: {}", total_failures).unwrap();
         if existing_file_failures_count > 0 {
-            println!(
+            writeln!(
+                out,
                 "  - Existing file label-add failures: {}",
                 existing_file_failures_count
-            );
+            )
+            .unwrap();
         }
         if cleanup_failed {
-            println!("  - Label cleanup failed (crawl not marked complete)");
+            writeln!(out, "  - Label cleanup failed (crawl not marked complete)").unwrap();
         }
         if vector_phase_failed {
-            println!("  - Vector phase: failed (see error above)");
+            writeln!(out, "  - Vector phase: failed (see error above)").unwrap();
         }
         if fts_phase_failed {
-            println!("  - FTS phase: failed (see error above)");
+            writeln!(out, "  - FTS phase: failed (see error above)").unwrap();
         }
-        println!();
-        println!("  This crawl is marked as incomplete. Re-run to complete indexing.");
+        writeln!(out).unwrap();
+        writeln!(
+            out,
+            "  This crawl is marked as incomplete. Re-run to complete indexing."
+        )
+        .unwrap();
     } else {
-        println!("✅ Crawl complete!");
-        println!(
+        writeln!(out, "✅ Crawl complete!").unwrap();
+        writeln!(
+            out,
             "  Total time: {}",
             format_duration(total_elapsed.as_secs_f64())
-        );
-        println!("  New files indexed: {}", new_count);
-        println!("  Existing files detected: {}", existing_count);
-        println!(
+        )
+        .unwrap();
+        writeln!(out, "  New files indexed: {}", new_count).unwrap();
+        writeln!(out, "  Existing files detected: {}", existing_count).unwrap();
+        writeln!(
+            out,
             "  Existing files updated successfully: {}",
             existing_success_count
-        );
+        )
+        .unwrap();
     }
+}
+
+/// Prints the crawl summary to stdout.
+///
+/// Wrapper around `write_summary` that writes to stdout.
+#[allow(clippy::too_many_arguments)]
+pub fn print_summary(
+    total_start: std::time::Instant,
+    new_count: usize,
+    existing_count: usize,
+    existing_success_count: usize,
+    had_failures: bool,
+    cleanup_failed: bool,
+    existing_file_failures_count: usize,
+    pipeline_failures_count: usize,
+    vector_phase_failed: bool,
+    fts_phase_failed: bool,
+) {
+    write_summary(
+        std::io::stdout().lock(),
+        total_start,
+        new_count,
+        existing_count,
+        existing_success_count,
+        had_failures,
+        cleanup_failed,
+        existing_file_failures_count,
+        pipeline_failures_count,
+        vector_phase_failed,
+        fts_phase_failed,
+    )
 }
 
 /// Formats the retrieval selection for display in the crawl preamble.
@@ -890,6 +939,43 @@ mod tests {
             metadata.fts_source,
             Some("abc123def456".to_string()),
             "fts_source should be set"
+        );
+    }
+
+    /// Test that write_summary includes FTS phase failure in output.
+    ///
+    /// This verifies the FTS-phase failure is mentioned in the summary output.
+    #[test]
+    fn test_summary_includes_fts_phase_failure() {
+        let mut output = Vec::new();
+        let start = std::time::Instant::now();
+
+        write_summary(
+            &mut output,
+            start,
+            10,    // new_count
+            5,     // existing_count
+            5,     // existing_success_count
+            false, // had_failures
+            false, // cleanup_failed
+            0,     // existing_file_failures_count
+            0,     // pipeline_failures_count
+            false, // vector_phase_failed
+            true,  // fts_phase_failed
+        );
+
+        let output_str = String::from_utf8(output).unwrap();
+
+        // Check that the output contains both "FTS" and "failed"
+        assert!(
+            output_str.contains("FTS"),
+            "Summary should mention FTS, got: {}",
+            output_str
+        );
+        assert!(
+            output_str.contains("failed"),
+            "Summary should mention failure, got: {}",
+            output_str
         );
     }
 }
