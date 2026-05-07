@@ -59,12 +59,12 @@ async fn run_purge_all_async(db_path: &std::path::Path) -> anyhow::Result<()> {
     chunk_storage.truncate().await?;
     label_storage.truncate().await?;
 
-    // Delete and recreate FTS directory
+    // Delete and recreate FTS directory (always recreate, even if absent)
     let fts_dir = db_path.join("fts");
     if fts_dir.exists() {
         std::fs::remove_dir_all(&fts_dir)?;
-        std::fs::create_dir_all(&fts_dir)?;
     }
+    std::fs::create_dir_all(&fts_dir)?;
 
     println!("✅ Database purged successfully");
     Ok(())
