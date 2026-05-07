@@ -187,7 +187,7 @@ fn test_crawl_then_search() {
         let config = create_test_config(monodex_home.path(), "test-catalog", repo_dir.path());
 
         // Run init-db
-        run_init_db(&config).expect("init-db failed");
+        run_init_db(&config, false).expect("init-db failed");
 
         // Run crawl with no --retrieval flag (defaults to all methods)
         monodex::app::commands::crawl::run_crawl_label(
@@ -301,7 +301,7 @@ fn test_selection_narrowing() {
         let config = create_test_config(monodex_home.path(), "test-catalog", repo_dir.path());
 
         // Run init-db
-        run_init_db(&config).expect("init-db failed");
+        run_init_db(&config, false).expect("init-db failed");
 
         // First crawl: no --retrieval flag (selection becomes {fts, vector})
         monodex::app::commands::crawl::run_crawl_label(
@@ -405,7 +405,7 @@ fn test_selection_widening() {
         let config = create_test_config(monodex_home.path(), "test-catalog", repo_dir.path());
 
         // Run init-db
-        run_init_db(&config).expect("init-db failed");
+        run_init_db(&config, false).expect("init-db failed");
 
         // First crawl: no --retrieval flag (selection becomes {fts, vector})
         monodex::app::commands::crawl::run_crawl_label(
@@ -535,7 +535,7 @@ fn test_first_time_crawl_fts_only() {
         let config = create_test_config(monodex_home.path(), "test-catalog", repo_dir.path());
 
         // Run init-db
-        run_init_db(&config).expect("init-db failed");
+        run_init_db(&config, false).expect("init-db failed");
 
         // First crawl with explicit --retrieval fts (no previous selection)
         monodex::app::commands::crawl::run_crawl_label(
@@ -622,7 +622,7 @@ fn test_purge_cleanup() {
         let config = create_test_config(monodex_home.path(), "test-catalog", repo_dir.path());
 
         // Run init-db
-        run_init_db(&config).expect("init-db failed");
+        run_init_db(&config, false).expect("init-db failed");
 
         // Crawl to create FTS state
         monodex::app::commands::crawl::run_crawl_label(
@@ -723,7 +723,7 @@ fn test_schema_mismatch_error() {
         let config = create_test_config(monodex_home.path(), "test-catalog", repo_dir.path());
 
         // Run init-db first
-        run_init_db(&config).expect("init-db failed");
+        run_init_db(&config, false).expect("init-db failed");
 
         // Get database path
         let db_path = monodex::app::resolve_database_path(Some(&config)).unwrap();
@@ -785,7 +785,7 @@ fn test_fts_query_parse_error() {
         let config = create_test_config(monodex_home.path(), "test-catalog", repo_dir.path());
 
         // Run init-db
-        run_init_db(&config).expect("init-db failed");
+        run_init_db(&config, false).expect("init-db failed");
 
         // Crawl with FTS
         monodex::app::commands::crawl::run_crawl_label(
@@ -863,7 +863,7 @@ fn test_multi_method_explicit_search() {
         let config = create_test_config(monodex_home.path(), "test-catalog", repo_dir.path());
 
         // Run init-db
-        run_init_db(&config).expect("init-db failed");
+        run_init_db(&config, false).expect("init-db failed");
 
         // Crawl with no --retrieval (selection becomes {fts, vector})
         monodex::app::commands::crawl::run_crawl_label(
@@ -946,7 +946,7 @@ fn test_cross_label_active_labels_preserved() {
         let config = create_test_config(monodex_home.path(), "test-catalog", repo_dir.path());
 
         // Run init-db
-        run_init_db(&config).expect("init-db failed");
+        run_init_db(&config, false).expect("init-db failed");
 
         // Step 1: Crawl with label A, FTS-only
         monodex::app::commands::crawl::run_crawl_label(
@@ -1044,7 +1044,7 @@ fn test_working_dir_remediation_message() {
         let config = create_test_config(monodex_home.path(), "test-catalog", repo_dir.path());
 
         // Run init-db
-        run_init_db(&config).expect("init-db failed");
+        run_init_db(&config, false).expect("init-db failed");
 
         // Crawl with working-dir mode, FTS-only to get incomplete state
         monodex::app::commands::crawl::run_crawl_working_dir(
@@ -1123,7 +1123,7 @@ fn test_fts_phase_failure_preserves_vector_completion() {
         let config = create_test_config(monodex_home.path(), "test-catalog", repo_dir.path());
 
         // Run init-db
-        run_init_db(&config).expect("init-db failed");
+        run_init_db(&config, false).expect("init-db failed");
 
         // Set environment variable to trigger FTS failure
         // SAFETY: Test is serialized via #[serial(monodex_home)]

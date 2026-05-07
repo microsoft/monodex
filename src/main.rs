@@ -24,8 +24,8 @@ fn main() -> anyhow::Result<()> {
         Commands::Use { catalog, label } => {
             run_use(catalog.as_deref(), label, &config)?;
         }
-        Commands::InitDb => {
-            monodex::app::commands::run_init_db(&config)?;
+        Commands::InitDb { delete_everything } => {
+            monodex::app::commands::run_init_db(&config, delete_everything)?;
         }
         Commands::Crawl {
             catalog,

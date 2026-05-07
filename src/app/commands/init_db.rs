@@ -68,7 +68,7 @@ fn log_already_initialized(db_path: &Path, schema_version: u32) -> String {
 ///
 /// Note: Config must be loaded by the caller (main.rs) and passed in.
 /// This ensures the --config flag is respected uniformly across all commands.
-pub fn run_init_db(config: &Config) -> Result<()> {
+pub fn run_init_db(config: &Config, delete_everything: bool) -> Result<()> {
     // Step 1: Resolve database path from config
     let db_path = resolve_database_path(Some(config))?;
 
@@ -91,30 +91,62 @@ pub fn run_init_db(config: &Config) -> Result<()> {
         fs::create_dir_all(&db_path)?;
     }
 
-    // Step 4: Pre-lock existence check (short-circuit if already initialized)
-    // Use the tolerant check that falls through to lock acquisition for transient mid-init states
-    if let Some(meta) = check_existing_database_pre_lock(&db_path)? {
-        println!(
-            "{}",
-            log_already_initialized(&db_path, meta.monodex_schema_version)
-        );
-        return Ok(());
+    // Step 4: Handle --delete-everything flag
+    // If the flag is set and the database exists, delete its contents (except locks/)
+    // before proceeding with normal initialization.
+    if delete_everything && db_path.exists() {
+        // Acquire exclusive lock before deleting
+        let _guard = acquire_database_exclusive(&db_path, &stderr_lock_progress)?;
+
+        // Check if there's anything to delete
+        let has_content = db_path
+            .read_dir()
+            .map(|mut entries| {
+                entries.any(|e| {
+                    e.ok()
+                        .map(|e| {
+                            let name = e.file_name();
+                            // Ignore locks directory - we hold a lock under it
+                            name != "locks"
+                        })
+                        .unwrap_or(false)
+                })
+            })
+            .unwrap_or(false);
+
+        if has_content {
+            println!("Deleted contents of {}; reinitializing.", db_path.display());
+            delete_database_contents(&db_path)?;
+        } else {
+            println!("Note: --delete-everything specified but no existing database to delete.");
+        }
+        // Fall through to normal initialization (create_database handles the fresh state)
+    } else {
+        // Step 5: Pre-lock existence check (short-circuit if already initialized)
+        // Use the tolerant check that falls through to lock acquisition for transient mid-init states
+        if let Some(meta) = check_existing_database_pre_lock(&db_path)? {
+            println!(
+                "{}",
+                log_already_initialized(&db_path, meta.monodex_schema_version)
+            );
+            return Ok(());
+        }
+
+        // Step 6: Acquire exclusive database lock
+        // The lock module creates <db>/locks/ and the lockfile lazily
+        let _guard = acquire_database_exclusive(&db_path, &stderr_lock_progress)?;
+
+        // Step 7: Under-lock recheck (double-checked init pattern)
+        if let Some(meta) = check_existing_database(&db_path)? {
+            println!(
+                "{}",
+                log_already_initialized(&db_path, meta.monodex_schema_version)
+            );
+            return Ok(());
+        }
     }
 
-    // Step 5: Acquire exclusive database lock
-    // The lock module creates <db>/locks/ and the lockfile lazily
-    let _guard = acquire_database_exclusive(&db_path, &stderr_lock_progress)?;
-
-    // Step 6: Under-lock recheck (double-checked init pattern)
-    if let Some(meta) = check_existing_database(&db_path)? {
-        println!(
-            "{}",
-            log_already_initialized(&db_path, meta.monodex_schema_version)
-        );
-        return Ok(());
-    }
-
-    // Step 7: Create the database
+    // Step 8: Create the database
     // Note: create_empty_table calls do not acquire the commit mutex.
     // The database is being initialized for the first time under DatabaseLockExclusive,
     // with no possible concurrent writer; the commit mutex would be ceremonial.
@@ -297,6 +329,36 @@ fn validate_parent_directory(db_path: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Delete all contents of the database directory except the locks/ subdirectory.
+///
+/// This is used by `init-db --delete-everything` to wipe the database clean
+/// while still holding the lock under locks/.
+fn delete_database_contents(db_path: &Path) -> Result<()> {
+    let entries: Vec<_> = db_path
+        .read_dir()
+        .map_err(|e| anyhow!("Failed to read database directory: {}", e))?
+        .filter_map(|e| e.ok())
+        .filter(|e| {
+            let name = e.file_name();
+            // Don't delete the locks directory - we hold a lock under it
+            name != "locks"
+        })
+        .collect();
+
+    for entry in entries {
+        let path = entry.path();
+        if path.is_dir() {
+            fs::remove_dir_all(&path)
+                .map_err(|e| anyhow!("Failed to remove directory {}: {}", path.display(), e))?;
+        } else {
+            fs::remove_file(&path)
+                .map_err(|e| anyhow!("Failed to remove file {}: {}", path.display(), e))?;
+        }
+    }
+
+    Ok(())
+}
+
 /// Create the database directory and initialize LanceDB tables.
 async fn create_database(db_path: &Path) -> Result<()> {
     // Open LanceDB connection
@@ -373,7 +435,7 @@ mod tests {
         let config = load_config(&config_path).expect("Config should load");
 
         // Run init-db
-        let result = run_init_db(&config);
+        let result = run_init_db(&config, false);
 
         // Should succeed
         assert!(result.is_ok(), "init-db should succeed: {:?}", result.err());
@@ -414,12 +476,12 @@ mod tests {
         let config = load_config(&config_path).expect("Config should load");
 
         // First run
-        let result1 = run_init_db(&config);
+        let result1 = run_init_db(&config, false);
         assert!(result1.is_ok(), "First init-db should succeed");
 
         // Second run
         clear_tool_home_cache(); // Clear cache for second run
-        let result2 = run_init_db(&config);
+        let result2 = run_init_db(&config, false);
         assert!(result2.is_ok(), "Second init-db should succeed");
 
         // Verify database still valid
@@ -445,7 +507,7 @@ mod tests {
         // Load config (simulating main.rs behavior)
         let config = load_config(&config_path).expect("Config should load");
 
-        let result = run_init_db(&config);
+        let result = run_init_db(&config, false);
         let err = result.unwrap_err();
 
         // Exact match on error message
@@ -477,7 +539,7 @@ mod tests {
         // Load config (simulating main.rs behavior)
         let config = load_config(&config_path).expect("Config should load");
 
-        let result = run_init_db(&config);
+        let result = run_init_db(&config, false);
         let err = result.unwrap_err();
 
         // Exact match on error message
@@ -501,7 +563,7 @@ mod tests {
         // Load config (simulating main.rs behavior)
         let config = load_config(&config_path).expect("Config should load");
 
-        let result = run_init_db(&config);
+        let result = run_init_db(&config, false);
         assert!(result.is_ok(), "Initial init-db should succeed");
 
         // Corrupt the meta file
@@ -512,7 +574,7 @@ mod tests {
 
         // Try to run init-db again
         clear_tool_home_cache(); // Clear cache for second run
-        let result = run_init_db(&config);
+        let result = run_init_db(&config, false);
         let err = result.unwrap_err();
 
         // Exact match on error message
@@ -534,7 +596,7 @@ mod tests {
         write_minimal_config(&config_path);
 
         let config = load_config(&config_path).expect("Config should load");
-        let result = run_init_db(&config);
+        let result = run_init_db(&config, false);
         assert!(result.is_ok(), "Initial init-db should succeed");
 
         // Modify the meta file to have a different schema version
@@ -546,7 +608,7 @@ mod tests {
 
         // Try to run init-db again
         clear_tool_home_cache();
-        let result = run_init_db(&config);
+        let result = run_init_db(&config, false);
         let err = result.unwrap_err();
 
         // Should get schema mismatch error
@@ -575,7 +637,7 @@ mod tests {
         write_minimal_config(&config_path);
 
         let config = load_config(&config_path).expect("Config should load");
-        let result = run_init_db(&config);
+        let result = run_init_db(&config, false);
         let err = result.unwrap_err();
 
         // Should get partial state error
@@ -602,7 +664,7 @@ mod tests {
         write_minimal_config(&config_path);
 
         let config = load_config(&config_path).expect("Config should load");
-        let result = run_init_db(&config);
+        let result = run_init_db(&config, false);
         let err = result.unwrap_err();
 
         // Should get partial state error
@@ -629,7 +691,7 @@ mod tests {
         write_minimal_config(&config_path);
 
         let config = load_config(&config_path).expect("Config should load");
-        let result = run_init_db(&config);
+        let result = run_init_db(&config, false);
 
         // Should succeed - locks/ is treated as detritus
         assert!(
@@ -661,7 +723,7 @@ mod tests {
         write_minimal_config(&config_path);
 
         let config = load_config(&config_path).expect("Config should load");
-        let result = run_init_db(&config);
+        let result = run_init_db(&config, false);
 
         // Should succeed - fts/ is treated as detritus
         assert!(
@@ -712,5 +774,118 @@ mod tests {
             strict_result.unwrap_err().to_string(),
             err_partial_state(&db_path)
         );
+    }
+
+    #[test]
+    #[serial(monodex_home)]
+    fn test_delete_everything_with_existing_database() {
+        // Test that --delete-everything wipes an existing database and recreates it
+        clear_tool_home_cache();
+        let temp_dir = TempDir::new().unwrap();
+
+        set_monodex_home(temp_dir.path());
+
+        let config_path = temp_dir.path().join("config.json");
+        write_minimal_config(&config_path);
+
+        let config = load_config(&config_path).expect("Config should load");
+
+        // First, create a valid database
+        let result = run_init_db(&config, false);
+        assert!(result.is_ok(), "Initial init-db should succeed");
+
+        let db_path = temp_dir.path().join("default-db");
+        assert!(db_path.join(META_FILE).exists());
+
+        // Add some extra content to verify deletion
+        fs::write(db_path.join("extra-file.txt"), "test content").unwrap();
+
+        // Run init-db --delete-everything
+        clear_tool_home_cache();
+        let result = run_init_db(&config, true);
+        assert!(
+            result.is_ok(),
+            "init-db --delete-everything should succeed: {:?}",
+            result.err()
+        );
+
+        // Verify database was recreated
+        assert!(db_path.join(META_FILE).exists());
+        // Verify extra content was deleted
+        assert!(
+            !db_path.join("extra-file.txt").exists(),
+            "Extra file should be deleted"
+        );
+        // Verify locks directory still exists (not deleted)
+        assert!(
+            db_path.join("locks").exists(),
+            "locks directory should be preserved"
+        );
+
+        remove_monodex_home();
+    }
+
+    #[test]
+    #[serial(monodex_home)]
+    fn test_delete_everything_with_nonexistent_database() {
+        // Test that --delete-everything on a non-existent database prints a note but succeeds
+        clear_tool_home_cache();
+        let temp_dir = TempDir::new().unwrap();
+
+        set_monodex_home(temp_dir.path());
+
+        let config_path = temp_dir.path().join("config.json");
+        write_minimal_config(&config_path);
+
+        let config = load_config(&config_path).expect("Config should load");
+
+        // Run init-db --delete-everything on a fresh system
+        let result = run_init_db(&config, true);
+        assert!(
+            result.is_ok(),
+            "init-db --delete-everything should succeed on non-existent db: {:?}",
+            result.err()
+        );
+
+        // Verify database was created
+        let db_path = temp_dir.path().join("default-db");
+        assert!(db_path.join(META_FILE).exists());
+
+        remove_monodex_home();
+    }
+
+    #[test]
+    #[serial(monodex_home)]
+    fn test_delete_everything_with_current_version_database() {
+        // Test that --delete-everything works even on a database with the current schema version
+        clear_tool_home_cache();
+        let temp_dir = TempDir::new().unwrap();
+
+        set_monodex_home(temp_dir.path());
+
+        let config_path = temp_dir.path().join("config.json");
+        write_minimal_config(&config_path);
+
+        let config = load_config(&config_path).expect("Config should load");
+
+        // Create a valid current-version database
+        let result = run_init_db(&config, false);
+        assert!(result.is_ok(), "Initial init-db should succeed");
+
+        let db_path = temp_dir.path().join("default-db");
+
+        // Run init-db --delete-everything (delete-and-recreate even though not strictly necessary)
+        clear_tool_home_cache();
+        let result = run_init_db(&config, true);
+        assert!(
+            result.is_ok(),
+            "init-db --delete-everything should succeed: {:?}",
+            result.err()
+        );
+
+        // Verify database was recreated
+        assert!(db_path.join(META_FILE).exists());
+
+        remove_monodex_home();
     }
 }

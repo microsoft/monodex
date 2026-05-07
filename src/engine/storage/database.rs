@@ -71,7 +71,8 @@ impl Default for MetaFile {
 pub fn err_schema_mismatch(db_version: u32, expected_version: u32) -> String {
     format!(
         "Schema mismatch: database has version {} but monodex expects version {}. \
-         Run 'monodex upgrade-db' to migrate, or delete the database and run 'monodex init-db' to recreate it.",
+         Run 'monodex init-db --delete-everything' to delete the database and start fresh. \
+         (A future 'upgrade-db' command will support in-place migration; for now, recrawl is the remedy.)",
         db_version, expected_version
     )
 }

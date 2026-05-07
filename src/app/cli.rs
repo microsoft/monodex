@@ -44,7 +44,13 @@ pub enum Commands {
     /// Initialize a new monodex database at the configured path.
     /// Creates database tables for chunks and label metadata.
     /// Idempotent: safe to run on an existing database.
-    InitDb,
+    InitDb {
+        /// Delete the entire database directory and recreate it from scratch.
+        /// Use this to recover from a schema mismatch error. WARNING: destroys
+        /// all indexed data; you will need to re-crawl every catalog/label.
+        #[arg(long)]
+        delete_everything: bool,
+    },
 
     /// Crawl source and index chunks (incremental sync).
     /// Reports warnings when AST chunking fails and fallback is used.
