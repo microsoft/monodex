@@ -117,6 +117,7 @@ pub fn run_crawl_label(
     println!("📦 Resolving commit...");
     let commit_oid = resolve_commit_oid(&repo_path, commit)?;
     println!("Resolved {} to {}", commit, &commit_oid[..12]);
+    println!();
 
     // Construct the blob source and metadata
     let blob_source = CommitBlobSource::new(repo_path.clone(), commit_oid.clone());

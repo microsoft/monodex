@@ -90,6 +90,7 @@ pub async fn write_in_progress_metadata(
 pub fn enumerate_files(blob_source: &dyn BlobSource) -> Result<Vec<FileEntry>> {
     let files = blob_source.enumerate()?;
     println!("Found {} files", files.len());
+    println!();
     Ok(files)
 }
 

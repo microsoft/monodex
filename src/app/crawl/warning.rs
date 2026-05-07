@@ -22,9 +22,11 @@ where
     match warning {
         CrawlWarning::ChunkerFallbackSplit { relative_path } => {
             // Byte-identical to the current println! in chunk_new_files
+            // Leading newline prevents this warning from appearing on the same line
+            // as the in-progress carriage-return progress meter.
             writeln!(
                 stdout,
-                "Warning: Couldn't find a splitpoint for {}",
+                "\nWarning: Couldn't find a splitpoint for {}",
                 relative_path
             )
             .expect("Failed to write warning to stdout");
@@ -122,7 +124,7 @@ mod tests {
 
         assert_eq!(
             stdout_str,
-            "Warning: Couldn't find a splitpoint for src/example.ts\n"
+            "\nWarning: Couldn't find a splitpoint for src/example.ts\n"
         );
         assert!(stderr_str.is_empty());
     }
