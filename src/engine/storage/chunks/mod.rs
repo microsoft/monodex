@@ -29,6 +29,16 @@ use crate::engine::storage::{ChunkRow, ScoredChunkRow};
 /// Batch size for upsert operations. Storage-layer internal detail.
 const UPSERT_BATCH_SIZE: usize = 1000;
 
+/// Policy for handling the vector column during upsert.
+///
+/// This is a private implementation detail of the upsert methods.
+enum VectorPolicy<'a> {
+    /// Include vectors in the upsert batch.
+    With(&'a [Vec<f32>]),
+    /// Omit vectors from the upsert batch (preserves existing vectors on matched rows).
+    Without,
+}
+
 /// Convert an iterator of ChunkRows with their vectors to a RecordBatch.
 ///
 /// This is the primary function for writing chunks during crawl, where we have
@@ -653,37 +663,8 @@ impl ChunkStorage {
             row.validate()?;
         }
 
-        // Fetch existing rows and merge active_label_ids
-        let row_ids: Vec<&str> = rows.iter().map(|r| r.row_id.as_str()).collect();
-        let existing_rows = self.get_by_row_ids_inner(&row_ids).await?;
-        let merged_rows = merge_active_label_ids(rows, &existing_rows);
-
-        let schema = self.table.schema().await?;
-
-        // Process in batches internally
-        for (batch_rows, batch_vectors) in merged_rows
-            .chunks(UPSERT_BATCH_SIZE)
-            .zip(vectors.chunks(UPSERT_BATCH_SIZE))
-        {
-            let rows_with_vectors: Vec<(&ChunkRow, &[f32])> = batch_rows
-                .iter()
-                .zip(batch_vectors.iter().map(|v| v.as_slice()))
-                .collect();
-            let batch = chunk_rows_to_record_batch_with_vectors(
-                rows_with_vectors.into_iter(),
-                schema.clone(),
-            )?;
-
-            // Use merge_insert for proper upsert semantics
-            let reader = RecordBatchIterator::new(std::iter::once(Ok(batch)), schema.clone());
-            let mut builder = self.table.merge_insert(&["row_id"]);
-            builder
-                .when_matched_update_all(None)
-                .when_not_matched_insert_all();
-            builder.execute(Box::new(reader)).await?;
-        }
-
-        Ok(())
+        self.upsert_chunks_inner(rows, VectorPolicy::With(vectors))
+            .await
     }
 
     /// Upsert a batch of chunk rows without embedding vectors.
@@ -712,20 +693,49 @@ impl ChunkStorage {
             row.validate()?;
         }
 
-        // Fetch existing rows and merge active_label_ids
-        let row_ids: Vec<&str> = rows.iter().map(|r| r.row_id.as_str()).collect();
-        let existing_rows = self.get_by_row_ids_inner(&row_ids).await?;
-        let merged_rows = merge_active_label_ids(rows, &existing_rows);
+        self.upsert_chunks_inner(rows, VectorPolicy::Without).await
+    }
 
+    /// Internal helper for upserting chunks with configurable vector handling.
+    ///
+    /// Assumes the commit mutex is already held by the caller.
+    /// Performs per-batch active_label_ids preservation to avoid unbounded IN(...) predicates.
+    async fn upsert_chunks_inner(
+        &self,
+        rows: &[ChunkRow],
+        vectors: VectorPolicy<'_>,
+    ) -> Result<()> {
         let schema = self.table.schema().await?;
 
-        // Process in batches internally
-        for batch_rows in merged_rows.chunks(UPSERT_BATCH_SIZE) {
-            let batch =
-                chunk_rows_to_record_batch_without_vectors(batch_rows.iter(), schema.clone())?;
+        // Process in batches, fetching existing rows per-batch to keep IN(...) predicate bounded
+        for batch_start in (0..rows.len()).step_by(UPSERT_BATCH_SIZE) {
+            let batch_end = std::cmp::min(batch_start + UPSERT_BATCH_SIZE, rows.len());
+            let batch_rows = &rows[batch_start..batch_end];
+
+            // Fetch existing rows for this batch only (bounded to UPSERT_BATCH_SIZE)
+            let row_ids: Vec<&str> = batch_rows.iter().map(|r| r.row_id.as_str()).collect();
+            let existing_rows = self.get_by_row_ids_inner(&row_ids).await?;
+            let merged_rows = merge_active_label_ids(batch_rows, &existing_rows);
+
+            // Build the record batch based on vector policy
+            let batch = match &vectors {
+                VectorPolicy::With(all_vectors) => {
+                    let batch_vectors = &all_vectors[batch_start..batch_end];
+                    let rows_with_vectors: Vec<(&ChunkRow, &[f32])> = merged_rows
+                        .iter()
+                        .zip(batch_vectors.iter().map(|v| v.as_slice()))
+                        .collect();
+                    chunk_rows_to_record_batch_with_vectors(
+                        rows_with_vectors.into_iter(),
+                        schema.clone(),
+                    )?
+                }
+                VectorPolicy::Without => {
+                    chunk_rows_to_record_batch_without_vectors(merged_rows.iter(), schema.clone())?
+                }
+            };
 
             // Use merge_insert for proper upsert semantics
-            // Note: schema without vector column
             let batch_schema = batch.schema();
             let reader = RecordBatchIterator::new(std::iter::once(Ok(batch)), batch_schema);
             let mut builder = self.table.merge_insert(&["row_id"]);
