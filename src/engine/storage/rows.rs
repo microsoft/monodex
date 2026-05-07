@@ -129,6 +129,12 @@ impl ChunkRow {
 ///
 /// This struct represents the Rust view of label metadata. There is no vector column
 /// because label metadata is not searched by similarity.
+///
+/// Per-method retrieval state:
+/// - `<method>_source`: The commit OID or working-dir sentinel this method was indexed against.
+///   `None` means the method is not in the label's retrieval selection.
+/// - `<method>_complete`: Whether the method's indexing phase completed successfully.
+///   Only meaningful when `<method>_source` is `Some`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct LabelMetadataRow {
     // Primary key
@@ -139,11 +145,17 @@ pub struct LabelMetadataRow {
     pub label: String,
 
     // Source info
-    pub commit_oid: String,
     pub source_kind: String,
 
-    // Crawl state
-    pub crawl_complete: bool,
+    // Per-method retrieval state (vector)
+    pub vector_source: Option<String>,
+    pub vector_complete: bool,
+
+    // Per-method retrieval state (fts)
+    pub fts_source: Option<String>,
+    pub fts_complete: bool,
+
+    // Timestamp
     pub updated_at_unix_secs: i64,
 }
 
@@ -239,9 +251,11 @@ mod tests {
             label_id: "my-catalog:main".to_string(),
             catalog: "my-catalog".to_string(),
             label: "main".to_string(),
-            commit_oid: "abc123def456".to_string(),
             source_kind: SOURCE_KIND_GIT_COMMIT.to_string(),
-            crawl_complete: true,
+            vector_source: Some("abc123def456".to_string()),
+            vector_complete: true,
+            fts_source: Some("abc123def456".to_string()),
+            fts_complete: true,
             updated_at_unix_secs: 1700000000,
         }
     }

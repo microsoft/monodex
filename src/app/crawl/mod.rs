@@ -1,10 +1,16 @@
-//! Purpose: Crawl pipeline orchestration shared between command handlers — phases, types, embed/upload pipeline.
-//! Edit here when: Modifying the embed/upload pipeline, crawl-phase wiring, or crawl types.
-//! Do not edit here for: Crawl command handlers (see `../commands/crawl.rs`), engine-level git/storage/chunking code (see `../../engine/`).
+//! Crawl pipeline orchestration shared between command handlers.
+//!
+//! Purpose: Export crawl submodules and public surface for command handlers.
+//! Edit here when: Adding or removing crawl submodules, or changing the public surface
+//! re-exported from this directory.
+//! Do not edit here for: Phase orchestration (see `phases.rs`), embed/upload pipeline
+//! (see `pipeline.rs`), crawl types (see `types.rs`), warning handling (see `warning.rs`),
+//! or crawl command handlers (see `../commands/crawl.rs`).
 
 pub mod phases;
 pub mod pipeline;
 pub mod types;
+pub mod warning;
 
-pub use pipeline::run_embed_upload_pipeline;
-pub use types::CrawlFailures;
+pub use pipeline::{run_embed_upload_pipeline, run_upsert_without_vectors};
+pub use types::{CrawlFailures, PhaseResults};

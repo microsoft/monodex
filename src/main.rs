@@ -15,23 +15,24 @@ fn main() -> anyhow::Result<()> {
 
     // Load config
     let config_path = match cli.config {
-        Some(path) => path,
-        None => monodex::paths::config_path()?,
+        Some(ref path) => path,
+        None => &monodex::paths::config_path()?,
     };
-    let config = load_config(&config_path)?;
+    let config = load_config(config_path)?;
 
     match cli.command {
         Commands::Use { catalog, label } => {
             run_use(catalog.as_deref(), label, &config)?;
         }
-        Commands::InitDb => {
-            monodex::app::commands::run_init_db(&config)?;
+        Commands::InitDb { delete_everything } => {
+            monodex::app::commands::run_init_db(&config, delete_everything)?;
         }
         Commands::Crawl {
             catalog,
             label,
             source,
             incremental_warnings,
+            retrieval,
         } => {
             // Resolve label context from explicit flags or default context
             let (_, catalog_name, label) = resolve_label_context(Some(&label), catalog.as_deref())?;
@@ -42,6 +43,7 @@ fn main() -> anyhow::Result<()> {
                     &catalog_name,
                     &label,
                     incremental_warnings,
+                    retrieval,
                     cli.debug,
                 )?;
             } else {
@@ -52,6 +54,7 @@ fn main() -> anyhow::Result<()> {
                     &label,
                     source.commit.as_ref().unwrap(),
                     incremental_warnings,
+                    retrieval,
                     cli.debug,
                 )?;
             }
@@ -79,13 +82,24 @@ fn main() -> anyhow::Result<()> {
             limit,
             label,
             catalog,
+            retrieval,
         } => {
+            // Normalize retrieval Vec to Option<BTreeSet>
+            // Empty Vec = None (all methods in selection)
+            // Non-empty Vec = Some(BTreeSet) with deduplication
+            let retrieval_set = if retrieval.is_empty() {
+                None
+            } else {
+                Some(retrieval.into_iter().collect())
+            };
+
             monodex::app::commands::run_search(
                 &config,
                 &text,
                 limit,
                 label.as_deref(),
                 catalog.as_deref(),
+                retrieval_set,
                 cli.debug,
             )?;
         }
@@ -108,6 +122,21 @@ fn main() -> anyhow::Result<()> {
         }
         Commands::AuditChunks { count, dir } => {
             monodex::app::commands::run_audit_chunks(count, dir)?;
+        }
+        Commands::DebugFts {
+            id,
+            label,
+            catalog,
+            query,
+        } => {
+            monodex::app::commands::run_debug_fts(
+                &config,
+                &id,
+                label.as_deref(),
+                catalog.as_deref(),
+                query.as_deref(),
+                cli.debug,
+            )?;
         }
     }
 

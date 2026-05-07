@@ -15,8 +15,10 @@ mod predicate;
 mod rows;
 
 pub use chunks::ChunkStorage;
+pub use chunks::SentinelStatus;
 pub use database::{Database, META_FILE, MetaFile, err_schema_mismatch};
 pub use labels::LabelStorage;
+pub use labels::read_selection;
 pub use locks::{
     CatalogLock, CommitMutex, DatabaseLockExclusive, DatabaseLockShared, acquire_catalog_lock,
     acquire_commit_mutex, acquire_database_exclusive, acquire_database_shared,

@@ -67,6 +67,9 @@ pub async fn create_test_db_with_chunks(
         .await
         .expect("Failed to create label_metadata table");
 
+    // Create fts directory for Tantivy indexes
+    fs::create_dir_all(db_path.join("fts")).unwrap();
+
     // Write meta file
     let meta = MetaFile::new();
     let meta_file = File::create(db_path.join(META_FILE)).unwrap();
@@ -181,9 +184,11 @@ pub fn test_label_metadata_row(label_id: &str) -> LabelMetadataRow {
             .next_back()
             .unwrap_or("main")
             .to_string(),
-        commit_oid: "abc123def456".to_string(),
         source_kind: SOURCE_KIND_GIT_COMMIT.to_string(),
-        crawl_complete: true,
+        vector_source: Some("abc123def456".to_string()),
+        vector_complete: true,
+        fts_source: Some("abc123def456".to_string()),
+        fts_complete: true,
         updated_at_unix_secs: 1700000000,
     }
 }
@@ -194,9 +199,11 @@ pub fn test_label_metadata_row_with_parts(catalog: &str, label: &str) -> LabelMe
         label_id: format!("{}:{}", catalog, label),
         catalog: catalog.to_string(),
         label: label.to_string(),
-        commit_oid: "abc123def456".to_string(),
         source_kind: SOURCE_KIND_GIT_COMMIT.to_string(),
-        crawl_complete: true,
+        vector_source: Some("abc123def456".to_string()),
+        vector_complete: true,
+        fts_source: Some("abc123def456".to_string()),
+        fts_complete: true,
         updated_at_unix_secs: 1700000000,
     }
 }

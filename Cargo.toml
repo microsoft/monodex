@@ -12,6 +12,7 @@ readme = "README.md"
 exclude = [
     "test_artifacts/*",
     "scripts/*",
+    "tests/*",
     "*.log",
     "crawl.log",
     "monodex.log",
@@ -62,11 +63,16 @@ rayon = "1.10"
 fs4 = "0.12"
 crossbeam-channel = "0.5"
 sysinfo = "0.33"
+terminal_size = "0.4"
 
 # Tree-sitter for AST parsing
 tree-sitter = "0.26"
 tree-sitter-typescript = "0.23"
 rand = "0.10"
+
+# Full-text search (Tantivy)
+tantivy = "0.24"
+jieba-rs = "0.8"
 
 [dev-dependencies]
 insta = { version = "1.47", features = ["yaml"] }

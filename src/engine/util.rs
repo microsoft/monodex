@@ -9,8 +9,8 @@
 //! - `EMBEDDER_ID` / `CHUNKER_ID` / catalog name: Participate in `row_id` computation.
 //!   Changing any of these invalidates chunk identity and forces re-vectorizing all content.
 //!
-//! - Future FTS constants (`FTS_SCHEMA_ID`, `FTS_TOKENIZER_ID`): Will NOT participate
-//!   in `row_id`. Changing them invalidates only FTS state, leaving vector state untouched.
+//! - `FTS_SCHEMA_ID` / `FTS_TOKENIZER_ID`: Do NOT participate in `row_id` computation.
+//!   Changing them invalidates only FTS state, leaving vector state untouched.
 
 use sha2::{Digest, Sha256};
 use std::hash::{Hash, Hasher};
@@ -21,6 +21,14 @@ pub const EMBEDDER_ID: &str = "jina-embeddings-v2-base-code:v1";
 
 /// Implementation identifier for the chunker
 pub const CHUNKER_ID: &str = "typescript-partitioner:v1";
+
+/// Versions the Tantivy schema (the field set and indexing options).
+/// Changing this invalidates only FTS state; vector state is untouched.
+pub const FTS_SCHEMA_ID: &str = "monodex-fts-schema:v1";
+
+/// Versions the tokenizer behavior.
+/// Changing this invalidates only FTS state; vector state is untouched.
+pub const FTS_TOKENIZER_ID: &str = "monodex-fts-tokenizer:v1";
 
 /// Compute SHA256 hash of content
 pub fn compute_hash(content: &str) -> String {

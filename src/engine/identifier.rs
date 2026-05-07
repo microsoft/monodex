@@ -314,13 +314,11 @@ impl LabelId {
     }
 
     /// Returns the catalog component.
-    #[cfg(test)]
     pub fn catalog(&self) -> &str {
         &self.catalog
     }
 
     /// Returns the label component.
-    #[cfg(test)]
     pub fn label(&self) -> &str {
         &self.label
     }

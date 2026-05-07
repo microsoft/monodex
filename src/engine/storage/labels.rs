@@ -4,14 +4,16 @@
 
 use anyhow::{Result, anyhow};
 use arrow_array::{
-    ArrayRef, BooleanArray, Int64Array, RecordBatch, RecordBatchIterator, StringArray,
+    Array, ArrayRef, BooleanArray, Int64Array, RecordBatch, RecordBatchIterator, StringArray,
 };
 use arrow_schema::SchemaRef;
 use futures::TryStreamExt;
 use lancedb::query::{ExecutableQuery, QueryBase};
+use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use crate::engine::retrieval::RetrievalMethod;
 use crate::engine::storage::LabelMetadataRow;
 use crate::engine::storage::locks::acquire_commit_mutex;
 use crate::engine::storage::predicate::eq_str;
@@ -26,9 +28,11 @@ fn label_metadata_rows_to_record_batch<'a>(
     let label_id: StringArray = rows.iter().map(|r| Some(r.label_id.as_str())).collect();
     let catalog: StringArray = rows.iter().map(|r| Some(r.catalog.as_str())).collect();
     let label: StringArray = rows.iter().map(|r| Some(r.label.as_str())).collect();
-    let commit_oid: StringArray = rows.iter().map(|r| Some(r.commit_oid.as_str())).collect();
     let source_kind: StringArray = rows.iter().map(|r| Some(r.source_kind.as_str())).collect();
-    let crawl_complete: BooleanArray = rows.iter().map(|r| Some(r.crawl_complete)).collect();
+    let vector_source: StringArray = rows.iter().map(|r| r.vector_source.as_deref()).collect();
+    let vector_complete: BooleanArray = rows.iter().map(|r| Some(r.vector_complete)).collect();
+    let fts_source: StringArray = rows.iter().map(|r| r.fts_source.as_deref()).collect();
+    let fts_complete: BooleanArray = rows.iter().map(|r| Some(r.fts_complete)).collect();
     let updated_at_unix_secs: Int64Array =
         rows.iter().map(|r| Some(r.updated_at_unix_secs)).collect();
 
@@ -36,9 +40,11 @@ fn label_metadata_rows_to_record_batch<'a>(
         Arc::new(label_id),
         Arc::new(catalog),
         Arc::new(label),
-        Arc::new(commit_oid),
         Arc::new(source_kind),
-        Arc::new(crawl_complete),
+        Arc::new(vector_source),
+        Arc::new(vector_complete),
+        Arc::new(fts_source),
+        Arc::new(fts_complete),
         Arc::new(updated_at_unix_secs),
     ];
 
@@ -77,15 +83,6 @@ fn parse_label_metadata_row(batch: &RecordBatch, row_idx: usize) -> Result<Label
         .value(row_idx)
         .to_string();
 
-    let commit_oid = batch
-        .column_by_name("commit_oid")
-        .ok_or_else(|| anyhow!("commit_oid column not found"))?
-        .as_any()
-        .downcast_ref::<StringArray>()
-        .ok_or_else(|| anyhow!("commit_oid column is not a StringArray"))?
-        .value(row_idx)
-        .to_string();
-
     let source_kind = batch
         .column_by_name("source_kind")
         .ok_or_else(|| anyhow!("source_kind column not found"))?
@@ -95,12 +92,38 @@ fn parse_label_metadata_row(batch: &RecordBatch, row_idx: usize) -> Result<Label
         .value(row_idx)
         .to_string();
 
-    let crawl_complete = batch
-        .column_by_name("crawl_complete")
-        .ok_or_else(|| anyhow!("crawl_complete column not found"))?
+    // Helper to read nullable string column
+    let read_nullable_string = |col_name: &str| -> Result<Option<String>> {
+        let col = batch
+            .column_by_name(col_name)
+            .ok_or_else(|| anyhow!("{} column not found", col_name))?
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .ok_or_else(|| anyhow!("{} column is not a StringArray", col_name))?;
+        if col.is_null(row_idx) {
+            Ok(None)
+        } else {
+            Ok(Some(col.value(row_idx).to_string()))
+        }
+    };
+
+    let vector_source = read_nullable_string("vector_source")?;
+    let fts_source = read_nullable_string("fts_source")?;
+
+    let vector_complete = batch
+        .column_by_name("vector_complete")
+        .ok_or_else(|| anyhow!("vector_complete column not found"))?
         .as_any()
         .downcast_ref::<BooleanArray>()
-        .ok_or_else(|| anyhow!("crawl_complete column is not a BooleanArray"))?
+        .ok_or_else(|| anyhow!("vector_complete column is not a BooleanArray"))?
+        .value(row_idx);
+
+    let fts_complete = batch
+        .column_by_name("fts_complete")
+        .ok_or_else(|| anyhow!("fts_complete column not found"))?
+        .as_any()
+        .downcast_ref::<BooleanArray>()
+        .ok_or_else(|| anyhow!("fts_complete column is not a BooleanArray"))?
         .value(row_idx);
 
     let updated_at_unix_secs = batch
@@ -115,14 +138,32 @@ fn parse_label_metadata_row(batch: &RecordBatch, row_idx: usize) -> Result<Label
         label_id,
         catalog,
         label,
-        commit_oid,
         source_kind,
-        crawl_complete,
+        vector_source,
+        vector_complete,
+        fts_source,
+        fts_complete,
         updated_at_unix_secs,
     };
 
     row.validate()?;
     Ok(row)
+}
+
+/// Read the retrieval selection from a label metadata row.
+///
+/// The selection is derived from which `<method>_source` columns are non-NULL.
+/// A method is in the selection iff its source column is Some.
+/// This is the single source of truth for retrieval selection.
+pub fn read_selection(row: &LabelMetadataRow) -> BTreeSet<RetrievalMethod> {
+    let mut selection = BTreeSet::new();
+    if row.vector_source.is_some() {
+        selection.insert(RetrievalMethod::Vector);
+    }
+    if row.fts_source.is_some() {
+        selection.insert(RetrievalMethod::Fts);
+    }
+    selection
 }
 
 /// Label metadata storage operations for LanceDB.
@@ -302,9 +343,11 @@ mod tests {
             label_id: format!("test-catalog:{}", label),
             catalog: "test-catalog".to_string(),
             label: label.to_string(),
-            commit_oid: "abc123def456".to_string(),
             source_kind: SOURCE_KIND_GIT_COMMIT.to_string(),
-            crawl_complete: true,
+            vector_source: Some("abc123def456".to_string()),
+            vector_complete: true,
+            fts_source: Some("abc123def456".to_string()),
+            fts_complete: true,
             updated_at_unix_secs: 1700000000,
         }
     }
@@ -352,9 +395,11 @@ mod tests {
             label_id: "other-catalog:main".to_string(),
             catalog: "other-catalog".to_string(),
             label: "main".to_string(),
-            commit_oid: "xyz".to_string(),
             source_kind: SOURCE_KIND_GIT_COMMIT.to_string(),
-            crawl_complete: true,
+            vector_source: Some("xyz".to_string()),
+            vector_complete: true,
+            fts_source: Some("xyz".to_string()),
+            fts_complete: true,
             updated_at_unix_secs: 1700000000,
         };
         storage.upsert(&other_row).await.unwrap();
@@ -436,11 +481,11 @@ mod tests {
 
         // Insert initial row
         let mut row = test_label_metadata_row("main");
-        row.crawl_complete = false;
+        row.vector_complete = false;
         storage.upsert(&row).await.unwrap();
 
-        // Upsert with updated crawl_complete
-        row.crawl_complete = true;
+        // Upsert with updated vector_complete
+        row.vector_complete = true;
         storage.upsert(&row).await.unwrap();
 
         let retrieved = storage
@@ -448,10 +493,74 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        assert!(retrieved.crawl_complete);
+        assert!(retrieved.vector_complete);
 
         // Verify only one row exists
         let rows = storage.list_for_catalog("test-catalog").await.unwrap();
         assert_eq!(rows.len(), 1);
+    }
+
+    #[test]
+    fn test_read_selection_both_methods() {
+        let row = test_label_metadata_row("main");
+        let selection = read_selection(&row);
+        assert_eq!(selection.len(), 2);
+        assert!(selection.contains(&RetrievalMethod::Fts));
+        assert!(selection.contains(&RetrievalMethod::Vector));
+    }
+
+    #[test]
+    fn test_read_selection_vector_only() {
+        let row = LabelMetadataRow {
+            label_id: "test-catalog:main".to_string(),
+            catalog: "test-catalog".to_string(),
+            label: "main".to_string(),
+            source_kind: SOURCE_KIND_GIT_COMMIT.to_string(),
+            vector_source: Some("abc123".to_string()),
+            vector_complete: true,
+            fts_source: None, // FTS not in selection
+            fts_complete: false,
+            updated_at_unix_secs: 1700000000,
+        };
+        let selection = read_selection(&row);
+        assert_eq!(selection.len(), 1);
+        assert!(selection.contains(&RetrievalMethod::Vector));
+        assert!(!selection.contains(&RetrievalMethod::Fts));
+    }
+
+    #[test]
+    fn test_read_selection_fts_only() {
+        let row = LabelMetadataRow {
+            label_id: "test-catalog:main".to_string(),
+            catalog: "test-catalog".to_string(),
+            label: "main".to_string(),
+            source_kind: SOURCE_KIND_GIT_COMMIT.to_string(),
+            vector_source: None, // Vector not in selection
+            vector_complete: false,
+            fts_source: Some("abc123".to_string()),
+            fts_complete: true,
+            updated_at_unix_secs: 1700000000,
+        };
+        let selection = read_selection(&row);
+        assert_eq!(selection.len(), 1);
+        assert!(selection.contains(&RetrievalMethod::Fts));
+        assert!(!selection.contains(&RetrievalMethod::Vector));
+    }
+
+    #[test]
+    fn test_read_selection_empty() {
+        let row = LabelMetadataRow {
+            label_id: "test-catalog:main".to_string(),
+            catalog: "test-catalog".to_string(),
+            label: "main".to_string(),
+            source_kind: SOURCE_KIND_GIT_COMMIT.to_string(),
+            vector_source: None,
+            vector_complete: false,
+            fts_source: None,
+            fts_complete: false,
+            updated_at_unix_secs: 1700000000,
+        };
+        let selection = read_selection(&row);
+        assert!(selection.is_empty());
     }
 }
