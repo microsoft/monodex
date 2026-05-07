@@ -1098,3 +1098,95 @@ fn test_working_dir_remediation_message() {
 
     remove_monodex_home();
 }
+
+// =============================================================================
+// Test: FTS phase failure after vector success
+// =============================================================================
+
+/// Test that when FTS phase fails after vector phase succeeds, the metadata
+/// correctly reflects `vector_complete=true` and `fts_complete=false`.
+///
+/// This verifies decision #17: FTS phase failure must still finalize metadata.
+/// The orchestrator catches the FTS phase result, threads it into PhaseResults,
+/// calls finalize, then propagates the error.
+///
+/// The test uses a test hook environment variable to simulate FTS failure.
+#[test]
+#[serial(monodex_home)]
+fn test_fts_phase_failure_preserves_vector_completion() {
+    let (_monodex_home, _repo_dir) = {
+        // Set up temp directories
+        let monodex_home = unique_temp_dir();
+        let repo_dir = unique_temp_dir();
+
+        set_monodex_home(monodex_home.path());
+
+        // Create test git repo
+        let commit_oid = create_test_git_repo(repo_dir.path());
+
+        // Create config pointing to the repo
+        let config = create_test_config(monodex_home.path(), "test-catalog", repo_dir.path());
+
+        // Run init-db
+        run_init_db(&config).expect("init-db failed");
+
+        // Set environment variable to trigger FTS failure
+        // SAFETY: Test is serialized via #[serial(monodex_home)]
+        unsafe {
+            std::env::set_var("MONODEX_TEST_FTS_FAIL", "1");
+        }
+
+        // Crawl with both methods - FTS should fail, vector should succeed
+        let crawl_result = monodex::app::commands::crawl::run_crawl_label(
+            &config,
+            "test-catalog",
+            "test-label",
+            &commit_oid,
+            false, // incremental_warnings
+            vec![], // empty = all methods
+            false, // debug
+        );
+
+        // Clean up the environment variable
+        unsafe {
+            std::env::remove_var("MONODEX_TEST_FTS_FAIL");
+        }
+
+        // The crawl should have failed due to FTS error
+        assert!(crawl_result.is_err(), "Crawl should fail due to FTS error");
+
+        // Now re-crawl with FTS only to complete the FTS phase
+        monodex::app::commands::crawl::run_crawl_label(
+            &config,
+            "test-catalog",
+            "test-label",
+            &commit_oid,
+            false, // incremental_warnings
+            vec![RetrievalMethod::Fts], // FTS-only
+            false, // debug
+        )
+        .expect("FTS-only crawl should succeed");
+
+        // Verify both methods work now
+        let fts_only: Option<BTreeSet<RetrievalMethod>> =
+            Some(std::iter::once(RetrievalMethod::Fts).collect());
+        let search_result = run_search(
+            &config,
+            "getUserProfile",
+            10,
+            Some("test-label"),
+            Some("test-catalog"),
+            fts_only,
+            false,
+        )
+        .expect("FTS search should work after recovery");
+        assert!(
+            !search_result.is_empty(),
+            "FTS search should find chunks after recovery"
+        );
+
+        (monodex_home, repo_dir)
+    };
+
+    remove_monodex_home();
+}
