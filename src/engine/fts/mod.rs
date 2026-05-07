@@ -1,8 +1,12 @@
 //! Full-text search via Tantivy.
 //!
-//! Purpose: Implement FTS indexing and search for code chunks using Tantivy.
-//! Edit here when: Changing FTS indexing logic, tokenizer behavior, schema, or search semantics.
-//! Do not edit here for: Vector search (see `engine/storage/chunks/`), CLI handlers (see `app/commands/`).
+//! Purpose: Export FTS submodules and public surface for the rest of the codebase.
+//! Edit here when: Adding or removing FTS submodules, or changing the public surface
+//! re-exported from this directory.
+//! Do not edit here for: FTS indexing logic (see `indexing.rs`), tokenizer behavior
+//! (see `tokenizer.rs`), schema (see `schema.rs`), search semantics (see `search.rs`),
+//! manifest handling (see `manifest.rs`), index management (see `index.rs`),
+//! error types (see `error.rs`), or vector search (see `engine/storage/chunks/`).
 
 mod error;
 pub mod index;
