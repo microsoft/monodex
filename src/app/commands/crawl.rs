@@ -320,6 +320,7 @@ async fn run_crawl_async(
         label_id,
         repo_path,
         classify_output.new_count,
+        vector_in_selection,
         &warning_counter,
         &mut warning_sink,
     )?;

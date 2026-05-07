@@ -342,6 +342,7 @@ pub fn chunk_new_files(
     label_id: &LabelId,
     repo_path: &std::path::Path,
     new_count: usize,
+    vector_in_selection: bool,
     warning_counter: &std::cell::Cell<usize>,
     warnings: WarningSink<'_>,
 ) -> Result<ChunkingOutput> {
@@ -426,7 +427,12 @@ pub fn chunk_new_files(
     }
 
     let total_chunks = chunks.len();
-    println!("\n  Found {} chunks to embed", total_chunks);
+    let chunks_label = if vector_in_selection {
+        "chunks to embed"
+    } else {
+        "chunks to store"
+    };
+    println!("\n  Found {} {}", total_chunks, chunks_label);
     println!();
 
     Ok(ChunkingOutput {
@@ -485,10 +491,9 @@ pub async fn run_fts_phase(
 
     let elapsed = start.elapsed();
     println!(
-        "  FTS indexing complete: {} added, {} removed, {} skipped (zero tokens), {} live in {}",
+        "  Tantivy FTS indexing complete: {} added, {} removed, {} live in {}",
         stats.added,
         stats.removed,
-        stats.zero_token_skipped,
         stats.live_row_ids,
         format_duration(elapsed.as_secs_f64()),
     );
