@@ -17,8 +17,7 @@ use monodex::engine::retrieval::RetrievalMethod;
 fn set_monodex_home(tmp_dir: &Path) {
     // Clear any cached tool_home from previous tests
     monodex::paths::clear_tool_home_cache();
-    
-    
+
     // SAFETY: Tests are serialized via #[serial_test::serial(monodex_home)] attribute
     unsafe {
         std::env::set_var("MONODEX_HOME", tmp_dir);
@@ -30,13 +29,13 @@ fn remove_monodex_home() {
     unsafe {
         std::env::remove_var("MONODEX_HOME");
     }
-    
+
     // Clear the cache so the next test starts fresh
     monodex::paths::clear_tool_home_cache();
 }
 
 /// Generate a unique temp directory with a prefix to avoid path reuse collisions.
-/// 
+///
 /// On macOS, temp directory paths can be reused rapidly after deletion, which can
 /// cause race conditions where a new test sees stale data from a previous test.
 /// Using a unique prefix ensures each test gets a truly distinct path.

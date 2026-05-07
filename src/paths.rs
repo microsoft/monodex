@@ -10,11 +10,11 @@ use std::path::{Path, PathBuf};
 use std::sync::RwLock;
 
 /// Cached tool home path.
-/// 
+///
 /// Uses RwLock<Option<PathBuf>> instead of OnceLock so that integration tests
 /// can clear the cache via `clear_tool_home_cache()`. The cache is per-process
 /// and thread-safe.
-/// 
+///
 /// In production: Once resolved, it stays consistent for the process lifetime.
 /// In tests: `clear_tool_home_cache()` can reset it so each test gets a fresh value.
 static TOOL_HOME: RwLock<Option<PathBuf>> = RwLock::new(None);
@@ -34,7 +34,7 @@ pub fn tool_home() -> Result<PathBuf> {
             return Ok(cached.clone());
         }
     }
-    
+
     // Not cached, resolve and cache (write lock)
     let resolved = resolve_tool_home_inner()?;
     {
@@ -48,7 +48,7 @@ pub fn tool_home() -> Result<PathBuf> {
 }
 
 /// Clear the cached tool home.
-/// 
+///
 /// This is intended for integration tests that need to reset the cached tool home
 /// between test cases. Each test sets its own MONODEX_HOME and needs to ensure
 /// the cache doesn't return a stale value from a previous test.
@@ -82,9 +82,7 @@ fn resolve_tool_home_inner() -> Result<PathBuf> {
 
     // Fall back to <home>/.monodex
     let home = dirs::home_dir().ok_or_else(|| {
-        anyhow!(
-            "Could not determine home directory. Set MONODEX_HOME or ensure $HOME is set."
-        )
+        anyhow!("Could not determine home directory. Set MONODEX_HOME or ensure $HOME is set.")
     })?;
 
     Ok(home.join(".monodex"))
