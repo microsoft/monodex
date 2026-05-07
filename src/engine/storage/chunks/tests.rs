@@ -814,3 +814,194 @@ async fn test_vector_search_excludes_null_vectors() {
     assert_eq!(results.len(), 1, "Should only return rows with vectors");
     assert_eq!(results[0].chunk.row_id, "file1:1");
 }
+
+// =========================================================================
+// upsert_without_vectors_with_progress tests
+// =========================================================================
+
+/// Test that empty inputs produce no progress events and no errors.
+#[tokio::test]
+async fn test_upsert_without_vectors_with_progress_empty() {
+    let (_tmp_dir, storage) = create_test_storage().await;
+
+    let events = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let events_clone = events.clone();
+    let callback = move |event: StorageProgressEvent| {
+        events_clone.lock().unwrap().push(event);
+    };
+
+    storage
+        .upsert_without_vectors_with_progress(&[], &[], callback)
+        .await
+        .unwrap();
+
+    assert!(events.lock().unwrap().is_empty());
+}
+
+/// Test that the progress callback receives all three phase labels in order
+/// with monotonically non-decreasing `completed` per phase.
+#[tokio::test]
+async fn test_upsert_without_vectors_with_progress_phases() {
+    let (_tmp_dir, storage) = create_test_storage().await;
+
+    // Create test rows (more than UPSERT_BATCH_SIZE to test batching)
+    let num_rows = 2500; // > UPSERT_BATCH_SIZE (1000)
+    let rows: Vec<ChunkRow> = (0..num_rows)
+        .map(|i| test_chunk_row(&format!("file{}:1", i), &format!("file{}", i), 1))
+        .collect();
+
+    let sentinel_row_ids: Vec<String> = (0..num_rows).map(|i| format!("file{}:1", i)).collect();
+
+    let events = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let events_clone = events.clone();
+    let callback = move |event: StorageProgressEvent| {
+        events_clone.lock().unwrap().push(event);
+    };
+
+    storage
+        .upsert_without_vectors_with_progress(&rows, &sentinel_row_ids, callback)
+        .await
+        .unwrap();
+
+    let events = events.lock().unwrap();
+
+    // Verify we have events from all three phases
+    let clearing_events: Vec<_> = events
+        .iter()
+        .filter(|e| e.phase == "Clearing vectors")
+        .collect();
+    let upserting_events: Vec<_> = events
+        .iter()
+        .filter(|e| e.phase == "Upserting chunks")
+        .collect();
+    let marking_events: Vec<_> = events
+        .iter()
+        .filter(|e| e.phase == "Marking file sentinels")
+        .collect();
+
+    assert!(!clearing_events.is_empty(), "Should have clearing events");
+    assert!(!upserting_events.is_empty(), "Should have upserting events");
+    assert!(!marking_events.is_empty(), "Should have marking events");
+
+    // Verify phase order: all clearing, then all upserting, then all marking
+    let first_upsert_idx = events
+        .iter()
+        .position(|e| e.phase == "Upserting chunks")
+        .unwrap();
+    let first_marking_idx = events
+        .iter()
+        .position(|e| e.phase == "Marking file sentinels")
+        .unwrap();
+    let last_clearing_idx = events
+        .iter()
+        .rposition(|e| e.phase == "Clearing vectors")
+        .unwrap();
+
+    assert!(
+        last_clearing_idx < first_upsert_idx,
+        "Clearing should complete before upserting"
+    );
+    let last_upsert_idx = events
+        .iter()
+        .rposition(|e| e.phase == "Upserting chunks")
+        .unwrap();
+    assert!(
+        last_upsert_idx < first_marking_idx,
+        "Upserting should complete before marking"
+    );
+
+    // Verify monotonically non-decreasing `completed` within each phase
+    fn check_monotonic(events: &[&StorageProgressEvent]) {
+        let mut prev = 0;
+        for event in events {
+            assert!(
+                event.completed >= prev,
+                "Completed should be non-decreasing: got {} after {}",
+                event.completed,
+                prev
+            );
+            prev = event.completed;
+        }
+    }
+
+    check_monotonic(&clearing_events);
+    check_monotonic(&upserting_events);
+    check_monotonic(&marking_events);
+
+    // Verify final `completed == total` per phase
+    assert_eq!(
+        clearing_events.last().unwrap().completed,
+        clearing_events.last().unwrap().total,
+        "Clearing should complete all items"
+    );
+    assert_eq!(
+        upserting_events.last().unwrap().completed,
+        upserting_events.last().unwrap().total,
+        "Upserting should complete all items"
+    );
+    assert_eq!(
+        marking_events.last().unwrap().completed,
+        marking_events.last().unwrap().total,
+        "Marking should complete all items"
+    );
+
+    // Verify unit field matches documented values
+    for event in &clearing_events {
+        assert_eq!(event.unit, "chunks");
+    }
+    for event in &upserting_events {
+        assert_eq!(event.unit, "chunks");
+    }
+    for event in &marking_events {
+        assert_eq!(event.unit, "files");
+    }
+}
+
+/// Test that the method correctly handles inputs larger than UPSERT_BATCH_SIZE
+/// with multiple batches per phase.
+#[tokio::test]
+async fn test_upsert_without_vectors_with_progress_multi_batch() {
+    let (_tmp_dir, storage) = create_test_storage().await;
+
+    // Create 2500 rows, which should produce 3 batches per phase (1000 + 1000 + 500)
+    let num_rows = 2500;
+    let rows: Vec<ChunkRow> = (0..num_rows)
+        .map(|i| test_chunk_row(&format!("file{}:1", i), &format!("file{}", i), 1))
+        .collect();
+
+    let sentinel_row_ids: Vec<String> = (0..num_rows).map(|i| format!("file{}:1", i)).collect();
+
+    let events = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let events_clone = events.clone();
+    let callback = move |event: StorageProgressEvent| {
+        events_clone.lock().unwrap().push(event);
+    };
+
+    storage
+        .upsert_without_vectors_with_progress(&rows, &sentinel_row_ids, callback)
+        .await
+        .unwrap();
+
+    let events = events.lock().unwrap();
+
+    // Should have 3 batches per phase = 9 events total
+    // Phase A (clearing): 1000, 2000, 2500
+    // Phase B (upserting): 1000, 2000, 2500
+    // Phase C (marking): 1000, 2000, 2500
+    assert_eq!(
+        events.len(),
+        9,
+        "Should have 9 events (3 phases x 3 batches)"
+    );
+
+    // Verify the batch sizes are correct
+    let clearing_events: Vec<_> = events
+        .iter()
+        .filter(|e| e.phase == "Clearing vectors")
+        .collect();
+    assert_eq!(clearing_events.len(), 3, "Should have 3 clearing batches");
+    assert_eq!(clearing_events[0].completed, 1000);
+    assert_eq!(clearing_events[1].completed, 2000);
+    assert_eq!(clearing_events[2].completed, 2500);
+    assert_eq!(clearing_events[2].total, 2500);
+}

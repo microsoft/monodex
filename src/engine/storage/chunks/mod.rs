@@ -29,6 +29,22 @@ use crate::engine::storage::{ChunkRow, ScoredChunkRow};
 /// Batch size for upsert operations. Storage-layer internal detail.
 const UPSERT_BATCH_SIZE: usize = 1000;
 
+/// Progress event emitted during storage operations.
+///
+/// Used by the crawl pipeline to report progress to the user during
+/// long-running FTS-only Phase 3 operations.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StorageProgressEvent {
+    /// Phase label suitable for direct display, e.g. "Clearing vectors", "Upserting chunks", "Marking file sentinels".
+    pub phase: &'static str,
+    /// Items completed so far in this phase.
+    pub completed: usize,
+    /// Total items expected in this phase.
+    pub total: usize,
+    /// Unit label for the items, suitable for direct display, e.g. "chunks" or "files".
+    pub unit: &'static str,
+}
+
 /// Policy for handling the vector column during upsert.
 ///
 /// This is a private implementation detail of the upsert methods.
@@ -697,6 +713,131 @@ impl ChunkStorage {
         }
 
         self.upsert_chunks_inner(rows, VectorPolicy::Without).await
+    }
+
+    /// Upsert chunks without vectors with progress reporting.
+    ///
+    /// This is the combined FTS-only Phase 3 operation that:
+    /// 1. Clears any existing vectors on these rows (handles interrupted vector crawls)
+    /// 2. Upserts the chunks without vectors
+    /// 3. Marks file sentinels as complete
+    ///
+    /// All three phases run under a single commit mutex acquisition, which is
+    /// correct because FTS-only crawls hold the per-catalog writer lock and
+    /// other writers against this catalog are already serialized.
+    ///
+    /// Progress is reported via the callback after each batch in each phase.
+    ///
+    /// # Arguments
+    /// * `rows` - Chunk rows to upsert
+    /// * `sentinel_row_ids` - Row IDs of sentinel rows to mark complete (format: "{file_id}:1")
+    /// * `on_progress` - Callback invoked with progress events
+    pub async fn upsert_without_vectors_with_progress(
+        &self,
+        rows: &[ChunkRow],
+        sentinel_row_ids: &[String],
+        on_progress: impl Fn(StorageProgressEvent) + Send + Sync,
+    ) -> Result<()> {
+        let _commit_guard = acquire_commit_mutex(&self.db_path)?;
+
+        if rows.is_empty() && sentinel_row_ids.is_empty() {
+            return Ok(());
+        }
+
+        // Validate all rows before writing
+        for row in rows {
+            row.validate()?;
+        }
+
+        let row_ids: Vec<&str> = rows.iter().map(|r| r.row_id.as_str()).collect();
+        let total_rows = rows.len();
+        let total_sentinels = sentinel_row_ids.len();
+
+        // Phase A: Clear vectors for all rows
+        if !rows.is_empty() {
+            for batch_start in (0..row_ids.len()).step_by(UPSERT_BATCH_SIZE) {
+                let batch_end = std::cmp::min(batch_start + UPSERT_BATCH_SIZE, row_ids.len());
+                let batch_ids = &row_ids[batch_start..batch_end];
+
+                let predicate = in_quoted_strs("row_id", batch_ids);
+                self.table
+                    .update()
+                    .only_if(&predicate)
+                    .column("vector", "null")
+                    .execute()
+                    .await
+                    .map_err(|e| anyhow!("Failed to null vectors: {}", e))?;
+
+                on_progress(StorageProgressEvent {
+                    phase: "Clearing vectors",
+                    completed: batch_end,
+                    total: total_rows,
+                    unit: "chunks",
+                });
+            }
+        }
+
+        // Phase B: Upsert chunks without vectors
+        if !rows.is_empty() {
+            let schema = self.table.schema().await?;
+
+            for batch_start in (0..rows.len()).step_by(UPSERT_BATCH_SIZE) {
+                let batch_end = std::cmp::min(batch_start + UPSERT_BATCH_SIZE, rows.len());
+                let batch_rows = &rows[batch_start..batch_end];
+
+                // Fetch existing rows for this batch to preserve active_label_ids
+                let batch_row_ids: Vec<&str> =
+                    batch_rows.iter().map(|r| r.row_id.as_str()).collect();
+                let existing_rows = self.get_by_row_ids_inner(&batch_row_ids).await?;
+                let merged_rows = merge_active_label_ids(batch_rows, &existing_rows);
+
+                let batch =
+                    chunk_rows_to_record_batch_without_vectors(merged_rows.iter(), schema.clone())?;
+
+                let batch_schema = batch.schema();
+                let reader = RecordBatchIterator::new(std::iter::once(Ok(batch)), batch_schema);
+                let mut builder = self.table.merge_insert(&["row_id"]);
+                builder
+                    .when_matched_update_all(None)
+                    .when_not_matched_insert_all();
+                builder.execute(Box::new(reader)).await?;
+
+                on_progress(StorageProgressEvent {
+                    phase: "Upserting chunks",
+                    completed: batch_end,
+                    total: total_rows,
+                    unit: "chunks",
+                });
+            }
+        }
+
+        // Phase C: Mark file sentinels as complete
+        if !sentinel_row_ids.is_empty() {
+            let sentinel_strs: Vec<&str> = sentinel_row_ids.iter().map(|s| s.as_str()).collect();
+
+            for batch_start in (0..sentinel_strs.len()).step_by(UPSERT_BATCH_SIZE) {
+                let batch_end = std::cmp::min(batch_start + UPSERT_BATCH_SIZE, sentinel_strs.len());
+                let batch_ids = &sentinel_strs[batch_start..batch_end];
+
+                let predicate = in_quoted_strs("row_id", batch_ids);
+                self.table
+                    .update()
+                    .only_if(&predicate)
+                    .column("file_complete", "true")
+                    .execute()
+                    .await
+                    .map_err(|e| anyhow!("Failed to update file_complete: {}", e))?;
+
+                on_progress(StorageProgressEvent {
+                    phase: "Marking file sentinels",
+                    completed: batch_end,
+                    total: total_sentinels,
+                    unit: "files",
+                });
+            }
+        }
+
+        Ok(())
     }
 
     /// Internal helper for upserting chunks with configurable vector handling.
