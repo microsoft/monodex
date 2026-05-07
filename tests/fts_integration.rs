@@ -15,6 +15,10 @@ use monodex::app::config::Config;
 use monodex::engine::retrieval::RetrievalMethod;
 
 fn set_monodex_home(tmp_dir: &Path) {
+    // Clear any cached tool_home from previous tests
+    monodex::paths::clear_tool_home_cache();
+    
+    
     // SAFETY: Tests are serialized via #[serial_test::serial(monodex_home)] attribute
     unsafe {
         std::env::set_var("MONODEX_HOME", tmp_dir);
@@ -26,6 +30,24 @@ fn remove_monodex_home() {
     unsafe {
         std::env::remove_var("MONODEX_HOME");
     }
+    
+    // Clear the cache so the next test starts fresh
+    monodex::paths::clear_tool_home_cache();
+}
+
+/// Generate a unique temp directory with a prefix to avoid path reuse collisions.
+/// 
+/// On macOS, temp directory paths can be reused rapidly after deletion, which can
+/// cause race conditions where a new test sees stale data from a previous test.
+/// Using a unique prefix ensures each test gets a truly distinct path.
+fn unique_temp_dir() -> tempfile::TempDir {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let id = COUNTER.fetch_add(1, Ordering::SeqCst);
+    tempfile::Builder::new()
+        .prefix(&format!("monodex-test-{}-", id))
+        .tempdir()
+        .expect("Failed to create temp directory")
 }
 
 /// Create a minimal Git repo with test files and return the commit OID.
@@ -154,8 +176,8 @@ fn create_test_config(monodex_home: &Path, catalog_name: &str, repo_path: &Path)
 fn test_crawl_then_search() {
     let (_monodex_home, _repo_dir) = {
         // Set up temp directories
-        let monodex_home = tempfile::TempDir::new().unwrap();
-        let repo_dir = tempfile::TempDir::new().unwrap();
+        let monodex_home = unique_temp_dir();
+        let repo_dir = unique_temp_dir();
 
         set_monodex_home(monodex_home.path());
 
@@ -268,8 +290,8 @@ fn test_crawl_then_search() {
 fn test_selection_narrowing() {
     let (_monodex_home, _repo_dir) = {
         // Set up temp directories
-        let monodex_home = tempfile::TempDir::new().unwrap();
-        let repo_dir = tempfile::TempDir::new().unwrap();
+        let monodex_home = unique_temp_dir();
+        let repo_dir = unique_temp_dir();
 
         set_monodex_home(monodex_home.path());
 
@@ -372,8 +394,8 @@ fn test_selection_narrowing() {
 fn test_selection_widening() {
     let (_monodex_home, _repo_dir) = {
         // Set up temp directories
-        let monodex_home = tempfile::TempDir::new().unwrap();
-        let repo_dir = tempfile::TempDir::new().unwrap();
+        let monodex_home = unique_temp_dir();
+        let repo_dir = unique_temp_dir();
 
         set_monodex_home(monodex_home.path());
 
@@ -502,8 +524,8 @@ fn test_selection_widening() {
 fn test_first_time_crawl_fts_only() {
     let (_monodex_home, _repo_dir) = {
         // Set up temp directories
-        let monodex_home = tempfile::TempDir::new().unwrap();
-        let repo_dir = tempfile::TempDir::new().unwrap();
+        let monodex_home = unique_temp_dir();
+        let repo_dir = unique_temp_dir();
 
         set_monodex_home(monodex_home.path());
 
@@ -589,8 +611,8 @@ fn test_first_time_crawl_fts_only() {
 fn test_purge_cleanup() {
     let (_monodex_home, _repo_dir) = {
         // Set up temp directories
-        let monodex_home = tempfile::TempDir::new().unwrap();
-        let repo_dir = tempfile::TempDir::new().unwrap();
+        let monodex_home = unique_temp_dir();
+        let repo_dir = unique_temp_dir();
 
         set_monodex_home(monodex_home.path());
 
@@ -690,8 +712,8 @@ fn test_purge_cleanup() {
 fn test_schema_mismatch_error() {
     let (_monodex_home, _repo_dir) = {
         // Set up temp directories
-        let monodex_home = tempfile::TempDir::new().unwrap();
-        let repo_dir = tempfile::TempDir::new().unwrap();
+        let monodex_home = unique_temp_dir();
+        let repo_dir = unique_temp_dir();
 
         set_monodex_home(monodex_home.path());
 
@@ -752,8 +774,8 @@ fn test_schema_mismatch_error() {
 fn test_fts_query_parse_error() {
     let (_monodex_home, _repo_dir) = {
         // Set up temp directories
-        let monodex_home = tempfile::TempDir::new().unwrap();
-        let repo_dir = tempfile::TempDir::new().unwrap();
+        let monodex_home = unique_temp_dir();
+        let repo_dir = unique_temp_dir();
 
         set_monodex_home(monodex_home.path());
 
@@ -830,8 +852,8 @@ fn test_fts_query_parse_error() {
 fn test_multi_method_explicit_search() {
     let (_monodex_home, _repo_dir) = {
         // Set up temp directories
-        let monodex_home = tempfile::TempDir::new().unwrap();
-        let repo_dir = tempfile::TempDir::new().unwrap();
+        let monodex_home = unique_temp_dir();
+        let repo_dir = unique_temp_dir();
 
         set_monodex_home(monodex_home.path());
 

@@ -268,7 +268,9 @@ pub fn resolve_database_path(config: Option<&Config>) -> anyhow::Result<PathBuf>
     }
 
     // Default: <tool_home>/default-db
-    Ok(crate::paths::tool_home()?.join("default-db"))
+    let tool_home = crate::paths::tool_home()?;
+    let result = tool_home.join("default-db");
+    Ok(result)
 }
 
 // ============================================================================
