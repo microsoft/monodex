@@ -618,18 +618,13 @@ pub fn print_summary(
 
 /// Formats the retrieval selection for display in the crawl preamble.
 ///
-/// Returns a string like "(fts, vector)", "(fts only, no vector)", "(vector only, no fts)",
+/// Returns a string like "(fts, vector)", "(fts only)", "(vector only)",
 /// or "(no retrieval methods)" for empty selection.
 pub fn format_selection_for_display(selection: &BTreeSet<RetrievalMethod>) -> String {
-    let has_vector = selection.contains(&RetrievalMethod::Vector);
-    let has_fts = selection.contains(&RetrievalMethod::Fts);
-
-    match (has_fts, has_vector) {
-        (true, true) => "(fts, vector)".to_string(),
-        (true, false) => "(fts only, no vector)".to_string(),
-        (false, true) => "(vector only, no fts)".to_string(),
-        (false, false) => "(no retrieval methods)".to_string(),
-    }
+    format!(
+        "({})",
+        crate::engine::retrieval::format_selection(selection)
+    )
 }
 
 /// Prints the selection-narrowing announcement if applicable.
@@ -722,19 +717,13 @@ mod tests {
     #[test]
     fn test_format_selection_fts_only() {
         let selection = make_selection(&[RetrievalMethod::Fts]);
-        assert_eq!(
-            format_selection_for_display(&selection),
-            "(fts only, no vector)"
-        );
+        assert_eq!(format_selection_for_display(&selection), "(fts only)");
     }
 
     #[test]
     fn test_format_selection_vector_only() {
         let selection = make_selection(&[RetrievalMethod::Vector]);
-        assert_eq!(
-            format_selection_for_display(&selection),
-            "(vector only, no fts)"
-        );
+        assert_eq!(format_selection_for_display(&selection), "(vector only)");
     }
 
     #[test]

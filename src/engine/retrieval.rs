@@ -43,6 +43,26 @@ impl fmt::Display for RetrievalMethod {
     }
 }
 
+use std::collections::BTreeSet;
+
+/// Format a retrieval selection for display.
+///
+/// Returns the inner text without parentheses, e.g. "fts, vector", "fts only",
+/// "vector only", or "no retrieval methods".
+///
+/// The caller is responsible for adding parentheses if needed.
+pub fn format_selection(selection: &BTreeSet<RetrievalMethod>) -> String {
+    let has_fts = selection.contains(&RetrievalMethod::Fts);
+    let has_vector = selection.contains(&RetrievalMethod::Vector);
+
+    match (has_fts, has_vector) {
+        (true, true) => "fts, vector".to_string(),
+        (true, false) => "fts only".to_string(),
+        (false, true) => "vector only".to_string(),
+        (false, false) => "no retrieval methods".to_string(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -88,5 +108,21 @@ mod tests {
         assert_eq!(all.len(), 2);
         assert!(all.contains(&RetrievalMethod::Fts));
         assert!(all.contains(&RetrievalMethod::Vector));
+    }
+
+    #[test]
+    fn test_format_selection() {
+        let mut selection = BTreeSet::new();
+        assert_eq!(format_selection(&selection), "no retrieval methods");
+
+        selection.insert(RetrievalMethod::Fts);
+        assert_eq!(format_selection(&selection), "fts only");
+
+        selection.clear();
+        selection.insert(RetrievalMethod::Vector);
+        assert_eq!(format_selection(&selection), "vector only");
+
+        selection.insert(RetrievalMethod::Fts);
+        assert_eq!(format_selection(&selection), "fts, vector");
     }
 }

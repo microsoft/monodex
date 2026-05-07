@@ -136,11 +136,12 @@ pub fn run_search(
         // Step 7: Dispatch to single method
         let method = active_subset.iter().next().unwrap();
 
-        // Format selection display for Label: line
-        let selection_display = format_selection_display(&persistent_selection);
-
-        println!("Catalog: {}", catalog_name);
-        println!("Label: {} ({})", label, selection_display);
+        // Format the active subset for the Searching: line
+        let searching_display = format_active_subset(&active_subset);
+        println!(
+            "Catalog: {} / Label: {} / Searching: {}",
+            catalog_name, label, searching_display
+        );
         println!();
 
         match method {
@@ -156,20 +157,23 @@ pub fn run_search(
     })
 }
 
-/// Format the selection display for the Label: line.
-fn format_selection_display(selection: &BTreeSet<RetrievalMethod>) -> String {
-    if selection.is_empty() {
-        "no retrieval methods".to_string()
-    } else if selection.len() == 1 {
-        let method = selection.iter().next().unwrap();
+/// Format the active subset for the Searching: line.
+///
+/// In PR1, the active subset always has exactly one method (multi-method is stub-error).
+/// Returns "fts only" or "vector only".
+fn format_active_subset(active_subset: &BTreeSet<RetrievalMethod>) -> String {
+    // In PR1, we only reach this function with exactly one method in active_subset
+    // (multi-method triggers stub error before dispatch)
+    if active_subset.len() == 1 {
+        let method = active_subset.iter().next().unwrap();
         match method {
-            RetrievalMethod::Fts => "fts only, no vector".to_string(),
-            RetrievalMethod::Vector => "vector only, no fts".to_string(),
+            RetrievalMethod::Fts => "fts only".to_string(),
+            RetrievalMethod::Vector => "vector only".to_string(),
         }
     } else {
-        // Two methods, alphabetical order
-        let methods: Vec<String> = selection.iter().map(|m| m.to_string()).collect();
-        methods.join(", ")
+        // Multi-method case - will be used by PR2 for RRF
+        // Format as "fts + vector (RRF)" when that lands
+        crate::engine::retrieval::format_selection(active_subset)
     }
 }
 
@@ -415,18 +419,20 @@ mod tests {
     }
 
     #[test]
-    fn test_format_selection_display() {
+    fn test_format_active_subset() {
         let mut selection = BTreeSet::new();
-        assert_eq!(format_selection_display(&selection), "no retrieval methods");
+        // Empty case (shouldn't happen in practice but test the helper)
+        assert_eq!(format_active_subset(&selection), "no retrieval methods");
 
         selection.insert(RetrievalMethod::Fts);
-        assert_eq!(format_selection_display(&selection), "fts only, no vector");
+        assert_eq!(format_active_subset(&selection), "fts only");
 
         selection.clear();
         selection.insert(RetrievalMethod::Vector);
-        assert_eq!(format_selection_display(&selection), "vector only, no fts");
+        assert_eq!(format_active_subset(&selection), "vector only");
 
         selection.insert(RetrievalMethod::Fts);
-        assert_eq!(format_selection_display(&selection), "fts, vector");
+        // Multi-method case (PR2 will use RRF format)
+        assert_eq!(format_active_subset(&selection), "fts, vector");
     }
 }
