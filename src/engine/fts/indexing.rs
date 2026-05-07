@@ -158,42 +158,36 @@ pub async fn index_chunks_for_fts(
 
 /// Get the currently indexed row_ids from the FTS index.
 ///
-/// Uses the manifest fast path when available, falling back to scanning
-/// Tantivy segments when the manifest is missing or invalid.
+/// Always reconciles from Tantivy to ensure correctness. The manifest is used
+/// only as an optimization when it exactly matches Tantivy's live row_id set.
 ///
 /// ## Crash-window handling
 ///
 /// A process crash between Tantivy commit and manifest write can leave the manifest
-/// stale (having fewer row_ids than Tantivy). We detect this by checking if the
-/// manifest count differs significantly from Tantivy's live doc count. If so, we
-/// discard the manifest and reconcile from Tantivy.
-///
-/// Note: This detection is not perfect - a manifest with the same cardinality but
-/// different row_ids would pass. This is an acceptable limitation for the MVP.
+/// stale (having fewer or different row_ids than Tantivy). We detect this by
+/// deriving Tantivy's live row_id set and comparing it as a set against the manifest.
+/// If they differ for any reason, we use the Tantivy-derived set.
 fn get_currently_indexed_row_ids(fts_index: &FtsIndex) -> Result<BTreeSet<String>> {
     let reader = fts_index.reader()?;
     let searcher = reader.searcher();
-    let num_docs = searcher.num_docs() as usize;
+
+    // Always derive Tantivy's live row_id set
+    let tantivy_row_ids = reconcile_from_index(&searcher, fts_index.fields.row_id)?;
 
     match fts_index.read_manifest() {
         ManifestRead::Present(manifest) if !manifest.row_ids.is_empty() => {
-            // Manifest fast path: trust the stored row_ids with sanity check
-            let manifest_count = manifest.row_ids.len();
-
-            // Two-sided tolerance check: manifest count should be close to num_docs
-            // tolerance = max(100, 5% of num_docs) to avoid false positives on small indexes
-            let tolerance = std::cmp::max(100, num_docs / 20);
-
-            if manifest_count.abs_diff(num_docs) > tolerance {
-                // Sanity check failed: manifest disagrees with Tantivy, reconcile from index
-                return reconcile_from_index(&searcher, fts_index.fields.row_id);
+            let manifest_row_ids = manifest.row_ids_set();
+            if manifest_row_ids == tantivy_row_ids {
+                // Manifest matches Tantivy exactly; use it
+                Ok(manifest_row_ids)
+            } else {
+                // Manifest disagrees with Tantivy; use Tantivy-derived set
+                Ok(tantivy_row_ids)
             }
-
-            Ok(manifest.row_ids_set())
         }
         _ => {
-            // Missing, empty, IdMismatch, or Unreadable: reconcile from Tantivy
-            reconcile_from_index(&searcher, fts_index.fields.row_id)
+            // Missing, empty, IdMismatch, or Unreadable: use Tantivy-derived set
+            Ok(tantivy_row_ids)
         }
     }
 }

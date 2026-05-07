@@ -491,15 +491,15 @@ fn test_open_existing_returns_none_for_missing() -> Result<()> {
 // Additional test: Manifest sanity check fallback
 // =============================================================================
 
-/// This test verifies that when the manifest disagrees with Tantivy's num_docs
-/// by more than the tolerance threshold, the system reconciles from Tantivy
-/// rather than trusting the bogus manifest.
+/// This test verifies that when the manifest disagrees with Tantivy's actual
+/// row_id set, the system reconciles from Tantivy rather than trusting the
+/// bogus manifest.
 ///
 /// The crash-window scenario: a process crashes between Tantivy commit and
 /// manifest write, leaving Tantivy with more docs than the stale manifest knows.
-/// The tolerance check catches this and forces a full scan.
+/// The set-comparison catches this and uses the Tantivy-derived set.
 #[tokio::test]
-async fn test_manifest_sanity_check_on_scan() -> Result<()> {
+async fn test_manifest_reconciles_when_set_differs() -> Result<()> {
     let temp_dir = TempDir::new()?;
     let db_path = temp_dir.path();
     let label_id = make_label_id("test-catalog", "main");
@@ -508,8 +508,7 @@ async fn test_manifest_sanity_check_on_scan() -> Result<()> {
     let db = create_test_db_with_fts(db_path).await;
     let chunk_storage = db.chunks_storage().await?;
 
-    // Create 1000 chunks - enough to exceed the absolute-floor threshold of 100
-    // This ensures the 5% tolerance applies, not the floor.
+    // Create 1000 chunks
     let mut chunks: Vec<ChunkRow> = Vec::new();
     for i in 0..1000 {
         let row_id = format!("aaaa{:04x}cccc1111:1", i);
@@ -541,7 +540,7 @@ async fn test_manifest_sanity_check_on_scan() -> Result<()> {
     assert_eq!(stats.live_row_ids, 1000, "Expected 1000 live row_ids");
 
     // Now write a BOGUS manifest with only 100 row_ids
-    // This is well outside the 5% tolerance (abs(100 - 1000) = 900 > max(100, 50) = 100)
+    // The set comparison will detect this mismatch and reconcile from Tantivy.
     let mut bogus_row_ids = BTreeSet::new();
     for i in 0..100 {
         bogus_row_ids.insert(format!("fake-row-{}", i));
@@ -567,8 +566,7 @@ async fn test_manifest_sanity_check_on_scan() -> Result<()> {
     }
 
     // Now run FTS indexing again with no changes
-    // The sanity check should fire because manifest count (100) differs from
-    // Tantivy num_docs (1000) by more than tolerance
+    // The set comparison detects the manifest disagrees with Tantivy and reconciles
     warnings.clear();
     let stats = index_chunks_for_fts(
         db_path,
@@ -598,6 +596,123 @@ async fn test_manifest_sanity_check_on_scan() -> Result<()> {
                 "Manifest should have 1000 row_ids after reconciliation, not {}",
                 m.row_ids.len()
             );
+        }
+        other => panic!("Expected Present, got {:?}", other),
+    }
+
+    Ok(())
+}
+
+/// Test that manifest reconciliation catches same-cardinality mismatches.
+///
+/// This tests the case the old tolerance-based check could not catch:
+/// manifest has N row_ids, Tantivy has N docs, but they're different row_ids.
+/// The set comparison detects this and reconciles from Tantivy.
+#[tokio::test]
+async fn test_manifest_reconciles_same_cardinality_different_rows() -> Result<()> {
+    let temp_dir = TempDir::new()?;
+    let db_path = temp_dir.path();
+    let label_id = make_label_id("test-catalog", "main");
+
+    // Create database and get chunk storage
+    let db = create_test_db_with_fts(db_path).await;
+    let chunk_storage = db.chunks_storage().await?;
+
+    // Create 10 chunks for LanceDB
+    let mut chunks: Vec<ChunkRow> = Vec::new();
+    for i in 0..10 {
+        let row_id = format!("aaaa{:04x}cccc1111:1", i);
+        let file_id = format!("aaaa{:04x}cccc1111", i);
+        chunks.push(test_chunk_row(
+            &row_id,
+            &file_id,
+            1,
+            label_id.as_ref(),
+            &format!("document number {} with some content", i),
+        ));
+    }
+
+    // Insert all chunks into storage
+    insert_test_chunks(&chunk_storage, &chunks).await?;
+
+    // First, do an initial FTS indexing to build a correct index with 10 docs
+    let mut warnings: Vec<CrawlWarning> = Vec::new();
+    let stats = index_chunks_for_fts(
+        db_path,
+        &label_id,
+        &chunk_storage,
+        &mut |w| warnings.push(w),
+        true, // is_commit_mode
+    )
+    .await?;
+
+    assert_eq!(stats.added, 10, "Expected 10 chunks added initially");
+    assert_eq!(stats.live_row_ids, 10, "Expected 10 live row_ids initially");
+
+    // Now write a bogus manifest with 10 DIFFERENT row_ids
+    // Same cardinality (10), but completely different row_id values
+    let mut bogus_row_ids = BTreeSet::new();
+    for i in 0..10 {
+        bogus_row_ids.insert(format!("fake-row-{}", i));
+    }
+    let bogus_manifest = FtsManifest {
+        fts_schema_id: FTS_SCHEMA_ID.to_string(),
+        fts_tokenizer_id: FTS_TOKENIZER_ID.to_string(),
+        row_ids: bogus_row_ids.into_iter().collect(),
+    };
+    let fts_index = FtsIndex::open_existing(db_path, &label_id)?.expect("index exists");
+    fts_index.write_manifest(&bogus_manifest)?;
+
+    // Verify the bogus manifest was written with 10 row_ids
+    match fts_index.read_manifest() {
+        ManifestRead::Present(m) => {
+            assert_eq!(m.row_ids.len(), 10, "Bogus manifest should have 10 row_ids");
+        }
+        other => panic!("Expected Present, got {:?}", other),
+    }
+
+    // Now run FTS indexing again with no changes to LanceDB chunks
+    // The set comparison should detect that the manifest's row_ids don't match
+    // Tantivy's actual row_ids, even though counts are equal.
+    warnings.clear();
+    let stats = index_chunks_for_fts(
+        db_path,
+        &label_id,
+        &chunk_storage,
+        &mut |w| warnings.push(w),
+        true, // is_commit_mode
+    )
+    .await?;
+
+    // Since LanceDB still has the same 10 chunks, and Tantivy has 10 docs,
+    // but manifest says 10 different row_ids, reconciliation should:
+    // - discover the 10 actual row_ids from Tantivy
+    // - compute diff: no additions (all 10 are already in Tantivy), no removals
+    // - write manifest with the correct 10 row_ids
+    assert_eq!(stats.added, 0, "Expected 0 chunks added (nothing new)");
+    assert_eq!(stats.removed, 0, "Expected 0 chunks removed");
+    assert_eq!(
+        stats.live_row_ids, 10,
+        "Expected 10 live row_ids after reconciliation"
+    );
+
+    // Verify the manifest now has the CORRECT 10 row_ids (the ones from Tantivy)
+    match fts_index.read_manifest() {
+        ManifestRead::Present(m) => {
+            assert_eq!(
+                m.row_ids.len(),
+                10,
+                "Manifest should have 10 row_ids after reconciliation"
+            );
+            // Verify the row_ids are the correct ones (from our original chunks)
+            for i in 0..10 {
+                let expected_row_id = format!("aaaa{:04x}cccc1111:1", i);
+                assert!(
+                    m.row_ids.contains(&expected_row_id),
+                    "Manifest should contain row_id {}",
+                    expected_row_id
+                );
+            }
         }
         other => panic!("Expected Present, got {:?}", other),
     }
