@@ -256,7 +256,7 @@ fn test_search_fts_only_selection() {
     let rt = tokio::runtime::Runtime::new().unwrap();
     rt.block_on(async {
         chunk_storage
-            .upsert_with_vectors(&[chunk.clone()], &[vec![0.0f32; 768]])
+            .upsert_with_vectors(std::slice::from_ref(&chunk), &[vec![0.0f32; 768]])
             .await
             .unwrap();
 
@@ -513,7 +513,7 @@ fn test_search_incomplete_method_warning() {
     let rt = tokio::runtime::Runtime::new().unwrap();
     rt.block_on(async {
         chunk_storage
-            .upsert_with_vectors(&[chunk.clone()], &[vec![0.0f32; 768]])
+            .upsert_with_vectors(std::slice::from_ref(&chunk), &[vec![0.0f32; 768]])
             .await
             .unwrap();
 

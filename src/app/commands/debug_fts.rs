@@ -7,7 +7,10 @@
 
 use anyhow::{Result, anyhow};
 
-use crate::app::{Config, format_source_pointer, resolve_database_path, resolve_label_context};
+use crate::app::{
+    ChunkSelector, Config, format_source_pointer, parse_chunk_selector, resolve_database_path,
+    resolve_label_context,
+};
 use crate::engine::fts::index::FtsIndex;
 use crate::engine::fts::tokenizer::tokenize_text;
 use crate::engine::storage::Database;
@@ -32,7 +35,7 @@ pub fn run_debug_fts(
     query: Option<&str>,
     _debug: bool,
 ) -> Result<()> {
-    // Parse the chunk identifier
+    // Parse the chunk identifier - must be single-ordinal form
     let (file_id, ordinal) = parse_chunk_id(id)?;
 
     // Resolve label context
@@ -181,52 +184,23 @@ fn print_tokens_wrapped(tokens: &[String], max_tokens: usize) {
 
 /// Parse a chunk identifier in file_id:ordinal form.
 ///
-/// Rejects ranges and bare-file forms (the view --id extensions).
+/// Uses the shared `parse_chunk_selector` and rejects any form that is not
+/// a single ordinal (i.e., rejects ranges, :N-end, and bare file_id).
 fn parse_chunk_id(s: &str) -> Result<(String, usize)> {
-    let s = s.trim();
+    let (file_id, selector) = parse_chunk_selector(s)?;
 
-    // Must contain a colon
-    let colon_pos = s.find(':').ok_or_else(|| {
-        anyhow!("--id must be in <file_id>:<ordinal> form (e.g. 700a4ba232fe9ddc:3)")
-    })?;
-
-    let file_id = s[..colon_pos].to_string();
-    let selector = &s[colon_pos + 1..];
-
-    // Validate file_id is 16 hex chars
-    if file_id.len() != 16 || !file_id.chars().all(|c| c.is_ascii_hexdigit()) {
-        return Err(anyhow!(
-            "Invalid file ID '{}'. Expected 16 hex characters.",
-            file_id
-        ));
-    }
-
-    // Reject ranges and bare-file forms
-    if selector.contains('-') {
-        return Err(anyhow!(
+    match selector {
+        ChunkSelector::Single(ordinal) => Ok((file_id, ordinal)),
+        ChunkSelector::Range(..) => Err(anyhow!(
             "Ranges are not supported. Use <file_id>:<ordinal> form (e.g. 700a4ba232fe9ddc:3)."
-        ));
-    }
-
-    if selector.is_empty() {
-        return Err(anyhow!(
+        )),
+        ChunkSelector::ToEnd(..) => Err(anyhow!(
+            "Range-to-end is not supported. Use <file_id>:<ordinal> form (e.g. 700a4ba232fe9ddc:3)."
+        )),
+        ChunkSelector::All => Err(anyhow!(
             "Missing ordinal. Use <file_id>:<ordinal> form (e.g. 700a4ba232fe9ddc:3)."
-        ));
+        )),
     }
-
-    // Parse ordinal (must be a positive integer)
-    let ordinal: usize = selector.parse().map_err(|_| {
-        anyhow!(
-            "Invalid chunk ordinal '{}'. Expected a positive integer.",
-            selector
-        )
-    })?;
-
-    if ordinal < 1 {
-        return Err(anyhow!("Chunk ordinals are 1-indexed, got {}.", ordinal));
-    }
-
-    Ok((file_id, ordinal))
 }
 
 /// Explain query ranking for a chunk.
@@ -315,7 +289,7 @@ mod tests {
     fn test_parse_chunk_id_rejects_bare_file() {
         let result = parse_chunk_id("700a4ba232fe9ddc");
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("must be in"));
+        assert!(result.unwrap_err().to_string().contains("Missing ordinal"));
     }
 
     #[test]
