@@ -199,7 +199,7 @@ pub fn run_search<W: Write>(
                 search::render(writer, &model)?;
 
                 // Format error message
-                let error_msg = format_decision_error(&err, &label_metadata, &label);
+                let error_msg = format_decision_error(&err, &label_metadata, &label, debug);
                 return Err(anyhow!("{}", error_msg));
             }
             Decision::SingleMethod { method, .. } => {
@@ -245,6 +245,7 @@ fn format_decision_error(
     err: &crate::engine::search_decision::DecisionError,
     metadata: &crate::engine::storage::LabelMetadataRow,
     label: &str,
+    debug: bool,
 ) -> String {
     use crate::engine::search_decision::DecisionError;
     let source_pointer = format_source_pointer(metadata);
@@ -255,12 +256,22 @@ fn format_decision_error(
         }
         DecisionError::AllInSelectionIncomplete { incomplete_methods } => {
             let methods_str: Vec<String> = incomplete_methods.iter().map(|m| format!("{}", m)).collect();
-            format!(
-                "All retrieval methods in this label's selection are incomplete ({}_complete = false).\nRe-run `monodex crawl --label {} {}` to complete indexing.",
-                methods_str.join("_complete = false, ") + "_complete = false",
+            let base_msg = format!(
+                "All retrieval methods in this label's selection ({}) are incomplete.\nRe-run `monodex crawl --label {} {}` to complete indexing.",
+                methods_str.join(", "),
                 label,
                 source_pointer
-            )
+            );
+            if debug {
+                // Append schema details in debug mode
+                let debug_details: Vec<String> = incomplete_methods
+                    .iter()
+                    .map(|m| format!("{}_complete = false", m))
+                    .collect();
+                format!("{} ({})", base_msg, debug_details.join(", "))
+            } else {
+                base_msg
+            }
         }
         DecisionError::SourcesDisagree { vector_source, fts_source } => {
             format!(
@@ -635,6 +646,142 @@ mod tests {
             err.contains("No context set"),
             "Error should mention missing context: {}",
             err
+        );
+    }
+
+    // =========================================================================
+    // format_decision_error tests
+    // =========================================================================
+
+    fn make_test_metadata() -> crate::engine::storage::LabelMetadataRow {
+        crate::engine::storage::LabelMetadataRow {
+            label_id: "test-catalog:main".to_string(),
+            catalog: "test-catalog".to_string(),
+            label: "main".to_string(),
+            source_kind: "git-commit".to_string(),
+            vector_source: Some("abc123".to_string()),
+            vector_complete: true,
+            fts_source: Some("abc123".to_string()),
+            fts_complete: true,
+            updated_at_unix_secs: 0,
+        }
+    }
+
+    #[test]
+    fn test_format_decision_error_empty_selection() {
+        let metadata = make_test_metadata();
+        let err = crate::engine::search_decision::DecisionError::EmptySelection;
+        let result = format_decision_error(&err, &metadata, "main", false);
+        assert_eq!(
+            result,
+            "This label has no retrieval methods in its selection. Re-run `monodex crawl` to populate it."
+        );
+    }
+
+    #[test]
+    fn test_format_decision_error_all_in_selection_incomplete_default() {
+        use crate::engine::retrieval::RetrievalMethod;
+        use std::collections::BTreeSet;
+
+        let metadata = make_test_metadata();
+        let mut incomplete_methods: BTreeSet<RetrievalMethod> = BTreeSet::new();
+        incomplete_methods.insert(RetrievalMethod::Fts);
+        incomplete_methods.insert(RetrievalMethod::Vector);
+
+        let err = crate::engine::search_decision::DecisionError::AllInSelectionIncomplete {
+            incomplete_methods,
+        };
+        let result = format_decision_error(&err, &metadata, "main", false);
+
+        // Default form should NOT contain schema details
+        assert!(result.contains(
+            "All retrieval methods in this label's selection (fts, vector) are incomplete."
+        ));
+        assert!(
+            result.contains(
+                "Re-run `monodex crawl --label main --commit abc123` to complete indexing."
+            )
+        );
+        assert!(!result.contains("_complete = false"));
+    }
+
+    #[test]
+    fn test_format_decision_error_all_in_selection_incomplete_debug() {
+        use crate::engine::retrieval::RetrievalMethod;
+        use std::collections::BTreeSet;
+
+        let metadata = make_test_metadata();
+        let mut incomplete_methods: BTreeSet<RetrievalMethod> = BTreeSet::new();
+        incomplete_methods.insert(RetrievalMethod::Fts);
+        incomplete_methods.insert(RetrievalMethod::Vector);
+
+        let err = crate::engine::search_decision::DecisionError::AllInSelectionIncomplete {
+            incomplete_methods,
+        };
+        let result = format_decision_error(&err, &metadata, "main", true);
+
+        // Debug form SHOULD contain schema details
+        assert!(result.contains(
+            "All retrieval methods in this label's selection (fts, vector) are incomplete."
+        ));
+        assert!(
+            result.contains(
+                "Re-run `monodex crawl --label main --commit abc123` to complete indexing."
+            )
+        );
+        assert!(result.contains("(fts_complete = false, vector_complete = false)"));
+    }
+
+    #[test]
+    fn test_format_decision_error_sources_disagree() {
+        let metadata = make_test_metadata();
+        let err = crate::engine::search_decision::DecisionError::SourcesDisagree {
+            vector_source: "commit-a".to_string(),
+            fts_source: "commit-b".to_string(),
+        };
+        let result = format_decision_error(&err, &metadata, "main", false);
+
+        assert!(result.contains("vector indexed against: commit-a"));
+        assert!(result.contains("fts indexed against: commit-b"));
+        assert!(result.contains(
+            "Re-run `monodex crawl --label main --commit abc123` to bring them back in sync."
+        ));
+    }
+
+    #[test]
+    fn test_format_decision_error_method_not_in_selection() {
+        use crate::engine::retrieval::RetrievalMethod;
+
+        let metadata = make_test_metadata();
+        let err = crate::engine::search_decision::DecisionError::MethodNotInSelection {
+            method: RetrievalMethod::Fts,
+        };
+        let result = format_decision_error(&err, &metadata, "main", false);
+
+        assert!(result.contains("Method fts is not in this label's retrieval selection."));
+        assert!(result.contains(
+            "Re-run `monodex crawl --label main --commit abc123 --retrieval fts` to add it."
+        ));
+    }
+
+    #[test]
+    fn test_format_decision_error_methods_not_in_selection() {
+        use crate::engine::retrieval::RetrievalMethod;
+        use std::collections::BTreeSet;
+
+        let metadata = make_test_metadata();
+        let mut methods: BTreeSet<RetrievalMethod> = BTreeSet::new();
+        methods.insert(RetrievalMethod::Fts);
+        methods.insert(RetrievalMethod::Vector);
+
+        let err = crate::engine::search_decision::DecisionError::MethodsNotInSelection { methods };
+        let result = format_decision_error(&err, &metadata, "main", false);
+
+        assert!(
+            result.contains("Methods fts, vector are not in this label's retrieval selection.")
+        );
+        assert!(
+            result.contains("Re-run `monodex crawl --label main --commit abc123` to add them.")
         );
     }
 }

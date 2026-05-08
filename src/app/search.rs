@@ -40,6 +40,7 @@ pub enum SearchWarning {
     /// A method in the persistent selection has not completed indexing.
     IncompleteMethod {
         method: RetrievalMethod,
+        label: String,
         source_pointer: String,
     },
     /// FTS state is missing on disk, no fallback available (FTS-only path).
@@ -286,17 +287,18 @@ fn render_warning<W: Write>(writer: &mut W, warning: &SearchWarning) -> io::Resu
     match warning {
         SearchWarning::IncompleteMethod {
             method,
+            label,
             source_pointer,
         } => {
             writeln!(
                 writer,
-                "⚠️  {} state for this label is incomplete; results may be missing entries indexed since the last successful crawl.",
-                method
+                "⚠️  {} state for label {} is incomplete; results may be missing entries indexed since the last successful crawl.",
+                method, label
             )?;
             writeln!(
                 writer,
-                "   To complete: monodex crawl --label <label> {} --retrieval {}",
-                source_pointer, method
+                "   To complete: monodex crawl --label {} {} --retrieval {}",
+                label, source_pointer, method
             )?;
         }
         SearchWarning::FtsNoIndexNoFallback {
@@ -374,6 +376,7 @@ pub fn translate_decision_warnings(
         .map(|w| match w {
             DecisionWarning::IncompleteMethod { method } => SearchWarning::IncompleteMethod {
                 method,
+                label: metadata.label.clone(),
                 source_pointer: source_pointer.clone(),
             },
         })
@@ -839,6 +842,7 @@ mod tests {
     fn test_render_warning_incomplete_method() {
         let warning = SearchWarning::IncompleteMethod {
             method: RetrievalMethod::Fts,
+            label: "main".to_string(),
             source_pointer: "--commit abc123".to_string(),
         };
 
@@ -860,8 +864,12 @@ mod tests {
         render(&mut output, &model).unwrap();
         let output = String::from_utf8(output).unwrap();
 
-        assert!(output.contains("⚠️  fts state for this label is incomplete"));
-        assert!(output.contains("--commit abc123"));
+        // Assert the exact pinned template lines
+        let lines: Vec<&str> = output.lines().collect();
+        assert!(lines.contains(&"⚠️  fts state for label main is incomplete; results may be missing entries indexed since the last successful crawl."));
+        assert!(lines.contains(
+            &"   To complete: monodex crawl --label main --commit abc123 --retrieval fts"
+        ));
     }
 
     #[test]
@@ -957,6 +965,7 @@ mod tests {
         let warnings = vec![
             SearchWarning::IncompleteMethod {
                 method: RetrievalMethod::Fts,
+                label: "main".to_string(),
                 source_pointer: "--commit abc".to_string(),
             },
             SearchWarning::FtsNoIndexDegrade {
@@ -1082,9 +1091,11 @@ mod tests {
         match &search_warnings[0] {
             SearchWarning::IncompleteMethod {
                 method,
+                label,
                 source_pointer,
             } => {
                 assert_eq!(*method, RetrievalMethod::Fts);
+                assert_eq!(label, "main");
                 assert_eq!(source_pointer, "--commit abc123");
             }
             _ => panic!("Expected IncompleteMethod warning"),
