@@ -5,12 +5,17 @@
 use anyhow::Result;
 use std::path::PathBuf;
 
+use crate::app::format_count;
 use crate::engine::partitioner::{ChunkQualityReport, PartitionConfig, partition_typescript};
 
 pub fn run_audit_chunks(count: usize, dir: String) -> Result<()> {
     use rand::seq::IndexedRandom;
 
-    println!("📊 Sampling {} TypeScript files from: {}", count, dir);
+    println!(
+        "📊 Sampling {} TypeScript files from: {}",
+        format_count(count as u64),
+        dir
+    );
     println!();
 
     // Collect all TypeScript files
@@ -28,7 +33,10 @@ pub fn run_audit_chunks(count: usize, dir: String) -> Result<()> {
         .map(|e| e.path().to_owned())
         .collect();
 
-    println!("Found {} TypeScript files", ts_files.len());
+    println!(
+        "Found {} TypeScript files",
+        format_count(ts_files.len() as u64)
+    );
 
     if ts_files.is_empty() {
         return Err(anyhow::anyhow!("No TypeScript files found"));

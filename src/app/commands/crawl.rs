@@ -18,7 +18,7 @@ use crate::app::crawl::phases::{
 };
 use crate::app::crawl::types::{CrawlSourceMetadata, PhaseResults};
 use crate::app::crawl::warning::create_warning_sink;
-use crate::app::util::stderr_lock_progress;
+use crate::app::util::{format_count, stderr_lock_progress};
 use crate::app::{
     Config, load_warning_state, resolve_database_path, run_embed_upload_pipeline,
     run_upsert_without_vectors, validate_config_path,
@@ -108,7 +108,7 @@ pub fn run_crawl_label(
     if !prior_warning_files.is_empty() {
         println!(
             "Found {} files with prior chunking warnings",
-            prior_warning_files.len()
+            format_count(prior_warning_files.len() as u64)
         );
     }
     println!();
@@ -117,6 +117,7 @@ pub fn run_crawl_label(
     println!("📦 Resolving commit...");
     let commit_oid = resolve_commit_oid(&repo_path, commit)?;
     println!("Resolved {} to {}", commit, &commit_oid[..12]);
+    println!();
 
     // Construct the blob source and metadata
     let blob_source = CommitBlobSource::new(repo_path.clone(), commit_oid.clone());
@@ -198,7 +199,7 @@ pub fn run_crawl_working_dir(
     if !prior_warning_files.is_empty() {
         println!(
             "Found {} files with prior chunking warnings",
-            prior_warning_files.len()
+            format_count(prior_warning_files.len() as u64)
         );
     }
     println!();
@@ -319,6 +320,7 @@ async fn run_crawl_async(
         label_id,
         repo_path,
         classify_output.new_count,
+        vector_in_selection,
         &warning_counter,
         &mut warning_sink,
     )?;
@@ -410,15 +412,7 @@ async fn run_crawl_async(
 
     // Phase 5: FTS indexing (conditional on selection and prior success)
     if fts_in_selection && phase_results.label_reassignment_succeeded {
-        match run_fts_phase(
-            db_path,
-            label_id,
-            &chunk_storage,
-            &mut warning_sink,
-            is_commit_mode,
-        )
-        .await
-        {
+        match run_fts_phase(db_path, label_id, &chunk_storage, is_commit_mode, debug).await {
             Ok(()) => {
                 phase_results.fts_succeeded = Some(true);
             }

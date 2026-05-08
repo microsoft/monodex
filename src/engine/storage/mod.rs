@@ -16,6 +16,7 @@ mod rows;
 
 pub use chunks::ChunkStorage;
 pub use chunks::SentinelStatus;
+pub use chunks::StorageProgressEvent;
 pub use database::{Database, META_FILE, MetaFile, err_schema_mismatch};
 pub use labels::LabelStorage;
 pub use labels::read_selection;

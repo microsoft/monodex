@@ -105,10 +105,11 @@ One file per CLI subcommand handler. Most are thin: parse args, call into the en
 
 - `audit_chunks.rs`: `audit-chunks`: sample TypeScript files from a directory and report aggregate chunk-quality scores. AST-only mode.
 - `crawl.rs`: `crawl`: enumerate files (commit tree or working dir), drive the embed/upload pipeline, run label reassignment after success, persist warnings.
+- `debug_fts.rs`: `debug-fts`: print tokens for a chunk and optionally explain query ranking. Diagnostic for FTS tokenization issues.
 - `dump_chunks.rs`: `dump-chunks`: visualize partitioner output for a single file. Supports debug, visualize, and with-fallback modes.
-- `init_db.rs`: `init-db`: create a new database directory, write the LanceDB tables and `monodex-meta.json`. Idempotent.
+- `init_db/`: `init-db`: create a new database directory, write the LanceDB tables and `monodex-meta.json`. Idempotent.
 - `purge.rs`: `purge`: delete all chunks for a catalog or for the entire database. Operates at catalog level only. There is no per-label purge.
-- `search.rs`: `search`: embed a query string and run a label-scoped vector search. Output uses `>`-prefixed lines and reports distance, not score.
+- `search.rs`: `search`: dispatch a query to the label's in-selection retrieval methods (vector, FTS), format results. Output uses `>`-prefixed lines.
 - `use_cmd.rs`: `use`: set or display default catalog/label context. Named `use_cmd` because `use` is a Rust keyword.
 - `view.rs`: `view`: retrieve chunks by `file_id` with selector syntax (`:N`, `:N-M`, `:N-end`, or absent for the whole file). Reconstructs files from chunks.
 
@@ -116,8 +117,10 @@ One file per CLI subcommand handler. Most are thin: parse args, call into the en
 
 Crawl-pipeline orchestration shared between command handlers.
 
+- `phases.rs`: Per-phase functions corresponding to the named steps of the crawl pipeline (label upsert, file classification, chunk-new-files, label cleanup, FTS phase, finalization, summary). The handlers in `commands/crawl.rs` call into these in order.
 - `pipeline.rs`: Coordinate parallel embedding and LanceDB writes via crossbeam channels and rayon. Track per-chunk failures, format ETA and progress output, drive memory-warning checks.
 - `types.rs`: Crawl source kinds and the `CrawlFailures` tracker. Embedding failures are tracked per-chunk; structural errors (disk full, dataset corruption) abort immediately.
+- `warning.rs`: Render in-flight crawl warnings to stdout/stderr. Distinct from `engine/warning.rs`, which defines the warning types.
 
 ### src/engine/
 
@@ -130,9 +133,24 @@ Reusable indexing engine. Does not depend on `src/app/`.
 - `markdown_partitioner.rs`: Custom markdown parser that splits at headings, fenced code blocks, block quotes, and paragraphs. Generates breadcrumbs from heading hierarchy.
 - `package_lookup.rs`: Filesystem-only fallback that walks up to find the nearest `package.json` and extracts its `name`. Used only by `dump-chunks`; the main crawl path resolves packages from the package index.
 - `parallel_embedder.rs`: Pool of ONNX sessions for parallel embedding generation. Each session uses limited intra-op threads; pool size and threads are auto-tuned from RAM and core count via `system_info`.
+- `retrieval.rs`: `RetrievalMethod` enum (vector, FTS) and parsing. The CLI's `--retrieval` flag and the `label_metadata` table's per-method columns both reference this type.
 - `schema.rs`: Arrow schema definitions for the `chunks` and `label_metadata` LanceDB tables. Holds `MONODEX_SCHEMA_VERSION`, which must be bumped on any change to column shape; see [monodex_files.md](./monodex_files.md) for the rationale.
 - `system_info.rs`: Detect total RAM, cgroup limits, CPU cores. Implements the `"auto"` heuristic for embedding-model `modelInstances` and `threadsPerInstance`. Cgroup-aware so containerized installs warn correctly.
 - `util.rs`: Hash utilities: `compute_file_id` (xxhash of embedder/chunker/catalog/blob/path), `compute_row_id`, `compute_hash`. Holds the `EMBEDDER_ID` and `CHUNKER_ID` constants.
+- `warning.rs`: `CrawlWarning` enum and the warning-sink abstraction. Distinct from the on-disk `<database-dir>/warnings-<catalog>.json` file (chunker-fallback path tracking).
+- `working_dir_sentinel.rs`: Generate per-crawl-unique sentinel strings for working-directory crawls.
+
+### src/engine/fts/
+
+Tantivy-based full-text search. Per-label index directories under `<database-dir>/fts/<catalog>/<label>/`. See [concurrency.md](./concurrency.md) for the writer contract and [monodex_files.md](./monodex_files.md) for the on-disk layout.
+
+- `error.rs`: Typed discrimination of Tantivy errors (path-not-found, lock conflict, etc.) for clean error reporting.
+- `index.rs`: Open and create per-label Tantivy indexes. Owns the `FtsIndex` handle and the heap-budget constant.
+- `indexing.rs`: `index_chunks_for_fts` and `FtsIndexingStats`. Read the label's chunks from LanceDB, diff against the staleness manifest, apply additions and removals to the Tantivy index, commit.
+- `manifest.rs`: Per-label staleness manifest used by `indexing.rs` for cheap incremental diff. Records which `row_id`s are currently indexed.
+- `schema.rs`: Tantivy schema for the FTS index. Distinct from `engine/schema.rs` (the LanceDB Arrow schema for the chunks/labels tables).
+- `search.rs`: `fts_search` and the `FtsHit` / `FtsSearchOutcome` result types. Builds a Tantivy query parser bound to the monodex tokenizer.
+- `tokenizer.rs`: Custom tokenizer for source code. Splits on case transitions, underscores, dots, digit boundaries, ASCII whitespace and punctuation; keeps both the original token and the splits; CJK-aware.
 
 ### src/engine/git_ops/
 
@@ -159,6 +177,8 @@ LanceDB storage layer. Typed operations on the two tables.
 
 - `database.rs`: Open a database directory, validate `monodex-meta.json` schema version, expose table handles. Single source of database-open errors.
 - `labels.rs`: Read, upsert, and delete `label_metadata` rows. Handles the per-method retrieval-selection and completion lifecycle.
+- `locks.rs`: OS-level file-locking primitives (database, catalog, commit mutex) backing the writer-lock taxonomy. Watchdog thread for long-acquisition progress reporting. See [concurrency.md](./concurrency.md).
+- `predicate.rs`: LanceDB SQL predicate builders (`eq_str`, `in_quoted_strs`, etc.) used across the storage layer. Callers must pre-validate inputs: catalog names by `validate_catalog`, label IDs by `LabelId::parse`.
 - `rows.rs`: Plain-Rust `ChunkRow` and `LabelMetadataRow` types with conversion to/from Arrow `RecordBatch`. The rest of the engine deals only in these row types, never in raw Arrow.
 
 ### src/engine/storage/chunks/
@@ -171,16 +191,16 @@ Sub-module for chunk-table operations, separated from the rest of `storage/` bec
 
 Every `.md` file in the repo, with a one-line description. Add an entry when adding a doc, remove when deleting. Top-level files (README, CHANGELOG, SECURITY, LICENSE) are listed alongside `docs/` files; new top-level docs are rare.
 
-- `README.md`: User-facing landing page: what Monodex is, install, configuration, CLI usage. Also serves as the crates.io page, so kept short.
-- `CHANGELOG.md`: Release history. Contains an HTML comment at the top with the version-bump procedure (semver rules, when to add the `## Unreleased` heading, which `###` subheadings are allowed); read it before publishing.
-- `SECURITY.md`: Microsoft boilerplate pointing at `aka.ms/SECURITY.md`. No project-specific content.
-- `docs/code_organization_policy.md`: Required reading for contributors. File size targets, where new code goes, banned patterns, test placement, naming.
-- `docs/smoke_test.md`: Minimal end-to-end verification procedure: configure Sparo as a catalog, purge, crawl, search, view. Run after any change to confirm the build actually works.
-- `docs/backlog.md`: Maintainer scratch pad for what might come next; items grouped by priority bucket. For official feature requests, the README points at GitHub issues, Zulip, and the Rush Hour video call.
-- `docs/design/architecture.md`: This file.
-- `docs/design/label_ids.md`: Identifier and reference syntax: catalogs, labels, breadcrumbs, cross-catalog references, planned typed-label grammar, path encoding rules at locator boundaries.
-- `docs/design/crawl.md`: Crawl pipeline in detail: package index implementation, working-directory identity model, label reassignment.
-- `docs/design/chunker.md`: Chunking algorithms: TypeScript AST partitioning (the "two worlds model"), markdown splitting, quality markers and scoring.
-- `docs/design/concurrency.md`: Writer lock taxonomy (database, catalog, commit mutex), reader-lock-free contract, interaction with LanceDB MVCC and Tantivy's per-directory locks.
-- `docs/design/monodex_files.md`: Inventory of files monodex reads or writes: tool-home state, repo-local config files monodex reads from the indexed repo, editor-consumed schemas, init templates.
-- `schemas/editing.md`: Cross-reference back to the Rust structs that mirror these schemas, plus a policy reminder that these files are publicly published artifacts.
+- [`README.md`](../../README.md): User-facing landing page: what Monodex is, install, configuration, CLI usage. Also serves as the crates.io page, so kept short.
+- [`CHANGELOG.md`](../../CHANGELOG.md): Release history. Contains an HTML comment at the top with the version-bump procedure (semver rules, when to add the `## Unreleased` heading, which `###` subheadings are allowed); read it before publishing.
+- [`SECURITY.md`](../../SECURITY.md): Microsoft boilerplate pointing at `aka.ms/SECURITY.md`. No project-specific content.
+- [`docs/code_organization_policy.md`](../code_organization_policy.md): Required reading for contributors. File size targets, where new code goes, banned patterns, test placement, naming.
+- [`docs/smoke_test.md`](../smoke_test.md): Minimal end-to-end verification procedure: configure Sparo as a catalog, purge, crawl, search, view. Run after any change to confirm the build actually works.
+- [`docs/backlog.md`](../backlog.md): Maintainer scratch pad for what might come next; items grouped by priority bucket. For official feature requests, the README points at GitHub issues, Zulip, and the Rush Hour video call.
+- [`docs/design/architecture.md`](./architecture.md): This file.
+- [`docs/design/label_ids.md`](./label_ids.md): Identifier and reference syntax: catalogs, labels, breadcrumbs, cross-catalog references, planned typed-label grammar, path encoding rules at locator boundaries.
+- [`docs/design/crawl.md`](./crawl.md): Crawl pipeline in detail: package index implementation, working-directory identity model, label reassignment.
+- [`docs/design/chunker.md`](./chunker.md): Chunking algorithms: TypeScript AST partitioning (the "two worlds model"), markdown splitting, quality markers and scoring.
+- [`docs/design/concurrency.md`](./concurrency.md): Writer lock taxonomy (database, catalog, commit mutex), reader-lock-free contract, interaction with LanceDB MVCC and Tantivy's per-directory locks.
+- [`docs/design/monodex_files.md`](./monodex_files.md): Inventory of files monodex reads or writes: tool-home state, repo-local config files monodex reads from the indexed repo, editor-consumed schemas, init templates.
+- [`schemas/editing.md`](../../schemas/editing.md): Cross-reference back to the Rust structs that mirror these schemas, plus a policy reminder that these files are publicly published artifacts.

@@ -19,7 +19,7 @@ pub use context::{
 };
 pub use crawl::{CrawlFailures, run_embed_upload_pipeline, run_upsert_without_vectors};
 pub use util::{
-    ChunkSelector, chrono_timestamp, format_chunk_report, format_duration, format_eta,
-    format_source_pointer, load_warning_state, parse_chunk_selector, sanitize_for_terminal,
-    save_warning_state,
+    ChunkSelector, chrono_timestamp, format_chunk_report, format_count, format_duration,
+    format_eta, format_source_pointer, load_warning_state, parse_chunk_selector,
+    sanitize_for_terminal, save_warning_state,
 };

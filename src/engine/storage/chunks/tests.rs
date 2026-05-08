@@ -814,3 +814,361 @@ async fn test_vector_search_excludes_null_vectors() {
     assert_eq!(results.len(), 1, "Should only return rows with vectors");
     assert_eq!(results[0].chunk.row_id, "file1:1");
 }
+
+// =========================================================================
+// upsert_without_vectors_with_progress tests
+// =========================================================================
+
+/// Test that empty inputs produce no progress events and no errors.
+#[tokio::test]
+async fn test_upsert_without_vectors_with_progress_empty() {
+    let (_tmp_dir, storage) = create_test_storage().await;
+
+    let events = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let events_clone = events.clone();
+    let callback = move |event: StorageProgressEvent| {
+        events_clone.lock().unwrap().push(event);
+    };
+
+    storage
+        .upsert_without_vectors_with_progress(&[], &[], callback)
+        .await
+        .unwrap();
+
+    assert!(events.lock().unwrap().is_empty());
+}
+
+/// Test that the progress callback receives all three phase labels in order
+/// with monotonically non-decreasing `completed` per phase.
+#[tokio::test]
+async fn test_upsert_without_vectors_with_progress_phases() {
+    let (_tmp_dir, storage) = create_test_storage().await;
+
+    // Create test rows (more than UPSERT_BATCH_SIZE to test batching)
+    let num_rows = 2500; // > UPSERT_BATCH_SIZE (1000)
+    let rows: Vec<ChunkRow> = (0..num_rows)
+        .map(|i| test_chunk_row(&format!("file{}:1", i), &format!("file{}", i), 1))
+        .collect();
+
+    let sentinel_row_ids: Vec<String> = (0..num_rows).map(|i| format!("file{}:1", i)).collect();
+
+    let events = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let events_clone = events.clone();
+    let callback = move |event: StorageProgressEvent| {
+        events_clone.lock().unwrap().push(event);
+    };
+
+    storage
+        .upsert_without_vectors_with_progress(&rows, &sentinel_row_ids, callback)
+        .await
+        .unwrap();
+
+    let events = events.lock().unwrap();
+
+    // Verify we have events from all three phases
+    let clearing_events: Vec<_> = events
+        .iter()
+        .filter(|e| e.phase == "Clearing vectors")
+        .collect();
+    let upserting_events: Vec<_> = events
+        .iter()
+        .filter(|e| e.phase == "Upserting chunks")
+        .collect();
+    let marking_events: Vec<_> = events
+        .iter()
+        .filter(|e| e.phase == "Marking file sentinels")
+        .collect();
+
+    assert!(!clearing_events.is_empty(), "Should have clearing events");
+    assert!(!upserting_events.is_empty(), "Should have upserting events");
+    assert!(!marking_events.is_empty(), "Should have marking events");
+
+    // Verify phase order: all clearing, then all upserting, then all marking
+    let first_upsert_idx = events
+        .iter()
+        .position(|e| e.phase == "Upserting chunks")
+        .unwrap();
+    let first_marking_idx = events
+        .iter()
+        .position(|e| e.phase == "Marking file sentinels")
+        .unwrap();
+    let last_clearing_idx = events
+        .iter()
+        .rposition(|e| e.phase == "Clearing vectors")
+        .unwrap();
+
+    assert!(
+        last_clearing_idx < first_upsert_idx,
+        "Clearing should complete before upserting"
+    );
+    let last_upsert_idx = events
+        .iter()
+        .rposition(|e| e.phase == "Upserting chunks")
+        .unwrap();
+    assert!(
+        last_upsert_idx < first_marking_idx,
+        "Upserting should complete before marking"
+    );
+
+    // Verify monotonically non-decreasing `completed` within each phase
+    fn check_monotonic(events: &[&StorageProgressEvent]) {
+        let mut prev = 0;
+        for event in events {
+            assert!(
+                event.completed >= prev,
+                "Completed should be non-decreasing: got {} after {}",
+                event.completed,
+                prev
+            );
+            prev = event.completed;
+        }
+    }
+
+    check_monotonic(&clearing_events);
+    check_monotonic(&upserting_events);
+    check_monotonic(&marking_events);
+
+    // Verify final `completed == total` per phase
+    assert_eq!(
+        clearing_events.last().unwrap().completed,
+        clearing_events.last().unwrap().total,
+        "Clearing should complete all items"
+    );
+    assert_eq!(
+        upserting_events.last().unwrap().completed,
+        upserting_events.last().unwrap().total,
+        "Upserting should complete all items"
+    );
+    assert_eq!(
+        marking_events.last().unwrap().completed,
+        marking_events.last().unwrap().total,
+        "Marking should complete all items"
+    );
+
+    // Verify unit field matches documented values
+    for event in &clearing_events {
+        assert_eq!(event.unit, "chunks");
+    }
+    for event in &upserting_events {
+        assert_eq!(event.unit, "chunks");
+    }
+    for event in &marking_events {
+        assert_eq!(event.unit, "files");
+    }
+}
+
+/// Test that the method correctly handles inputs larger than UPSERT_BATCH_SIZE
+/// with multiple batches per phase.
+#[tokio::test]
+async fn test_upsert_without_vectors_with_progress_multi_batch() {
+    let (_tmp_dir, storage) = create_test_storage().await;
+
+    // Create 2500 rows, which should produce 3 batches per phase (1000 + 1000 + 500)
+    let num_rows = 2500;
+    let rows: Vec<ChunkRow> = (0..num_rows)
+        .map(|i| test_chunk_row(&format!("file{}:1", i), &format!("file{}", i), 1))
+        .collect();
+
+    let sentinel_row_ids: Vec<String> = (0..num_rows).map(|i| format!("file{}:1", i)).collect();
+
+    let events = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let events_clone = events.clone();
+    let callback = move |event: StorageProgressEvent| {
+        events_clone.lock().unwrap().push(event);
+    };
+
+    storage
+        .upsert_without_vectors_with_progress(&rows, &sentinel_row_ids, callback)
+        .await
+        .unwrap();
+
+    let events = events.lock().unwrap();
+
+    // Should have 3 batches per phase = 9 events total
+    // Phase A (clearing): 1000, 2000, 2500
+    // Phase B (upserting): 1000, 2000, 2500
+    // Phase C (marking): 1000, 2000, 2500
+    assert_eq!(
+        events.len(),
+        9,
+        "Should have 9 events (3 phases x 3 batches)"
+    );
+
+    // Verify the batch sizes are correct
+    let clearing_events: Vec<_> = events
+        .iter()
+        .filter(|e| e.phase == "Clearing vectors")
+        .collect();
+    assert_eq!(clearing_events.len(), 3, "Should have 3 clearing batches");
+    assert_eq!(clearing_events[0].completed, 1000);
+    assert_eq!(clearing_events[1].completed, 2000);
+    assert_eq!(clearing_events[2].completed, 2500);
+    assert_eq!(clearing_events[2].total, 2500);
+}
+
+/// Correctness test for `upsert_without_vectors_with_progress`.
+///
+/// Verifies that:
+/// 1. Vectors are cleared for rows that had them (Phase A)
+/// 2. Rows are upserted correctly with the right text/active_label_ids (Phase B)
+/// 3. Only complete files have their sentinel marked file_complete=true (Phase C)
+/// 4. Partial files do NOT have their sentinel marked complete
+#[tokio::test]
+async fn test_upsert_without_vectors_with_progress_correctness() {
+    let (_tmp_dir, storage) = create_test_storage().await;
+
+    // === Setup: Create two files ===
+    // File A: complete (all 3 chunks)
+    // File B: incomplete (only chunk 1 of 3)
+
+    // Helper to create a chunk row with specific chunk_count
+    fn make_row(file_id: &str, ordinal: i32, chunk_count: i32) -> ChunkRow {
+        ChunkRow {
+            row_id: format!("{}:{}", file_id, ordinal),
+            text: format!("Content for {} chunk {}", file_id, ordinal),
+            catalog: "test-catalog".to_string(),
+            active_label_ids: vec!["test-catalog:main".to_string()],
+            embedder_id: "test-embedder:v1".to_string(),
+            chunker_id: "test-chunker:v1".to_string(),
+            blob_id: "abc123".to_string(),
+            content_hash: format!("hash-{}-{}", file_id, ordinal),
+            file_id: file_id.to_string(),
+            relative_path: format!("src/{}.ts", file_id),
+            package_name: "test-package".to_string(),
+            source_uri: format!("/path/to/{}.ts", file_id),
+            chunk_ordinal: ordinal,
+            chunk_count,
+            start_line: ordinal * 10,
+            end_line: ordinal * 10 + 9,
+            symbol_name: Some(format!("func_{}", file_id)),
+            chunk_type: "function".to_string(),
+            chunk_kind: "content".to_string(),
+            breadcrumb: Some(format!("test-package:{}.ts:func_{}", file_id, file_id)),
+            split_part_ordinal: None,
+            split_part_count: None,
+            file_complete: false,
+        }
+    }
+
+    // Pre-populate storage with file A's rows having vectors (to exercise Phase A)
+    let file_a_rows: Vec<ChunkRow> = (1..=3).map(|i| make_row("fileA", i, 3)).collect();
+    let vectors: Vec<Vec<f32>> = file_a_rows
+        .iter()
+        .map(|_| {
+            let mut v = vec![0.0f32; VECTOR_DIMENSION];
+            v[0] = 1.0; // Non-zero vector
+            v
+        })
+        .collect();
+    storage
+        .upsert_with_vectors(&file_a_rows, &vectors)
+        .await
+        .unwrap();
+
+    // Verify file A rows have vectors before FTS-only upsert
+    for row in &file_a_rows {
+        let status = storage
+            .get_sentinel_status(&row.row_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            status.has_vector,
+            "File A row {} should have vector initially",
+            row.row_id
+        );
+    }
+
+    // Create the input for FTS-only upsert:
+    // File A: all 3 chunks (complete)
+    // File B: only chunk 1 of 3 (incomplete)
+    let mut rows_to_upsert: Vec<ChunkRow> = Vec::new();
+    rows_to_upsert.extend((1..=3).map(|i| make_row("fileA", i, 3)));
+    rows_to_upsert.push(make_row("fileB", 1, 3));
+
+    // Sentinel list should only include file A (complete)
+    let sentinel_row_ids = vec!["fileA:1".to_string()];
+
+    // Run the upsert
+    let events = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let events_clone = events.clone();
+    let callback = move |event: StorageProgressEvent| {
+        events_clone.lock().unwrap().push(event);
+    };
+
+    storage
+        .upsert_without_vectors_with_progress(&rows_to_upsert, &sentinel_row_ids, callback)
+        .await
+        .unwrap();
+
+    // === Verify correctness ===
+
+    // 1. File A's rows should have vectors cleared (Phase A worked)
+    for row in &file_a_rows {
+        let status = storage
+            .get_sentinel_status(&row.row_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            !status.has_vector,
+            "File A row {} should have NULL vector after upsert_without_vectors",
+            row.row_id
+        );
+    }
+
+    // 2. File A's rows should exist with correct text
+    for i in 1..=3 {
+        let row = storage
+            .get_by_row_id(&format!("fileA:{}", i))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            row.text,
+            format!("Content for fileA chunk {}", i),
+            "Row fileA:{} should have correct text",
+            i
+        );
+        assert!(
+            row.active_label_ids
+                .contains(&"test-catalog:main".to_string()),
+            "Row fileA:{} should have the label",
+            i
+        );
+    }
+
+    // 3. File A's sentinel (fileA:1) should have file_complete = true
+    let sentinel_a = storage.get_by_row_id("fileA:1").await.unwrap().unwrap();
+    assert!(
+        sentinel_a.file_complete,
+        "File A sentinel should be marked complete"
+    );
+
+    // 4. File B's row should exist but NOT be complete
+    let row_b = storage.get_by_row_id("fileB:1").await.unwrap().unwrap();
+    assert_eq!(
+        row_b.text, "Content for fileB chunk 1",
+        "File B row should have correct text"
+    );
+    assert!(
+        !row_b.file_complete,
+        "File B sentinel should NOT be marked complete (partial file)"
+    );
+
+    // 5. Verify we got progress events from all phases
+    let events = events.lock().unwrap();
+    let phases: std::collections::HashSet<_> = events.iter().map(|e| e.phase).collect();
+    assert!(
+        phases.contains("Clearing vectors"),
+        "Should have Phase A events"
+    );
+    assert!(
+        phases.contains("Upserting chunks"),
+        "Should have Phase B events"
+    );
+    assert!(
+        phases.contains("Marking file sentinels"),
+        "Should have Phase C events"
+    );
+}

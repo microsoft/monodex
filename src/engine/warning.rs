@@ -28,8 +28,6 @@ pub enum CrawlWarning {
         relative_path: String,
         error: String,
     },
-    /// FTS tokenizer produced zero tokens for a chunk's text.
-    FtsZeroTokens { row_id: String },
 }
 
 /// Sink for in-flight crawl warnings.

@@ -362,6 +362,8 @@ Multiple `monodex` invocations against the same database coordinate via OS-level
 
 ## Development
 
+For full developer documentation (data model, crawl pipeline, source tree, and links to every other doc in the repo), start at [docs/design/architecture.md](https://github.com/microsoft/monodex/blob/main/docs/design/architecture.md). After making changes, run [docs/smoke_test.md](https://github.com/microsoft/monodex/blob/main/docs/smoke_test.md) to verify the build end-to-end.
+
 When making a pull request, add a bullet under "## Unreleased" in [CHANGELOG.md](./CHANGELOG.md) describing the change from an end-user perspective. See CHANGELOG.md for the version history and publishing instructions.
 
 Run CI checks using [Just](https://github.com/casey/just) (recommended):
@@ -406,6 +408,8 @@ RUST_LOG=debug ./target/release/monodex crawl --catalog sparo --label main --com
 ## Crawl Configuration
 
 The crawl behavior (which files to index and how to chunk them) can be customized via configuration files.
+
+For the full inventory of files Monodex reads or writes (tool-home state, the database directory layout, repo-local config files), see [docs/design/monodex_files.md](https://github.com/microsoft/monodex/blob/main/docs/design/monodex_files.md).
 
 ### Config Discovery
 
@@ -485,20 +489,6 @@ shouldCrawl = matchesFileType && (matchesPatternsToKeep || !matchesPatternsToExc
 ## Status
 
 This project is under active development. Expect breaking changes between versions.
-
-## Documentation
-
-For contributors and curious users:
-
-- [`docs/design/architecture.md`](./docs/design/architecture.md): Five-minute crash course for working on the codebase: vocabulary, data model, crawl pipeline overview, chunker dispatch, source tree.
-- [`docs/design/label_ids.md`](./docs/design/label_ids.md): Identifier and reference syntax: catalogs, labels, breadcrumbs, path encoding, planned typed-label and cross-catalog reference grammar.
-- [`docs/design/crawl.md`](./docs/design/crawl.md): Crawl pipeline in detail: package index, working-directory identity model, label reassignment, partial-crawl semantics.
-- [`docs/design/chunker.md`](./docs/design/chunker.md): Chunking algorithms: embedding model, TypeScript AST partitioning (the "two worlds model"), markdown splitting, quality scoring, empirical findings on alternative runtimes.
-- [`docs/design/concurrency.md`](./docs/design/concurrency.md): Writer lock taxonomy, reader semantics, and how the model interacts with LanceDB's and Tantivy's own concurrency mechanisms.
-- [`docs/design/monodex_files.md`](./docs/design/monodex_files.md): Inventory of files Monodex reads or writes: tool-home state, database directory, repo-local config, shipped artifacts.
-- [`docs/code_organization_policy.md`](./docs/code_organization_policy.md): File size targets, where new code goes, banned patterns. Required reading for contributors.
-- [`docs/backlog.md`](./docs/backlog.md): Maintainer scratch pad for what might come next.
-- [`docs/smoke_test.md`](./docs/smoke_test.md): End-to-end verification procedure to run after any change.
 
 ## License
 

@@ -9,7 +9,7 @@ use std::collections::{BTreeSet, HashSet};
 use std::sync::Arc;
 
 use crate::app::crawl::types::PhaseResults;
-use crate::app::format_duration;
+use crate::app::{format_count, format_duration};
 use crate::engine::{
     TARGET_CHARS,
     chunker::{ChunkContext, chunk_content},
@@ -89,7 +89,8 @@ pub async fn write_in_progress_metadata(
 /// Enumerates files from the blob source.
 pub fn enumerate_files(blob_source: &dyn BlobSource) -> Result<Vec<FileEntry>> {
     let files = blob_source.enumerate()?;
-    println!("Found {} files", files.len());
+    println!("Found {} files", format_count(files.len() as u64));
+    println!();
     Ok(files)
 }
 
@@ -111,7 +112,10 @@ pub fn filter_files(files: Vec<FileEntry>, crawl_config: &CompiledCrawlConfig) -
         .into_iter()
         .filter(|f| crawl_config.should_crawl(&f.relative_path))
         .collect();
-    println!("{} files to process after filtering", filtered.len());
+    println!(
+        "{} files to process after filtering",
+        format_count(filtered.len() as u64)
+    );
     println!();
     filtered
 }
@@ -223,8 +227,11 @@ pub async fn classify_files(
         }
     }
 
-    println!("  New files to index: {}", new_count);
-    println!("  Existing files (label update only): {}", existing_count);
+    println!("  New files to index: {}", format_count(new_count as u64));
+    println!(
+        "  Existing files (label update only): {}",
+        format_count(existing_count as u64)
+    );
     println!();
 
     Ok(ClassifyOutput {
@@ -265,7 +272,7 @@ pub async fn add_label_to_existing_files(
 
     println!(
         "🏷️  Adding label to {} existing files...",
-        existing_file_ids.len()
+        format_count(existing_file_ids.len() as u64)
     );
     for file_id in existing_file_ids {
         // Get all chunks for this file and add the label
@@ -305,7 +312,7 @@ pub async fn add_label_to_existing_files(
     if !failures.is_empty() {
         println!(
             "  ⚠️  Failed to add label to {} existing files",
-            failures.len()
+            format_count(failures.len() as u64)
         );
     }
     println!();
@@ -341,6 +348,7 @@ pub fn chunk_new_files(
     label_id: &LabelId,
     repo_path: &std::path::Path,
     new_count: usize,
+    vector_in_selection: bool,
     warning_counter: &std::cell::Cell<usize>,
     warnings: WarningSink<'_>,
 ) -> Result<ChunkingOutput> {
@@ -356,15 +364,18 @@ pub fn chunk_new_files(
         });
     }
 
-    println!("🔶 Phase 2: Chunking {} new files...", new_count);
+    println!(
+        "🔶 Phase 2: Chunking {} new files...",
+        format_count(new_count as u64)
+    );
 
     for (idx, file_entry) in new_files.iter().enumerate() {
         print!(
             "\r  Processing file {}/{} ({:.0}%) | warnings: {}   ",
-            idx + 1,
-            new_count,
+            format_count((idx + 1) as u64),
+            format_count(new_count as u64),
             ((idx + 1) as f64 / new_count as f64) * 100.0,
-            warning_counter.get()
+            format_count(warning_counter.get() as u64)
         );
         std::io::Write::flush(&mut std::io::stdout())?;
 
@@ -425,7 +436,16 @@ pub fn chunk_new_files(
     }
 
     let total_chunks = chunks.len();
-    println!("\n  Found {} chunks to embed", total_chunks);
+    let chunks_label = if vector_in_selection {
+        "chunks to embed"
+    } else {
+        "chunks to store"
+    };
+    println!(
+        "\n  Found {} {}",
+        format_count(total_chunks as u64),
+        chunks_label
+    );
     println!();
 
     Ok(ChunkingOutput {
@@ -445,7 +465,10 @@ pub async fn run_label_cleanup(
     let processed = chunk_storage
         .remove_label_from_chunks(label_id, all_touched_file_ids)
         .await?;
-    println!("  Processed {} chunks for label cleanup", processed);
+    println!(
+        "  Processed {} chunks for label cleanup",
+        format_count(processed)
+    );
     Ok(processed)
 }
 
@@ -458,39 +481,64 @@ pub async fn run_label_cleanup(
 /// * `db_path` - Path to the Monodex database root
 /// * `label_id` - The label to index
 /// * `chunk_storage` - ChunkStorage instance for reading LanceDB chunks
-/// * `warnings` - Warning sink for emitting FTS-specific warnings
 /// * `is_commit_mode` - If true, wait for merging threads after commit
+/// * `debug` - If true, print debug lines for zero-token chunks
 pub async fn run_fts_phase(
     db_path: &std::path::Path,
     label_id: &LabelId,
     chunk_storage: &ChunkStorage,
-    warnings: WarningSink<'_>,
     is_commit_mode: bool,
+    debug: bool,
 ) -> Result<()> {
-    use crate::app::util::format_duration;
+    use crate::app::util::{format_count, format_duration};
     use std::time::Instant;
 
     println!("🔶 Phase 5: FTS indexing...");
     let start = Instant::now();
 
-    let stats = crate::engine::fts::index_chunks_for_fts(
-        db_path,
-        label_id,
-        chunk_storage,
-        warnings,
-        is_commit_mode,
-    )
-    .await?;
+    let stats =
+        crate::engine::fts::index_chunks_for_fts(db_path, label_id, chunk_storage, is_commit_mode)
+            .await?;
 
     let elapsed = start.elapsed();
     println!(
-        "  FTS indexing complete: {} added, {} removed, {} skipped (zero tokens), {} live in {}",
-        stats.added,
-        stats.removed,
-        stats.zero_token_skipped,
-        stats.live_row_ids,
+        "  Tantivy FTS indexing complete: {} added, {} removed, {} live in {}",
+        format_count(stats.added as u64),
+        format_count(stats.removed as u64),
+        format_count(stats.live_row_ids as u64),
         format_duration(elapsed.as_secs_f64()),
     );
+
+    // Print zero-token summary block if any chunks were skipped
+    if stats.zero_token_skipped > 0 {
+        let total_attempted = stats.added + stats.zero_token_skipped;
+        let percentage = (stats.zero_token_skipped as f64 / total_attempted as f64) * 100.0;
+        println!(
+            "{} chunks ({:.2}%) contained no searchable text and were skipped.",
+            format_count(stats.zero_token_skipped as u64),
+            percentage
+        );
+
+        // Show up to 3 example row_ids
+        let example_count = stats.zero_token_row_ids.len().min(3);
+        let examples: Vec<&str> = stats
+            .zero_token_row_ids
+            .iter()
+            .take(example_count)
+            .map(|s| s.as_str())
+            .collect();
+        println!("  Examples: {}", examples.join(", "));
+
+        println!("  Use `monodex view --id <id>` or `monodex debug-fts --id <id>` to inspect.");
+
+        // Print debug lines after the summary (if debug mode)
+        if debug {
+            for row_id in &stats.zero_token_row_ids {
+                eprintln!("[DEBUG] FTS zero tokens: {}", row_id);
+            }
+        }
+    }
+
     Ok(())
 }
 
@@ -591,21 +639,36 @@ pub fn write_summary(
             format_duration(total_elapsed.as_secs_f64())
         )
         .unwrap();
-        writeln!(out, "  New files indexed: {}", new_count).unwrap();
-        writeln!(out, "  Existing files detected: {}", existing_count).unwrap();
+        writeln!(
+            out,
+            "  New files indexed: {}",
+            format_count(new_count as u64)
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "  Existing files detected: {}",
+            format_count(existing_count as u64)
+        )
+        .unwrap();
         writeln!(
             out,
             "  Existing files updated successfully: {}",
-            existing_success_count
+            format_count(existing_success_count as u64)
         )
         .unwrap();
         let total_failures = pipeline_failures_count + existing_file_failures_count;
-        writeln!(out, "  Total failures: {}", total_failures).unwrap();
+        writeln!(
+            out,
+            "  Total failures: {}",
+            format_count(total_failures as u64)
+        )
+        .unwrap();
         if existing_file_failures_count > 0 {
             writeln!(
                 out,
                 "  - Existing file label-add failures: {}",
-                existing_file_failures_count
+                format_count(existing_file_failures_count as u64)
             )
             .unwrap();
         }
@@ -632,12 +695,22 @@ pub fn write_summary(
             format_duration(total_elapsed.as_secs_f64())
         )
         .unwrap();
-        writeln!(out, "  New files indexed: {}", new_count).unwrap();
-        writeln!(out, "  Existing files detected: {}", existing_count).unwrap();
+        writeln!(
+            out,
+            "  New files indexed: {}",
+            format_count(new_count as u64)
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "  Existing files detected: {}",
+            format_count(existing_count as u64)
+        )
+        .unwrap();
         writeln!(
             out,
             "  Existing files updated successfully: {}",
-            existing_success_count
+            format_count(existing_success_count as u64)
         )
         .unwrap();
     }
@@ -749,12 +822,19 @@ pub fn print_warning_summary(crawl_warning_files: &HashSet<String>) {
     sorted.sort();
     let plural = if sorted.len() == 1 { "file" } else { "files" };
     println!();
-    println!("Chunking warnings in {} {}:", sorted.len(), plural);
+    println!(
+        "Chunking warnings in {} {}:",
+        format_count(sorted.len() as u64),
+        plural
+    );
     for file in sorted.iter().take(20) {
         println!("  - {}", file);
     }
     if sorted.len() > 20 {
-        println!("  ... and {} more", sorted.len() - 20);
+        println!(
+            "  ... and {} more",
+            format_count((sorted.len() - 20) as u64)
+        );
     }
 }
 
