@@ -759,14 +759,7 @@ impl ChunkStorage {
                 let batch_end = std::cmp::min(batch_start + UPSERT_BATCH_SIZE, row_ids.len());
                 let batch_ids = &row_ids[batch_start..batch_end];
 
-                let predicate = in_quoted_strs("row_id", batch_ids);
-                self.table
-                    .update()
-                    .only_if(&predicate)
-                    .column("vector", "null")
-                    .execute()
-                    .await
-                    .map_err(|e| anyhow!("Failed to null vectors: {}", e))?;
+                self.null_vectors_batch(batch_ids).await?;
 
                 on_progress(StorageProgressEvent {
                     phase: "Clearing vectors",
@@ -1291,15 +1284,7 @@ impl ChunkStorage {
             let batch_end = std::cmp::min(batch_start + UPSERT_BATCH_SIZE, row_ids.len());
             let batch_ids = &row_ids[batch_start..batch_end];
 
-            let predicate = in_quoted_strs("row_id", batch_ids);
-
-            self.table
-                .update()
-                .only_if(&predicate)
-                .column("vector", "null")
-                .execute()
-                .await
-                .map_err(|e| anyhow!("Failed to null vectors: {}", e))?;
+            self.null_vectors_batch(batch_ids).await?;
         }
 
         Ok(())
@@ -1309,6 +1294,21 @@ impl ChunkStorage {
     pub async fn delete_by_row_ids(&self, row_ids: &[String]) -> Result<()> {
         let _commit_guard = acquire_commit_mutex(&self.db_path)?;
         self.delete_by_row_ids_inner(row_ids).await
+    }
+
+    /// Internal helper for null_vectors_for_row_ids (no mutex acquisition).
+    ///
+    /// Nulls the vector column for one batch of row_ids. The caller must hold the commit mutex.
+    async fn null_vectors_batch(&self, batch_ids: &[&str]) -> Result<()> {
+        let predicate = in_quoted_strs("row_id", batch_ids);
+        self.table
+            .update()
+            .only_if(&predicate)
+            .column("vector", "null")
+            .execute()
+            .await
+            .map_err(|e| anyhow!("Failed to null vectors: {}", e))?;
+        Ok(())
     }
 
     /// Internal helper for delete_by_row_ids (no mutex acquisition).
