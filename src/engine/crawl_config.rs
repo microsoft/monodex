@@ -311,7 +311,10 @@ const DEFAULT_CRAWL_CONFIG_JSON: &str = r#"{
 /// 3. Embedded default (compiled into binary)
 ///
 /// No merging is performed - exactly one config is used.
-pub fn load_crawl_config(repo_path: Option<&Path>) -> Result<CrawlConfig> {
+pub fn load_crawl_config(
+    paths: &crate::paths::Paths,
+    repo_path: Option<&Path>,
+) -> Result<CrawlConfig> {
     // Try repo-local config first
     if let Some(repo) = repo_path {
         let repo_local_path = repo.join("monodex-crawl.json");
@@ -329,7 +332,7 @@ pub fn load_crawl_config(repo_path: Option<&Path>) -> Result<CrawlConfig> {
     }
 
     // Try user-global config
-    let user_global_path = crate::paths::crawl_config_path()?;
+    let user_global_path = paths.crawl_config();
     if user_global_path.exists() {
         let content = std::fs::read_to_string(&user_global_path).map_err(|e| {
             anyhow!(
@@ -351,8 +354,11 @@ pub fn load_crawl_config(repo_path: Option<&Path>) -> Result<CrawlConfig> {
 ///
 /// This is a convenience function that loads the config and compiles it
 /// for use in crawl operations.
-pub fn load_compiled_crawl_config(repo_path: Option<&Path>) -> Result<CompiledCrawlConfig> {
-    let config = load_crawl_config(repo_path)?;
+pub fn load_compiled_crawl_config(
+    paths: &crate::paths::Paths,
+    repo_path: Option<&Path>,
+) -> Result<CompiledCrawlConfig> {
+    let config = load_crawl_config(paths, repo_path)?;
     config.compile()
 }
 
@@ -589,14 +595,18 @@ mod tests {
     #[test]
     fn test_load_crawl_config_uses_embedded_default() {
         // When no repo path and no user-global config, use embedded default
-        let config = load_crawl_config(None).unwrap();
+        let temp_dir = tempfile::tempdir().unwrap();
+        let paths = crate::paths::Paths::for_test(temp_dir.path().into());
+        let config = load_crawl_config(&paths, None).unwrap();
         assert_eq!(config.version, 1);
         assert!(config.file_types.contains_key(".ts"));
     }
 
     #[test]
     fn test_load_compiled_crawl_config() {
-        let compiled = load_compiled_crawl_config(None).unwrap();
+        let temp_dir = tempfile::tempdir().unwrap();
+        let paths = crate::paths::Paths::for_test(temp_dir.path().into());
+        let compiled = load_compiled_crawl_config(&paths, None).unwrap();
         assert!(compiled.should_crawl("src/index.ts"));
         assert!(!compiled.should_crawl("node_modules/example.ts"));
     }

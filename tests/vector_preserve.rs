@@ -5,7 +5,6 @@
 use std::sync::Arc;
 
 use lancedb::connect;
-use serial_test::serial;
 
 use monodex::engine::{
     Chunk,
@@ -13,20 +12,6 @@ use monodex::engine::{
     schema::chunks_schema,
     storage::{ChunkRow, ChunkStorage},
 };
-
-fn set_monodex_home(tmp_dir: &std::path::Path) {
-    // SAFETY: Tests are serialized via #[serial_test::serial(monodex_home)] attribute
-    unsafe {
-        std::env::set_var("MONODEX_HOME", tmp_dir);
-    }
-}
-
-fn remove_monodex_home() {
-    // SAFETY: Tests are serialized via #[serial_test::serial(monodex_home)] attribute
-    unsafe {
-        std::env::remove_var("MONODEX_HOME");
-    }
-}
 
 fn write_minimal_config(monodex_home: &std::path::Path) {
     let config_path = monodex_home.join("config.json");
@@ -99,14 +84,12 @@ async fn create_test_storage() -> (tempfile::TempDir, ChunkStorage) {
 /// 2. Upsert the same chunk without a vector via upsert_without_vectors
 /// 3. Verify vector search still finds the chunk (proving vector was preserved)
 #[tokio::test]
-#[serial(monodex_home)]
 async fn test_upsert_without_vectors_preserves_vector() {
     // Use a blocking scope to set up the test environment, then drop the lock
     // before any async operations
     let (_monodex_home, _tmp_dir) = {
         let tmp_dir = tempfile::TempDir::new().unwrap();
         let monodex_home = tmp_dir.path().to_path_buf();
-        set_monodex_home(&monodex_home);
         write_minimal_config(&monodex_home);
         (monodex_home, tmp_dir)
     };
@@ -201,8 +184,6 @@ async fn test_upsert_without_vectors_preserves_vector() {
         results_after[0].chunk.row_id, row.row_id,
         "Should find the correct chunk"
     );
-
-    remove_monodex_home();
 }
 
 /// Test that FTS-only crawl clears partial vectors to maintain the per-file invariant.
@@ -217,12 +198,10 @@ async fn test_upsert_without_vectors_preserves_vector() {
 /// crawl reprocesses a file that was partially indexed by a previous vector crawl,
 /// the existing vectors must be cleared so the file ends up with uniform NULL vectors.
 #[tokio::test]
-#[serial(monodex_home)]
 async fn test_fts_only_clears_partial_vectors() {
     let (_monodex_home, _tmp_dir) = {
         let tmp_dir = tempfile::TempDir::new().unwrap();
         let monodex_home = tmp_dir.path().to_path_buf();
-        set_monodex_home(&monodex_home);
         write_minimal_config(&monodex_home);
         (monodex_home, tmp_dir)
     };
@@ -384,6 +363,4 @@ async fn test_fts_only_clears_partial_vectors() {
         sentinel.file_complete,
         "Sentinel should have file_complete=true"
     );
-
-    remove_monodex_home();
 }

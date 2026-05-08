@@ -10,6 +10,7 @@ use anyhow::anyhow;
 
 use crate::app::util::chrono_timestamp;
 use crate::engine::identifier::{LabelId, validate_catalog, validate_label};
+use crate::paths::Paths;
 
 /// Default context for commands
 #[derive(Debug, serde::Serialize, serde::Deserialize, Clone)]
@@ -23,11 +24,8 @@ pub struct DefaultContext {
 }
 
 /// Load default context from file, validating identifiers at the boundary
-pub fn load_default_context() -> Option<DefaultContext> {
-    let path = match crate::paths::context_path() {
-        Ok(p) => p,
-        Err(_) => return None,
-    };
+pub fn load_default_context(paths: &Paths) -> Option<DefaultContext> {
+    let path = paths.context_file();
 
     match std::fs::read_to_string(&path) {
         Ok(content) => {
@@ -69,8 +67,8 @@ pub fn load_default_context() -> Option<DefaultContext> {
 }
 
 /// Save default context to file
-pub fn save_default_context(catalog: &str, label: &str) -> anyhow::Result<()> {
-    let path = crate::paths::context_path()?;
+pub fn save_default_context(paths: &Paths, catalog: &str, label: &str) -> anyhow::Result<()> {
+    let path = paths.context_file();
 
     // Create parent directory if needed
     if let Some(parent) = path.parent() {
@@ -95,6 +93,7 @@ pub fn save_default_context(catalog: &str, label: &str) -> anyhow::Result<()> {
 /// Per #25: --label takes a bare label name, --catalog takes a bare catalog name.
 /// The qualified "catalog:label" form is no longer accepted.
 pub fn resolve_label_context(
+    paths: &Paths,
     explicit_label: Option<&str>,
     explicit_catalog: Option<&str>,
 ) -> anyhow::Result<(LabelId, String, String)> {
@@ -120,7 +119,11 @@ pub fn resolve_label_context(
     }
 
     // Resolve from explicit flags or default context
-    match (explicit_catalog, explicit_label, load_default_context()) {
+    match (
+        explicit_catalog,
+        explicit_label,
+        load_default_context(paths),
+    ) {
         (Some(catalog), Some(label), _) => {
             // Both explicitly provided
             let label_id = LabelId::new(catalog, label).map_err(|e| anyhow!("{}", e))?;

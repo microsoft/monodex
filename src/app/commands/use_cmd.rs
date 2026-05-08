@@ -13,7 +13,7 @@ pub fn run_use(
     match (catalog, label) {
         (None, None) => {
             // Show current context
-            match load_default_context() {
+            match load_default_context(&config.paths) {
                 Some(ctx) => {
                     println!("Current context:");
                     println!("  Catalog: {}", ctx.catalog);
@@ -51,7 +51,7 @@ pub fn run_use(
             }
 
             // Set new context
-            save_default_context(catalog_name, &label)?;
+            save_default_context(&config.paths, catalog_name, &label)?;
 
             println!("✓ Default context set to:");
             println!("  Catalog: {}", catalog_name);

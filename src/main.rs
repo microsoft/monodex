@@ -6,19 +6,19 @@ use clap::Parser;
 use monodex::app::commands::run_use;
 use monodex::app::{Cli, Commands};
 use monodex::app::{load_config, resolve_label_context};
+use monodex::paths::Paths;
 
 fn main() -> anyhow::Result<()> {
-    // Warn if old tool home files exist
-    monodex::paths::warn_old_tool_home_if_present();
-
     let cli = Cli::parse();
 
+    // Resolve paths from environment and CLI overrides
+    let paths = Paths::resolve_from_env(cli.config.clone())?;
+
     // Load config
-    let config_path = match cli.config {
-        Some(ref path) => path,
-        None => &monodex::paths::config_path()?,
-    };
-    let config = load_config(config_path)?;
+    let config = load_config(paths)?;
+
+    // Warn if old tool home files exist
+    monodex::paths::warn_old_tool_home_if_present(&config.paths);
 
     match cli.command {
         Commands::Use { catalog, label } => {
@@ -35,7 +35,8 @@ fn main() -> anyhow::Result<()> {
             retrieval,
         } => {
             // Resolve label context from explicit flags or default context
-            let (_, catalog_name, label) = resolve_label_context(Some(&label), catalog.as_deref())?;
+            let (_, catalog_name, label) =
+                resolve_label_context(&config.paths, Some(&label), catalog.as_deref())?;
 
             if source.working_dir {
                 monodex::app::commands::run_crawl_working_dir(

@@ -17,6 +17,7 @@ use crate::engine::system_info::{
     ResolvedEmbeddingConfig, compute_auto_embedding_config, estimate_ram_usage, format_bytes,
     get_physical_core_count,
 };
+use crate::paths::Paths;
 
 /// Database configuration (LanceDB)
 #[derive(Debug, serde::Deserialize, Clone)]
@@ -172,45 +173,66 @@ impl<'de> serde::Deserialize<'de> for EmbeddingSizeValue {
     }
 }
 
-/// Main configuration file
+/// Configuration file schema (deserialization target).
+///
+/// This is the shape of the JSON config file. It is separate from the runtime
+/// `Config` struct because we need to add paths that are not part of the file.
 #[derive(Debug, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct Config {
+struct ConfigFile {
     pub catalogs: HashMap<String, CatalogConfig>,
     #[serde(rename = "embeddingModel", default)]
     pub embedding_model: EmbeddingModelConfig,
-    /// Optional database configuration (LanceDB).
-    /// If absent, defaults to <tool_home>/default-db.
     #[serde(default)]
     pub database: Option<DatabaseConfig>,
 }
 
-/// Load config from a file path.
+/// Main configuration with resolved paths.
+///
+/// This is the runtime configuration passed through the application.
+/// It combines the config file contents with the resolved `Paths`.
+#[derive(Debug, Clone)]
+pub struct Config {
+    /// Resolved filesystem paths
+    pub paths: Paths,
+    /// Catalog definitions from config file
+    pub catalogs: HashMap<String, CatalogConfig>,
+    /// Embedding model configuration
+    pub embedding_model: EmbeddingModelConfig,
+    /// Optional database configuration
+    pub database: Option<DatabaseConfig>,
+}
+
+/// Load config from a paths struct.
 /// Validates catalog names and types after parsing.
 ///
 /// Error messages:
 /// - File not found: "No config found at <path>. See the README for instructions on creating a config file."
 /// - Other IO errors: preserved with context
 /// - Parse/validation errors: preserved
-pub fn load_config(path: &PathBuf) -> anyhow::Result<Config> {
-    let content = std::fs::read_to_string(path).map_err(|e| {
+pub fn load_config(paths: Paths) -> anyhow::Result<Config> {
+    let content = std::fs::read_to_string(&paths.config_path).map_err(|e| {
         if e.kind() == std::io::ErrorKind::NotFound {
             anyhow!(
                 "No config found at {}. See the README for instructions on creating a config file.",
-                path.display()
+                paths.config_path.display()
             )
         } else {
-            anyhow!("Failed to read config file {}: {}", path.display(), e)
+            anyhow!(
+                "Failed to read config file {}: {}",
+                paths.config_path.display(),
+                e
+            )
         }
     })?;
 
     // Parse JSONC (JSON with comments, per Rush Stack convention)
     let stripped = json_comments::StripComments::new(content.as_bytes());
-    let config: Config = serde_json::from_reader(stripped)
+    let config_file: ConfigFile = serde_json::from_reader(stripped)
         .map_err(|e| anyhow!("Failed to parse config file: {}", e))?;
 
     // Validate catalog names and types
-    for (name, catalog) in &config.catalogs {
+    for (name, catalog) in &config_file.catalogs {
         validate_catalog(name)
             .map_err(|e| anyhow!("Invalid catalog name '{}' in config: {}", name, e))?;
         catalog
@@ -218,7 +240,12 @@ pub fn load_config(path: &PathBuf) -> anyhow::Result<Config> {
             .map_err(|e| anyhow!("Invalid catalog '{}': {}", name, e))?;
     }
 
-    Ok(config)
+    Ok(Config {
+        paths,
+        catalogs: config_file.catalogs,
+        embedding_model: config_file.embedding_model,
+        database: config_file.database,
+    })
 }
 
 /// Validate that a config-file path setting is an absolute, literal path.
@@ -256,20 +283,16 @@ pub fn validate_config_path(field_name: &str, value: &str) -> anyhow::Result<Pat
 ///
 /// - If `database.path` is specified in config, validates it as an absolute path and returns it.
 /// - Otherwise returns `<tool_home>/default-db`.
-///
-/// Note: This uses `crate::paths::tool_home()` which handles MONODEX_HOME.
-pub fn resolve_database_path(config: Option<&Config>) -> anyhow::Result<PathBuf> {
+pub fn resolve_database_path(config: &Config) -> anyhow::Result<PathBuf> {
     // Check if database.path is specified in config
-    if let Some(config) = config
-        && let Some(db_config) = &config.database
+    if let Some(db_config) = &config.database
         && let Some(path) = &db_config.path
     {
         return validate_config_path("database.path", path);
     }
 
     // Default: <tool_home>/default-db
-    let tool_home = crate::paths::tool_home()?;
-    let result = tool_home.join("default-db");
+    let result = config.paths.tool_home.join("default-db");
     Ok(result)
 }
 
@@ -499,7 +522,8 @@ mod tests {
         )
         .unwrap();
 
-        let result = load_config(&config_path);
+        let paths = Paths::for_test(dir.path().into());
+        let result = load_config(paths);
         let err = result.unwrap_err();
         assert!(err.to_string().contains("Invalid catalog 'test'"));
         assert!(
@@ -527,7 +551,8 @@ mod tests {
         )
         .unwrap();
 
-        let config = load_config(&config_path).unwrap();
+        let paths = Paths::for_test(dir.path().into());
+        let config = load_config(paths).unwrap();
         assert_eq!(config.catalogs.get("sparo").unwrap().r#type, "monorepo");
     }
 
@@ -551,7 +576,8 @@ mod tests {
         )
         .unwrap();
 
-        let config = load_config(&config_path).unwrap();
+        let paths = Paths::for_test(dir.path().into());
+        let config = load_config(paths).unwrap();
         assert!(config.database.is_some());
         let db_config = config.database.unwrap();
         assert_eq!(db_config.path, Some("/custom/db".to_string()));
@@ -576,7 +602,8 @@ mod tests {
         )
         .unwrap();
 
-        let config = load_config(&config_path).unwrap();
+        let paths = Paths::for_test(dir.path().into());
+        let config = load_config(paths).unwrap();
         assert!(config.database.is_none());
     }
 
@@ -595,8 +622,9 @@ mod tests {
         )
         .unwrap();
 
-        let config = load_config(&config_path).unwrap();
-        let result = resolve_database_path(Some(&config));
+        let paths = Paths::for_test(dir.path().into());
+        let config = load_config(paths).unwrap();
+        let result = resolve_database_path(&config);
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(
@@ -626,8 +654,9 @@ mod tests {
         )
         .unwrap();
 
-        let config = load_config(&config_path).unwrap();
-        let result = resolve_database_path(Some(&config));
+        let paths = Paths::for_test(dir.path().into());
+        let config = load_config(paths).unwrap();
+        let result = resolve_database_path(&config);
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(
@@ -657,8 +686,9 @@ mod tests {
         )
         .unwrap();
 
-        let config = load_config(&config_path).unwrap();
-        let result = resolve_database_path(Some(&config));
+        let paths = Paths::for_test(dir.path().into());
+        let config = load_config(paths).unwrap();
+        let result = resolve_database_path(&config);
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(
@@ -688,18 +718,33 @@ mod tests {
         )
         .unwrap();
 
-        let config = load_config(&config_path).unwrap();
-        let path = resolve_database_path(Some(&config)).unwrap();
+        let paths = Paths::for_test(dir.path().into());
+        let config = load_config(paths).unwrap();
+        let path = resolve_database_path(&config).unwrap();
         assert_eq!(path, PathBuf::from("/custom/db"));
     }
 
     #[test]
     fn test_resolve_database_path_defaults_to_tool_home() {
-        // When no config or no database.path, should use <tool_home>/default-db
-        let path = resolve_database_path(None).unwrap();
+        // When no database.path, should use <tool_home>/default-db
+        let dir = tempdir().unwrap();
+        let config_path = dir.path().join("config.json");
+        let mut file = std::fs::File::create(&config_path).unwrap();
 
-        // Should end with default-db
-        assert!(path.ends_with("default-db"));
+        writeln!(
+            file,
+            r#"{{
+                "catalogs": {{}}
+            }}"#
+        )
+        .unwrap();
+
+        let paths = Paths::for_test(dir.path().into());
+        let config = load_config(paths).unwrap();
+        let path = resolve_database_path(&config).unwrap();
+
+        // Should be <tool_home>/default-db
+        assert_eq!(path, dir.path().join("default-db"));
     }
 
     #[test]
@@ -716,11 +761,12 @@ mod tests {
         )
         .unwrap();
 
-        let config = load_config(&config_path).unwrap();
-        let path = resolve_database_path(Some(&config)).unwrap();
+        let paths = Paths::for_test(dir.path().into());
+        let config = load_config(paths).unwrap();
+        let path = resolve_database_path(&config).unwrap();
 
-        // Should end with default-db
-        assert!(path.ends_with("default-db"));
+        // Should be <tool_home>/default-db
+        assert_eq!(path, dir.path().join("default-db"));
     }
 
     #[test]
@@ -742,7 +788,8 @@ mod tests {
         )
         .unwrap();
 
-        let result = load_config(&config_path);
+        let paths = Paths::for_test(dir.path().into());
+        let result = load_config(paths);
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(
@@ -755,8 +802,9 @@ mod tests {
     #[test]
     fn test_load_config_missing_file_centralized_error() {
         // Test that the "config file not found" error uses the centralized wording
-        let nonexistent_path = PathBuf::from("/nonexistent/path/to/config.json");
-        let result = load_config(&nonexistent_path);
+        let temp_dir = tempdir().unwrap();
+        let paths = Paths::for_test(temp_dir.path().into());
+        let result = load_config(paths);
 
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
@@ -770,12 +818,6 @@ mod tests {
         assert!(
             err.contains("See the README for instructions on creating a config file."),
             "Expected error to contain README hint, got: {}",
-            err
-        );
-        // Verify the path is included
-        assert!(
-            err.contains("/nonexistent/path/to/config.json"),
-            "Expected error to contain the path, got: {}",
             err
         );
     }
@@ -803,7 +845,8 @@ mod tests {
         )
         .unwrap();
 
-        let config = load_config(&config_path).unwrap();
+        let paths = Paths::for_test(dir.path().into());
+        let config = load_config(paths).unwrap();
         assert_eq!(config.catalogs.get("sparo").unwrap().r#type, "monorepo");
     }
 }

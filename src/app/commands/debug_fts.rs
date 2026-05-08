@@ -39,10 +39,11 @@ pub fn run_debug_fts(
     let (file_id, ordinal) = parse_chunk_id(id)?;
 
     // Resolve label context
-    let (label_id, catalog_name, label_name) = resolve_label_context(label, catalog)?;
+    let (label_id, catalog_name, label_name) =
+        resolve_label_context(&config.paths, label, catalog)?;
 
     // Resolve database path
-    let db_path = resolve_database_path(Some(config))?;
+    let db_path = resolve_database_path(config)?;
 
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {

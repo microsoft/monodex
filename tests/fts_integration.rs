@@ -11,32 +11,10 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
-use serial_test::serial;
-
 use monodex::app::commands::init_db::run_init_db;
 use monodex::app::commands::search::run_search;
 use monodex::app::config::Config;
 use monodex::engine::retrieval::RetrievalMethod;
-
-fn set_monodex_home(tmp_dir: &Path) {
-    // Clear any cached tool_home from previous tests
-    monodex::paths::clear_tool_home_cache();
-
-    // SAFETY: Tests are serialized via #[serial_test::serial(monodex_home)] attribute
-    unsafe {
-        std::env::set_var("MONODEX_HOME", tmp_dir);
-    }
-}
-
-fn remove_monodex_home() {
-    // SAFETY: Tests are serialized via #[serial_test::serial(monodex_home)] attribute
-    unsafe {
-        std::env::remove_var("MONODEX_HOME");
-    }
-
-    // Clear the cache so the next test starts fresh
-    monodex::paths::clear_tool_home_cache();
-}
 
 /// Generate a unique temp directory with a prefix to avoid path reuse collisions.
 ///
@@ -158,10 +136,9 @@ fn create_test_config(monodex_home: &Path, catalog_name: &str, repo_path: &Path)
 
     fs::write(&config_path, &config_content).expect("Failed to write config");
 
-    // Load and return the config
-    let content = fs::read_to_string(&config_path).expect("Failed to read config");
-    let stripped = json_comments::StripComments::new(content.as_bytes());
-    serde_json::from_reader(stripped).expect("Failed to parse config")
+    // Use the proper load_config path to get a Config with Paths
+    let paths = monodex::paths::Paths::for_test(monodex_home.to_path_buf());
+    monodex::app::config::load_config(paths).expect("Failed to load config")
 }
 
 // =============================================================================
@@ -175,15 +152,12 @@ fn create_test_config(monodex_home: &Path, catalog_name: &str, repo_path: &Path)
 /// - `monodex search --text "..." --retrieval fts` → confirms FTS results.
 /// - `monodex search --text "..." --retrieval vector` → confirms vector results.
 #[test]
-#[serial(monodex_home)]
 #[allow(non_snake_case)]
 fn test_crawl_then_search__quick_excluded() {
     let (_monodex_home, _repo_dir) = {
         // Set up temp directories
         let monodex_home = unique_temp_dir();
         let repo_dir = unique_temp_dir();
-
-        set_monodex_home(monodex_home.path());
 
         // Create test git repo
         let commit_oid = create_test_git_repo(repo_dir.path());
@@ -281,8 +255,6 @@ fn test_crawl_then_search__quick_excluded() {
 
         (monodex_home, repo_dir)
     };
-
-    remove_monodex_home();
 }
 
 // =============================================================================
@@ -296,15 +268,12 @@ fn test_crawl_then_search__quick_excluded() {
 /// - Confirms search shows "(fts only, no vector)" on Label: line
 /// - Confirms search --retrieval vector errors with "not in selection"
 #[test]
-#[serial(monodex_home)]
 #[allow(non_snake_case)]
 fn test_selection_narrowing__quick_excluded() {
     let (_monodex_home, _repo_dir) = {
         // Set up temp directories
         let monodex_home = unique_temp_dir();
         let repo_dir = unique_temp_dir();
-
-        set_monodex_home(monodex_home.path());
 
         // Create test git repo
         let commit_oid = create_test_git_repo(repo_dir.path());
@@ -390,8 +359,6 @@ fn test_selection_narrowing__quick_excluded() {
 
         (monodex_home, repo_dir)
     };
-
-    remove_monodex_home();
 }
 
 // =============================================================================
@@ -405,15 +372,12 @@ fn test_selection_narrowing__quick_excluded() {
 /// - Confirms search shows "(fts, vector)" on Label: line
 /// - Confirms search with no --retrieval produces PR1 stub error again
 #[test]
-#[serial(monodex_home)]
 #[allow(non_snake_case)]
 fn test_selection_widening__quick_excluded() {
     let (_monodex_home, _repo_dir) = {
         // Set up temp directories
         let monodex_home = unique_temp_dir();
         let repo_dir = unique_temp_dir();
-
-        set_monodex_home(monodex_home.path());
 
         // Create test git repo
         let commit_oid = create_test_git_repo(repo_dir.path());
@@ -528,8 +492,6 @@ fn test_selection_widening__quick_excluded() {
 
         (monodex_home, repo_dir)
     };
-
-    remove_monodex_home();
 }
 
 // =============================================================================
@@ -542,15 +504,12 @@ fn test_selection_widening__quick_excluded() {
 /// - Confirms parenthesis shows "(fts only, no vector)"
 /// - Confirms search --retrieval vector errors with "not in selection"
 #[test]
-#[serial(monodex_home)]
 #[allow(non_snake_case)]
 fn test_first_time_crawl_fts_only__quick_excluded() {
     let (_monodex_home, _repo_dir) = {
         // Set up temp directories
         let monodex_home = unique_temp_dir();
         let repo_dir = unique_temp_dir();
-
-        set_monodex_home(monodex_home.path());
 
         // Create test git repo
         let commit_oid = create_test_git_repo(repo_dir.path());
@@ -622,8 +581,6 @@ fn test_first_time_crawl_fts_only__quick_excluded() {
 
         (monodex_home, repo_dir)
     };
-
-    remove_monodex_home();
 }
 
 // =============================================================================
@@ -634,15 +591,12 @@ fn test_first_time_crawl_fts_only__quick_excluded() {
 /// - After a crawl producing FTS state, purge --catalog X removes FTS directory
 /// - purge --all removes entire fts/ directory
 #[test]
-#[serial(monodex_home)]
 #[allow(non_snake_case)]
 fn test_purge_cleanup__quick_excluded() {
     let (_monodex_home, _repo_dir) = {
         // Set up temp directories
         let monodex_home = unique_temp_dir();
         let repo_dir = unique_temp_dir();
-
-        set_monodex_home(monodex_home.path());
 
         // Create test git repo
         let commit_oid = create_test_git_repo(repo_dir.path());
@@ -666,7 +620,7 @@ fn test_purge_cleanup__quick_excluded() {
         .expect("crawl failed");
 
         // Get database path
-        let db_path = monodex::app::resolve_database_path(Some(&config)).unwrap();
+        let db_path = monodex::app::resolve_database_path(&config).unwrap();
         let fts_catalog_path = db_path.join("fts").join("test-catalog");
 
         // Verify FTS directory exists after crawl
@@ -724,8 +678,6 @@ fn test_purge_cleanup__quick_excluded() {
 
         (monodex_home, repo_dir)
     };
-
-    remove_monodex_home();
 }
 
 // =============================================================================
@@ -737,15 +689,12 @@ fn test_purge_cleanup__quick_excluded() {
 /// - Attempt to open the database
 /// - Confirm error fires with expected message
 #[test]
-#[serial(monodex_home)]
 #[allow(non_snake_case)]
 fn test_schema_mismatch_error__quick_excluded() {
     let (_monodex_home, _repo_dir) = {
         // Set up temp directories
         let monodex_home = unique_temp_dir();
         let repo_dir = unique_temp_dir();
-
-        set_monodex_home(monodex_home.path());
 
         // Create test git repo (unused - we just need a repo for config)
         let _commit_oid = create_test_git_repo(repo_dir.path());
@@ -757,7 +706,7 @@ fn test_schema_mismatch_error__quick_excluded() {
         run_init_db(&config, false).expect("init-db failed");
 
         // Get database path
-        let db_path = monodex::app::resolve_database_path(Some(&config)).unwrap();
+        let db_path = monodex::app::resolve_database_path(&config).unwrap();
         let meta_path = db_path.join("monodex-meta.json");
 
         // Now hand-write an old schema version
@@ -787,8 +736,6 @@ fn test_schema_mismatch_error__quick_excluded() {
 
         (monodex_home, repo_dir)
     };
-
-    remove_monodex_home();
 }
 
 // =============================================================================
@@ -800,15 +747,12 @@ fn test_schema_mismatch_error__quick_excluded() {
 /// - Run search with a syntactically-invalid query for Tantivy's parser
 /// - Confirm output is "Couldn't parse FTS query: <message>" and NOT "No results."
 #[test]
-#[serial(monodex_home)]
 #[allow(non_snake_case)]
 fn test_fts_query_parse_error__quick_excluded() {
     let (_monodex_home, _repo_dir) = {
         // Set up temp directories
         let monodex_home = unique_temp_dir();
         let repo_dir = unique_temp_dir();
-
-        set_monodex_home(monodex_home.path());
 
         // Create test git repo
         let commit_oid = create_test_git_repo(repo_dir.path());
@@ -868,8 +812,6 @@ fn test_fts_query_parse_error__quick_excluded() {
 
         (monodex_home, repo_dir)
     };
-
-    remove_monodex_home();
 }
 
 // =============================================================================
@@ -881,15 +823,12 @@ fn test_fts_query_parse_error__quick_excluded() {
 /// - Run `monodex search --retrieval fts --retrieval vector`
 /// - Confirm the PR1 stub error fires (same as no-flag with size-2+ selection)
 #[test]
-#[serial(monodex_home)]
 #[allow(non_snake_case)]
 fn test_multi_method_explicit_search__quick_excluded() {
     let (_monodex_home, _repo_dir) = {
         // Set up temp directories
         let monodex_home = unique_temp_dir();
         let repo_dir = unique_temp_dir();
-
-        set_monodex_home(monodex_home.path());
 
         // Create test git repo
         let commit_oid = create_test_git_repo(repo_dir.path());
@@ -950,8 +889,6 @@ fn test_multi_method_explicit_search__quick_excluded() {
 
         (monodex_home, repo_dir)
     };
-
-    remove_monodex_home();
 }
 
 /// Test that the search preamble appears before the multi-method stub error.
@@ -960,15 +897,12 @@ fn test_multi_method_explicit_search__quick_excluded() {
 /// is printed before the PR1 stub error for hybrid search, making the
 /// retrieval-selection concept legible even when errors follow.
 #[test]
-#[serial(monodex_home)]
 #[allow(non_snake_case)]
 fn test_multi_method_search_shows_preamble__quick_excluded() {
     let (_monodex_home, _repo_dir) = {
         // Set up temp directories
         let monodex_home = unique_temp_dir();
         let repo_dir = unique_temp_dir();
-
-        set_monodex_home(monodex_home.path());
 
         // Create test git repo
         let commit_oid = create_test_git_repo(repo_dir.path());
@@ -1043,8 +977,6 @@ fn test_multi_method_search_shows_preamble__quick_excluded() {
 
         (monodex_home, repo_dir)
     };
-
-    remove_monodex_home();
 }
 
 // =============================================================================
@@ -1060,15 +992,12 @@ fn test_multi_method_search_shows_preamble__quick_excluded() {
 /// 3. Search under label A should find the chunk
 /// 4. Search under label B should find the chunk
 #[test]
-#[serial(monodex_home)]
 #[allow(non_snake_case)]
 fn test_cross_label_active_labels_preserved__quick_excluded() {
     let (_monodex_home, _repo_dir) = {
         // Set up temp directories
         let monodex_home = unique_temp_dir();
         let repo_dir = unique_temp_dir();
-
-        set_monodex_home(monodex_home.path());
 
         // Create test git repo
         let commit_oid = create_test_git_repo(repo_dir.path());
@@ -1154,8 +1083,6 @@ fn test_cross_label_active_labels_preserved__quick_excluded() {
 
         (monodex_home, repo_dir)
     };
-
-    remove_monodex_home();
 }
 
 // =============================================================================
@@ -1165,15 +1092,12 @@ fn test_cross_label_active_labels_preserved__quick_excluded() {
 /// Test that a working-dir-crawled label produces remediation suggesting
 /// `--working-dir`, not `--commit <opaque sentinel>`.
 #[test]
-#[serial(monodex_home)]
 #[allow(non_snake_case)]
 fn test_working_dir_remediation_message__quick_excluded() {
     let (_monodex_home, _repo_dir) = {
         // Set up temp directories
         let monodex_home = unique_temp_dir();
         let repo_dir = unique_temp_dir();
-
-        set_monodex_home(monodex_home.path());
 
         // Create test git repo (we crawl working-dir, but need git for the repo structure)
         let _commit_oid = create_test_git_repo(repo_dir.path());
@@ -1242,8 +1166,6 @@ fn test_working_dir_remediation_message__quick_excluded() {
 
         (monodex_home, repo_dir)
     };
-
-    remove_monodex_home();
 }
 
 // =============================================================================
@@ -1258,15 +1180,12 @@ fn test_working_dir_remediation_message__quick_excluded() {
 ///
 /// The crawl should fail with an error referencing the warning state.
 #[test]
-#[serial(monodex_home)]
 #[allow(non_snake_case)]
 fn test_post_finalize_error_propagates_when_no_phase_error__quick_excluded() {
     let (_monodex_home, _repo_dir) = {
         // Set up temp directories
         let monodex_home = unique_temp_dir();
         let repo_dir = unique_temp_dir();
-
-        set_monodex_home(monodex_home.path());
 
         // Create test git repo
         let commit_oid = create_test_git_repo(repo_dir.path());
@@ -1278,7 +1197,7 @@ fn test_post_finalize_error_propagates_when_no_phase_error__quick_excluded() {
         run_init_db(&config, false).expect("init-db failed");
 
         // Resolve the database path
-        let db_path = monodex::app::resolve_database_path(Some(&config)).unwrap();
+        let db_path = monodex::app::resolve_database_path(&config).unwrap();
 
         // Create a directory at the path where save_warning_state would write its file.
         // This causes the write to fail with "is a directory" error.
@@ -1313,6 +1232,4 @@ fn test_post_finalize_error_propagates_when_no_phase_error__quick_excluded() {
 
         (monodex_home, repo_dir)
     };
-
-    remove_monodex_home();
 }

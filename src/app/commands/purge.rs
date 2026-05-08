@@ -17,7 +17,7 @@ pub fn run_purge(
     _debug: bool,
 ) -> anyhow::Result<()> {
     // Resolve database path early (before any lock acquisition)
-    let db_path = resolve_database_path(Some(config))?;
+    let db_path = resolve_database_path(config)?;
 
     // Move error check to synchronous entry point (before lock acquisition)
     // No lock should be taken when arguments are invalid
@@ -102,28 +102,24 @@ async fn run_purge_catalog_async(
 mod tests {
     use super::*;
     use crate::engine::storage::{Database as StorageDatabase, META_FILE};
-    use crate::paths::clear_tool_home_cache;
-    use serial_test::serial;
     use tempfile::TempDir;
 
     use crate::app::commands::test_helpers::{
-        create_test_db_with_chunks, remove_monodex_home, set_monodex_home,
-        test_chunk_row_with_catalog, test_label_metadata_row_with_parts, write_minimal_config,
+        create_test_db_with_chunks, test_chunk_row_with_catalog,
+        test_label_metadata_row_with_parts, write_minimal_config,
     };
+    use crate::paths::Paths;
 
     #[test]
-    #[serial(monodex_home)]
     fn test_purge_missing_database() {
-        clear_tool_home_cache();
         let temp_dir = TempDir::new().unwrap();
-
-        set_monodex_home(temp_dir.path());
 
         // Create config but no database
         let config_path = temp_dir.path().join("config.json");
         write_minimal_config(&config_path);
 
-        let config = crate::app::config::load_config(&config_path).unwrap();
+        let paths = Paths::for_test(temp_dir.path().into());
+        let config = crate::app::config::load_config(paths).unwrap();
         let result = run_purge(&config, Some("test-catalog"), false, false);
 
         let err = result.unwrap_err().to_string();
@@ -137,17 +133,11 @@ mod tests {
             "Error should mention init-db: {}",
             err
         );
-
-        remove_monodex_home();
     }
 
     #[test]
-    #[serial(monodex_home)]
     fn test_purge_neither_catalog_nor_all() {
-        clear_tool_home_cache();
         let temp_dir = TempDir::new().unwrap();
-
-        set_monodex_home(temp_dir.path());
 
         // Create config
         let config_path = temp_dir.path().join("config.json");
@@ -160,7 +150,8 @@ mod tests {
             create_test_db_with_chunks(&db_path, vec![], vec![]).await;
         });
 
-        let config = crate::app::config::load_config(&config_path).unwrap();
+        let paths = Paths::for_test(temp_dir.path().into());
+        let config = crate::app::config::load_config(paths).unwrap();
         let result = run_purge(&config, None, false, false);
 
         let err = result.unwrap_err().to_string();
@@ -169,17 +160,11 @@ mod tests {
             "Error should mention missing options: {}",
             err
         );
-
-        remove_monodex_home();
     }
 
     #[test]
-    #[serial(monodex_home)]
     fn test_purge_all_truncates_tables() {
-        clear_tool_home_cache();
         let temp_dir = TempDir::new().unwrap();
-
-        set_monodex_home(temp_dir.path());
 
         // Create config
         let config_path = temp_dir.path().join("config.json");
@@ -203,7 +188,8 @@ mod tests {
             .await;
         });
 
-        let config = crate::app::config::load_config(&config_path).unwrap();
+        let paths = Paths::for_test(temp_dir.path().into());
+        let config = crate::app::config::load_config(paths).unwrap();
         let result = run_purge(&config, None, true, false);
 
         assert!(
@@ -230,17 +216,11 @@ mod tests {
             db_path.join(META_FILE).exists(),
             "Meta file should still exist"
         );
-
-        remove_monodex_home();
     }
 
     #[test]
-    #[serial(monodex_home)]
     fn test_purge_catalog_deletes_only_that_catalog() {
-        clear_tool_home_cache();
         let temp_dir = TempDir::new().unwrap();
-
-        set_monodex_home(temp_dir.path());
 
         // Create config
         let config_path = temp_dir.path().join("config.json");
@@ -265,7 +245,8 @@ mod tests {
             .await;
         });
 
-        let config = crate::app::config::load_config(&config_path).unwrap();
+        let paths = Paths::for_test(temp_dir.path().into());
+        let config = crate::app::config::load_config(paths).unwrap();
         let result = run_purge(&config, Some("catalog1"), false, false);
 
         assert!(
@@ -286,17 +267,11 @@ mod tests {
             assert_eq!(chunk_count, 1, "Only catalog2 chunks should remain");
             assert_eq!(label_count, 1, "Only catalog2 label should remain");
         });
-
-        remove_monodex_home();
     }
 
     #[test]
-    #[serial(monodex_home)]
     fn test_purge_nonexistent_catalog_succeeds() {
-        clear_tool_home_cache();
         let temp_dir = TempDir::new().unwrap();
-
-        set_monodex_home(temp_dir.path());
 
         // Create config
         let config_path = temp_dir.path().join("config.json");
@@ -320,7 +295,8 @@ mod tests {
             .await;
         });
 
-        let config = crate::app::config::load_config(&config_path).unwrap();
+        let paths = Paths::for_test(temp_dir.path().into());
+        let config = crate::app::config::load_config(paths).unwrap();
         let result = run_purge(&config, Some("nonexistent-catalog"), false, false);
 
         // Should succeed (deletes 0 rows)
@@ -338,7 +314,5 @@ mod tests {
             let chunk_count = chunk_storage.table().count_rows(None).await.unwrap();
             assert_eq!(chunk_count, 1, "Original chunks should still exist");
         });
-
-        remove_monodex_home();
     }
 }

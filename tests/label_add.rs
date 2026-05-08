@@ -7,7 +7,6 @@ use std::path::Path;
 use std::sync::Arc;
 
 use lancedb::connect;
-use serial_test::serial;
 
 use monodex::engine::{
     Chunk,
@@ -15,20 +14,6 @@ use monodex::engine::{
     schema::chunks_schema,
     storage::{ChunkRow, ChunkStorage},
 };
-
-fn set_monodex_home(tmp_dir: &Path) {
-    // SAFETY: Tests are serialized via #[serial_test::serial(monodex_home)] attribute
-    unsafe {
-        std::env::set_var("MONODEX_HOME", tmp_dir);
-    }
-}
-
-fn remove_monodex_home() {
-    // SAFETY: Tests are serialized via #[serial_test::serial(monodex_home)] attribute
-    unsafe {
-        std::env::remove_var("MONODEX_HOME");
-    }
-}
 
 fn write_minimal_config(monodex_home: &Path) {
     let config_path = monodex_home.join("config.json");
@@ -97,14 +82,12 @@ async fn create_test_storage() -> (tempfile::TempDir, ChunkStorage) {
 /// crawling it under label B should add label B to the active_label_ids array
 /// without re-embedding.
 #[tokio::test]
-#[serial(monodex_home)]
 async fn test_label_add_makes_chunks_searchable() {
     // Use a blocking scope to set up the test environment, then drop the lock
     // before any async operations
     let (_monodex_home, _tmp_dir) = {
         let tmp_dir = tempfile::TempDir::new().unwrap();
         let monodex_home = tmp_dir.path().to_path_buf();
-        set_monodex_home(&monodex_home);
         write_minimal_config(&monodex_home);
         (monodex_home, tmp_dir)
     };
@@ -212,8 +195,6 @@ async fn test_label_add_makes_chunks_searchable() {
         file_ids_a, file_ids_b,
         "Both labels should return the same file_ids"
     );
-
-    remove_monodex_home();
 }
 
 /// Test that incomplete files (file_complete = false) are re-crawled.
@@ -221,14 +202,12 @@ async fn test_label_add_makes_chunks_searchable() {
 /// This verifies the sentinel check: when a sentinel chunk exists but
 /// file_complete is false, the file should be treated as new and re-crawled.
 #[tokio::test]
-#[serial(monodex_home)]
 async fn test_incomplete_file_is_recrawled() {
     // Use a blocking scope to set up the test environment, then drop the lock
     // before any async operations
     let (_monodex_home, _tmp_dir) = {
         let tmp_dir = tempfile::TempDir::new().unwrap();
         let monodex_home = tmp_dir.path().to_path_buf();
-        set_monodex_home(&monodex_home);
         write_minimal_config(&monodex_home);
         (monodex_home, tmp_dir)
     };
@@ -300,6 +279,4 @@ async fn test_incomplete_file_is_recrawled() {
         should_recrawl,
         "Incomplete file should be marked for re-crawl"
     );
-
-    remove_monodex_home();
 }

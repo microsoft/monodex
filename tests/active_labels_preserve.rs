@@ -5,7 +5,6 @@
 use std::sync::Arc;
 
 use lancedb::connect;
-use serial_test::serial;
 
 use monodex::engine::{
     Chunk,
@@ -13,20 +12,6 @@ use monodex::engine::{
     schema::chunks_schema,
     storage::{ChunkRow, ChunkStorage},
 };
-
-fn set_monodex_home(tmp_dir: &std::path::Path) {
-    // SAFETY: Tests are serialized via #[serial_test::serial(monodex_home)] attribute
-    unsafe {
-        std::env::set_var("MONODEX_HOME", tmp_dir);
-    }
-}
-
-fn remove_monodex_home() {
-    // SAFETY: Tests are serialized via #[serial_test::serial(monodex_home)] attribute
-    unsafe {
-        std::env::remove_var("MONODEX_HOME");
-    }
-}
 
 fn write_minimal_config(monodex_home: &std::path::Path) {
     let config_path = monodex_home.join("config.json");
@@ -125,12 +110,10 @@ fn chunk_to_row(chunk: &Chunk) -> ChunkRow {
 /// 2. Upsert the same chunk with active_label_ids=[B] via upsert_with_vectors
 /// 3. Verify the chunk now has active_label_ids containing both A and B
 #[tokio::test]
-#[serial(monodex_home)]
 async fn test_active_label_ids_preserved_vector_path() {
     let (_monodex_home, _tmp_dir) = {
         let tmp_dir = tempfile::TempDir::new().unwrap();
         let monodex_home = tmp_dir.path().to_path_buf();
-        set_monodex_home(&monodex_home);
         write_minimal_config(&monodex_home);
         (monodex_home, tmp_dir)
     };
@@ -192,8 +175,6 @@ async fn test_active_label_ids_preserved_vector_path() {
         2,
         "Should have exactly 2 labels (no duplicates)"
     );
-
-    remove_monodex_home();
 }
 
 /// Test that active_label_ids is preserved across FTS-then-vector upserts.
@@ -203,12 +184,10 @@ async fn test_active_label_ids_preserved_vector_path() {
 /// 2. Upsert the same chunk with active_label_ids=[B] via upsert_with_vectors
 /// 3. Verify the chunk has both labels AND the vector works
 #[tokio::test]
-#[serial(monodex_home)]
 async fn test_active_label_ids_preserved_fts_then_vector() {
     let (_monodex_home, _tmp_dir) = {
         let tmp_dir = tempfile::TempDir::new().unwrap();
         let monodex_home = tmp_dir.path().to_path_buf();
-        set_monodex_home(&monodex_home);
         write_minimal_config(&monodex_home);
         (monodex_home, tmp_dir)
     };
@@ -284,8 +263,6 @@ async fn test_active_label_ids_preserved_fts_then_vector() {
         .await
         .unwrap();
     assert_eq!(results_b.len(), 1, "Should find chunk via label B");
-
-    remove_monodex_home();
 }
 
 /// Test that self-upsert is idempotent (no duplicate labels).
@@ -295,12 +272,10 @@ async fn test_active_label_ids_preserved_fts_then_vector() {
 /// 2. Upsert the same chunk with active_label_ids=[A] again
 /// 3. Verify active_label_ids still has exactly [A], not [A, A]
 #[tokio::test]
-#[serial(monodex_home)]
 async fn test_active_label_ids_self_upsert_idempotent() {
     let (_monodex_home, _tmp_dir) = {
         let tmp_dir = tempfile::TempDir::new().unwrap();
         let monodex_home = tmp_dir.path().to_path_buf();
-        set_monodex_home(&monodex_home);
         write_minimal_config(&monodex_home);
         (monodex_home, tmp_dir)
     };
@@ -349,6 +324,4 @@ async fn test_active_label_ids_self_upsert_idempotent() {
         stored.active_label_ids.contains(&label_a_id),
         "Should contain label A"
     );
-
-    remove_monodex_home();
 }

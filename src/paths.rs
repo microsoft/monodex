@@ -1,4 +1,4 @@
-//! Purpose: Resolve filesystem paths for monodex tool state (config, context, crawl config, warning state).
+//! Purpose: Resolve filesystem paths for monodex tool state (config, context, crawl config).
 //!
 //! Edit here when: Changing where tool state lives on disk, adding MONODEX_HOME-style overrides,
 //!   or adding accessors for new files under the tool home.
@@ -6,139 +6,126 @@
 //!   or default-context semantics (see app/context.rs).
 
 use anyhow::{Result, anyhow};
-use std::path::{Path, PathBuf};
-use std::sync::RwLock;
+use std::path::PathBuf;
 
-/// Cached tool home path.
+/// Resolved filesystem paths for monodex tool state.
 ///
-/// Uses RwLock<Option<PathBuf>> instead of OnceLock so that integration tests
-/// can clear the cache via `clear_tool_home_cache()`. The cache is per-process
-/// and thread-safe.
-///
-/// In production: Once resolved, it stays consistent for the process lifetime.
-/// In tests: `clear_tool_home_cache()` can reset it so each test gets a fresh value.
-static TOOL_HOME: RwLock<Option<PathBuf>> = RwLock::new(None);
-
-/// Resolve the monodex tool home.
-///
-/// - If `MONODEX_HOME` is set and non-empty (after trim), returns that path (canonicalized if relative).
-/// - Otherwise returns `<home>/.monodex`.
-/// - Errors if neither is available.
-///
-/// The result is cached for the process lifetime to ensure consistency.
-pub fn tool_home() -> Result<PathBuf> {
-    // Check cache first (read lock)
-    {
-        let cache = TOOL_HOME.read().unwrap();
-        if let Some(cached) = cache.as_ref() {
-            return Ok(cached.clone());
-        }
-    }
-
-    // Not cached, resolve and cache (write lock)
-    let resolved = resolve_tool_home_inner()?;
-    {
-        let mut cache = TOOL_HOME.write().unwrap();
-        // Check again in case another thread resolved while we were waiting
-        if cache.is_none() {
-            *cache = Some(resolved.clone());
-        }
-        Ok(cache.as_ref().unwrap().clone())
-    }
+/// This struct owns the resolved tool home directory and derived paths.
+/// It is constructed once at startup (via `resolve_from_env`) or explicitly
+/// in tests (via `for_test`). After construction, all path access is deterministic
+/// and does not read environment variables.
+#[derive(Debug, Clone)]
+pub struct Paths {
+    /// The tool home directory (resolved from MONODEX_HOME or ~/.monodex)
+    pub tool_home: PathBuf,
+    /// Path to the config file (resolved from --config, MONODEX_CONFIG, or <tool_home>/config.json)
+    pub config_path: PathBuf,
 }
 
-/// Clear the cached tool home.
-///
-/// This is intended for integration tests that need to reset the cached tool home
-/// between test cases. Each test sets its own MONODEX_HOME and needs to ensure
-/// the cache doesn't return a stale value from a previous test.
-pub fn clear_tool_home_cache() {
-    let mut cache = TOOL_HOME.write().unwrap();
-    *cache = None;
-}
+impl Paths {
+    /// Resolve paths from environment variables and CLI overrides.
+    ///
+    /// Tool home resolution:
+    /// - If `MONODEX_HOME` is set and non-empty (after trim), uses that path.
+    ///   Relative paths are converted to absolute using current working directory.
+    /// - Otherwise falls back to `<home>/.monodex`.
+    ///
+    /// Config path resolution (precedence):
+    /// 1. `config_override` (from CLI `--config` flag)
+    /// 2. `MONODEX_CONFIG` environment variable
+    /// 3. `<tool_home>/config.json`
+    ///
+    /// Relative paths in `config_override` and `MONODEX_CONFIG` are preserved as-is.
+    pub fn resolve_from_env(config_override: Option<PathBuf>) -> Result<Self> {
+        // Resolve tool home
+        let tool_home = Self::resolve_tool_home()?;
 
-/// Inner resolution logic, uncached.
-fn resolve_tool_home_inner() -> Result<PathBuf> {
-    // Check MONODEX_HOME env var
-    if let Ok(env_val) = std::env::var("MONODEX_HOME") {
-        let trimmed = env_val.trim();
-        if !trimmed.is_empty() {
-            let path = PathBuf::from(trimmed);
-
-            // If relative, convert to absolute using current working directory
-            if path.is_relative() {
-                let cwd = std::env::current_dir()?;
-                let absolute = cwd.join(&path);
-                eprintln!(
-                    "MONODEX_HOME is a relative path; resolved to {}",
-                    absolute.display()
-                );
-                return Ok(absolute);
+        // Resolve config path
+        let config_path = match config_override {
+            Some(path) => path,
+            None => {
+                if let Ok(env_val) = std::env::var("MONODEX_CONFIG") {
+                    let trimmed = env_val.trim();
+                    if !trimmed.is_empty() {
+                        PathBuf::from(trimmed)
+                    } else {
+                        tool_home.join("config.json")
+                    }
+                } else {
+                    tool_home.join("config.json")
+                }
             }
+        };
 
-            return Ok(path);
+        Ok(Paths {
+            tool_home,
+            config_path,
+        })
+    }
+
+    /// Construct a `Paths` from an explicit tool-home directory.
+    ///
+    /// Intended for tests, but safe to use from any code that has already
+    /// resolved its own tool home. Sets `config_path` to `<tool_home>/config.json`.
+    pub fn for_test(tool_home: PathBuf) -> Self {
+        let config_path = tool_home.join("config.json");
+        Paths {
+            tool_home,
+            config_path,
         }
     }
 
-    // Fall back to <home>/.monodex
-    let home = dirs::home_dir().ok_or_else(|| {
-        anyhow!("Could not determine home directory. Set MONODEX_HOME or ensure $HOME is set.")
-    })?;
-
-    Ok(home.join(".monodex"))
-}
-
-/// Resolve the path to the config file.
-///
-/// Resolution order:
-/// 1. If MONODEX_CONFIG is set and non-empty, use that path.
-/// 2. Otherwise, use `<tool_home>/config.json`.
-pub fn config_path() -> Result<PathBuf> {
-    if let Ok(env_val) = std::env::var("MONODEX_CONFIG") {
-        let trimmed = env_val.trim();
-        if !trimmed.is_empty() {
-            return Ok(PathBuf::from(trimmed));
-        }
+    /// Path to the context file (for `monodex use`).
+    ///
+    /// The context file stores the default catalog and label.
+    pub fn context_file(&self) -> PathBuf {
+        self.tool_home.join("context.json")
     }
 
-    Ok(tool_home()?.join("config.json"))
-}
+    /// Path to the user-global crawl config file.
+    ///
+    /// This file is optional and may not exist.
+    pub fn crawl_config(&self) -> PathBuf {
+        self.tool_home.join("crawl.json")
+    }
 
-/// Resolve the path to the context file (for `monodex use`).
-///
-/// The context file stores the default catalog and label.
-pub fn context_path() -> Result<PathBuf> {
-    Ok(tool_home()?.join("context.json"))
-}
+    /// Inner tool home resolution logic.
+    fn resolve_tool_home() -> Result<PathBuf> {
+        // Check MONODEX_HOME env var
+        if let Ok(env_val) = std::env::var("MONODEX_HOME") {
+            let trimmed = env_val.trim();
+            if !trimmed.is_empty() {
+                let path = PathBuf::from(trimmed);
 
-/// Resolve the path to the repo-local crawl config file.
-///
-/// This file is optional and may not exist.
-pub fn repo_local_crawl_config_path(repo_root: &Path) -> PathBuf {
-    repo_root.join("monodex-crawl.json")
-}
+                // If relative, convert to absolute using current working directory
+                if path.is_relative() {
+                    let cwd = std::env::current_dir()?;
+                    let absolute = cwd.join(&path);
+                    eprintln!(
+                        "MONODEX_HOME is a relative path; resolved to {}",
+                        absolute.display()
+                    );
+                    return Ok(absolute);
+                }
 
-/// Resolve the path to the user-global crawl config file.
-///
-/// This file is optional and may not exist.
-pub fn user_global_crawl_config_path() -> Result<PathBuf> {
-    Ok(tool_home()?.join("crawl.json"))
-}
+                return Ok(path);
+            }
+        }
 
-/// Alias for `user_global_crawl_config_path` for backward compatibility.
-pub fn crawl_config_path() -> Result<PathBuf> {
-    user_global_crawl_config_path()
+        // Fall back to <home>/.monodex
+        let home = dirs::home_dir().ok_or_else(|| {
+            anyhow!("Could not determine home directory. Set MONODEX_HOME or ensure $HOME is set.")
+        })?;
+
+        Ok(home.join(".monodex"))
+    }
 }
 
 /// Called once from main() early in startup. Prints a one-line warning to stderr
 /// if any files exist at the old pre-PR locations and no files exist at the
 /// new locations.
-pub fn warn_old_tool_home_if_present() {
-    // Resolve the new tool home (honoring MONODEX_HOME)
-    let new_home = match tool_home() {
-        Ok(path) => path,
-        Err(_) => return, // Can't resolve tool home, nothing to warn about
-    };
+pub fn warn_old_tool_home_if_present(paths: &Paths) {
+    let new_home = &paths.tool_home;
 
     // Check if any new files exist
     let new_config = new_home.join("config.json");
@@ -213,73 +200,79 @@ pub fn warn_old_tool_home_if_present() {
     }
 }
 
-/// Resolve the path to the warning state file for a catalog.
-///
-/// This file tracks files that produced warnings during crawl.
-pub fn warning_state_path(catalog_name: &str) -> Result<PathBuf> {
-    Ok(tool_home()?.join(format!("warnings-{}.json", catalog_name)))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use serial_test::serial;
     use std::env;
 
+    /// RAII guard to restore MONODEX_HOME on drop.
+    /// Captures the current value on construction and restores it (or removes it)
+    /// when dropped, even on panic.
+    struct MonodexHomeGuard {
+        original: Option<String>,
+    }
+
+    impl MonodexHomeGuard {
+        fn capture() -> Self {
+            let original = env::var("MONODEX_HOME").ok();
+            MonodexHomeGuard { original }
+        }
+    }
+
+    impl Drop for MonodexHomeGuard {
+        fn drop(&mut self) {
+            if let Some(ref val) = self.original {
+                unsafe {
+                    env::set_var("MONODEX_HOME", val);
+                }
+            } else {
+                unsafe {
+                    env::remove_var("MONODEX_HOME");
+                }
+            }
+        }
+    }
+
     #[test]
-    #[serial(monodex_home)]
-    fn test_tool_home_uses_env_var() {
+    #[serial(monodex_home_resolver)]
+    fn test_resolve_from_env_uses_monodex_home() {
+        let _guard = MonodexHomeGuard::capture();
         let temp_dir = tempfile::tempdir().unwrap();
-        clear_tool_home_cache();
+
         unsafe {
             env::set_var("MONODEX_HOME", temp_dir.path());
         }
-        let result = tool_home().unwrap();
-        assert_eq!(result, temp_dir.path());
-        clear_tool_home_cache();
-        unsafe {
-            env::remove_var("MONODEX_HOME");
-        }
+
+        let paths = Paths::resolve_from_env(None).unwrap();
+        assert_eq!(paths.tool_home, temp_dir.path());
+
+        // Config path should default to <tool_home>/config.json
+        assert_eq!(paths.config_path, temp_dir.path().join("config.json"));
     }
 
     #[test]
-    #[serial(monodex_home)]
-    fn test_tool_home_falls_back_to_home() {
-        clear_tool_home_cache();
+    #[serial(monodex_home_resolver)]
+    fn test_resolve_from_env_falls_back_to_home() {
+        let _guard = MonodexHomeGuard::capture();
+
         unsafe {
             env::remove_var("MONODEX_HOME");
         }
-        let result = tool_home().unwrap();
-        assert!(result.ends_with(".monodex"));
-        clear_tool_home_cache();
+
+        let paths = Paths::resolve_from_env(None).unwrap();
+        assert!(paths.tool_home.ends_with(".monodex"));
+        assert_eq!(paths.config_path, paths.tool_home.join("config.json"));
     }
 
     #[test]
-    #[serial(monodex_home)]
-    fn test_clear_tool_home_cache_works() {
-        let temp_dir1 = tempfile::tempdir().unwrap();
-        let temp_dir2 = tempfile::tempdir().unwrap();
+    fn test_for_test_constructs_paths() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let paths = Paths::for_test(temp_dir.path().into());
 
-        // Set and cache first path
-        clear_tool_home_cache();
-        unsafe {
-            env::set_var("MONODEX_HOME", temp_dir1.path());
-        }
-        let result1 = tool_home().unwrap();
-        assert_eq!(result1, temp_dir1.path());
-
-        // Clear cache and set new path
-        clear_tool_home_cache();
-        unsafe {
-            env::set_var("MONODEX_HOME", temp_dir2.path());
-        }
-        let result2 = tool_home().unwrap();
-        assert_eq!(result2, temp_dir2.path());
-
-        // Cleanup
-        clear_tool_home_cache();
-        unsafe {
-            env::remove_var("MONODEX_HOME");
-        }
+        assert_eq!(paths.tool_home, temp_dir.path());
+        assert_eq!(paths.config_path, temp_dir.path().join("config.json"));
+        assert_eq!(paths.context_file(), temp_dir.path().join("context.json"));
+        assert_eq!(paths.crawl_config(), temp_dir.path().join("crawl.json"));
     }
 }

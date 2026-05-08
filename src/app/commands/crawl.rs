@@ -91,11 +91,11 @@ pub fn run_crawl_label(
     let label_id = LabelId::new(catalog_name, label).map_err(|e| anyhow::anyhow!("{}", e))?;
 
     // Load repo-specific crawl configuration
-    let crawl_config = load_compiled_crawl_config(Some(&repo_path))?;
+    let crawl_config = load_compiled_crawl_config(&config.paths, Some(&repo_path))?;
     println!("Loaded crawl configuration for repository");
 
     // Resolve database path (needed for warning state file location)
-    let db_path = resolve_database_path(Some(config))?;
+    let db_path = resolve_database_path(config)?;
     println!("Database: {}", db_path.display());
 
     // Acquire locks before any catalog-scoped I/O
@@ -182,11 +182,11 @@ pub fn run_crawl_working_dir(
     let label_id = LabelId::new(catalog_name, label).map_err(|e| anyhow::anyhow!("{}", e))?;
 
     // Load repo-specific crawl configuration
-    let crawl_config = load_compiled_crawl_config(Some(&repo_path))?;
+    let crawl_config = load_compiled_crawl_config(&config.paths, Some(&repo_path))?;
     println!("Loaded crawl configuration for repository");
 
     // Resolve database path (needed for warning state file location)
-    let db_path = resolve_database_path(Some(config))?;
+    let db_path = resolve_database_path(config)?;
     println!("Database: {}", db_path.display());
 
     // Acquire locks before any catalog-scoped I/O
