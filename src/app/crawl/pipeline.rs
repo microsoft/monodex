@@ -12,7 +12,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::thread::{self, JoinHandle};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::app::{
     CrawlFailures, EmbeddingModelConfig, chrono_timestamp, format_count, format_duration,
@@ -380,49 +380,49 @@ pub async fn run_upsert_without_vectors(
     ) = mpsc::channel();
 
     let reporter_handle = thread::spawn(move || {
-        use std::time::Instant;
+        let mut state = ReporterState {
+            last_printed_at: None,
+            last_printed_phase: None,
+        };
 
-        // First iteration: blocking recv, always prints (phase start)
-        let (mut last_printed_at, mut last_printed_phase) = match rx.recv() {
-            Ok(event) => {
-                print_progress_event(&event);
-                (Some(Instant::now()), Some(event.phase))
-            }
+        // First event: blocking recv
+        let first_event = match rx.recv() {
+            Ok(event) => event,
             Err(_) => return, // Channel disconnected immediately
         };
 
-        // Subsequent iterations: timeout-based with cadence gating
+        // Collect batch: first event + all drained events (FIFO order)
+        let mut batch = vec![first_event];
+        while let Ok(event) = rx.try_recv() {
+            batch.push(event);
+        }
+
+        // Decide and print
+        let to_print = decide_prints(&batch, &mut state, Instant::now());
+        for event in to_print {
+            print_progress_event(&event);
+        }
+
+        // Main loop: timeout-based for cadence gating
         loop {
             match rx.recv_timeout(Duration::from_secs(10)) {
                 Ok(event) => {
-                    // Drain any additional queued events, keeping only the most recent
-                    let mut current = event;
+                    // Collect batch: first event + all drained events (FIFO order)
+                    let mut batch = vec![event];
                     while let Ok(newer) = rx.try_recv() {
-                        current = newer;
+                        batch.push(newer);
                     }
 
-                    // Determine if we should print
-                    let should_print = {
-                        let phase_changed = last_printed_phase != Some(current.phase);
-                        let is_complete = current.completed == current.total;
-                        let cadence_elapsed = last_printed_at
-                            .map(|t| t.elapsed() >= Duration::from_secs(10))
-                            .unwrap_or(true);
+                    // Decide which events to print
+                    let to_print = decide_prints(&batch, &mut state, Instant::now());
 
-                        phase_changed || is_complete || cadence_elapsed
-                    };
-
-                    if should_print {
-                        // Save phase before printing (printing takes ownership of event)
-                        let phase = current.phase;
-                        print_progress_event(&current);
-                        last_printed_at = Some(Instant::now());
-                        last_printed_phase = Some(phase);
+                    // Print the selected events
+                    for event in to_print {
+                        print_progress_event(&event);
                     }
                 }
                 Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-                    // Cadence check happens inside the Ok branch; Timeout is just a wakeup
-                    // to re-check the channel. Do not re-print here.
+                    // Timeout is just a wakeup; cadence is handled in decide_prints
                 }
                 Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
                     // Sender dropped, exit cleanly. Do not print a final event;
@@ -462,6 +462,68 @@ pub async fn run_upsert_without_vectors(
     println!();
 
     Ok((touched_file_ids, failures))
+}
+
+/// State tracked by the progress reporter across event batches.
+struct ReporterState {
+    /// When the last event was printed (for cadence gating).
+    last_printed_at: Option<Instant>,
+    /// Which phase was last printed (for transition detection).
+    last_printed_phase: Option<&'static str>,
+}
+
+/// Decide which events from a received batch should be printed.
+///
+/// Walks `events` in FIFO order. An event prints if:
+/// - the phase differs from `state.last_printed_phase` (phase transition;
+///   `None` counts as a transition), OR
+/// - `event.completed == event.total` (100% tick).
+///
+/// After the walk, if nothing was printed and `state.last_printed_at`
+/// elapsed >= 10s (or is `None`), the final event in the batch prints
+/// as the cadence tick.
+///
+/// An event that satisfies multiple conditions prints exactly once.
+/// `state` is mutated to reflect the last print.
+fn decide_prints(
+    events: &[StorageProgressEvent],
+    state: &mut ReporterState,
+    now: Instant,
+) -> Vec<StorageProgressEvent> {
+    if events.is_empty() {
+        return Vec::new();
+    }
+
+    let mut to_print = Vec::new();
+
+    for event in events {
+        let phase_changed = state.last_printed_phase != Some(event.phase);
+        let is_complete = event.completed == event.total;
+
+        if phase_changed || is_complete {
+            to_print.push(event.clone());
+            state.last_printed_phase = Some(event.phase);
+            state.last_printed_at = Some(now);
+        }
+    }
+
+    // If nothing triggered, check cadence
+    if to_print.is_empty() {
+        let cadence_elapsed = state
+            .last_printed_at
+            .map(|t| now.duration_since(t) >= Duration::from_secs(10))
+            .unwrap_or(true);
+
+        if cadence_elapsed {
+            // Print the final event only
+            let last = events.last().unwrap();
+            to_print.push(last.clone());
+            state.last_printed_phase = Some(last.phase);
+            state.last_printed_at = Some(now);
+        }
+    }
+
+    to_print
 }
 
 /// Print a progress event line to stderr.
@@ -587,4 +649,111 @@ async fn upsert_chunks_with_vectors(
 
     // Persist chunks and their embedding vectors through the storage layer.
     storage.upsert_with_vectors(rows, vectors).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_event(phase: &'static str, completed: usize, total: usize) -> StorageProgressEvent {
+        StorageProgressEvent {
+            phase,
+            completed,
+            total,
+            unit: "chunks",
+        }
+    }
+
+    #[test]
+    fn test_first_batch_single_event_prints() {
+        let events = vec![make_event("Clearing vectors", 100, 1000)];
+        let mut state = ReporterState {
+            last_printed_at: None,
+            last_printed_phase: None,
+        };
+        let now = Instant::now();
+
+        let to_print = decide_prints(&events, &mut state, now);
+
+        assert_eq!(to_print.len(), 1);
+        assert_eq!(to_print[0].phase, "Clearing vectors");
+    }
+
+    #[test]
+    fn test_batch_prints_phase_transitions_and_complete_ticks() {
+        // Batch: [A:1000/1000, B:500/1000, B:1000/1000, C:100/1000]
+        // State: last_printed_phase = Some("A"), recent last_printed_at
+        // Should print: A 100%, B transition, B 100%, C transition
+        let events = vec![
+            make_event("A", 1000, 1000),
+            make_event("B", 500, 1000),
+            make_event("B", 1000, 1000),
+            make_event("C", 100, 1000),
+        ];
+        let mut state = ReporterState {
+            last_printed_at: Some(Instant::now()),
+            last_printed_phase: Some("A"),
+        };
+        let now = Instant::now();
+
+        let to_print = decide_prints(&events, &mut state, now);
+
+        assert_eq!(to_print.len(), 4);
+        assert_eq!(to_print[0].phase, "A"); // 100% tick
+        assert_eq!(to_print[0].completed, 1000);
+        assert_eq!(to_print[1].phase, "B"); // transition
+        assert_eq!(to_print[1].completed, 500);
+        assert_eq!(to_print[2].phase, "B"); // 100% tick
+        assert_eq!(to_print[2].completed, 1000);
+        assert_eq!(to_print[3].phase, "C"); // transition
+        assert_eq!(to_print[3].completed, 100);
+    }
+
+    #[test]
+    fn test_transition_and_complete_same_event_prints_once() {
+        // Event that is both phase transition and 100% tick
+        let events = vec![make_event("B", 1000, 1000)];
+        let mut state = ReporterState {
+            last_printed_at: Some(Instant::now()),
+            last_printed_phase: Some("A"),
+        };
+        let now = Instant::now();
+
+        let to_print = decide_prints(&events, &mut state, now);
+
+        assert_eq!(to_print.len(), 1);
+        assert_eq!(to_print[0].phase, "B");
+        assert_eq!(to_print[0].completed, 1000);
+    }
+
+    #[test]
+    fn test_cadence_elapsed_prints_final_event() {
+        // No transition or 100%, but cadence elapsed
+        let events = vec![make_event("A", 500, 1000)];
+        let mut state = ReporterState {
+            last_printed_at: Some(Instant::now() - Duration::from_secs(15)),
+            last_printed_phase: Some("A"),
+        };
+        let now = Instant::now();
+
+        let to_print = decide_prints(&events, &mut state, now);
+
+        assert_eq!(to_print.len(), 1);
+        assert_eq!(to_print[0].phase, "A");
+        assert_eq!(to_print[0].completed, 500);
+    }
+
+    #[test]
+    fn test_no_cadence_no_transition_no_complete_prints_nothing() {
+        let events = vec![make_event("A", 500, 1000)];
+        let mut state = ReporterState {
+            last_printed_at: Some(Instant::now()),
+            last_printed_phase: Some("A"),
+        };
+        let now = Instant::now();
+
+        let to_print = decide_prints(&events, &mut state, now);
+
+        assert!(to_print.is_empty());
+    }
 }
