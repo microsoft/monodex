@@ -1005,3 +1005,170 @@ async fn test_upsert_without_vectors_with_progress_multi_batch() {
     assert_eq!(clearing_events[2].completed, 2500);
     assert_eq!(clearing_events[2].total, 2500);
 }
+
+/// Correctness test for `upsert_without_vectors_with_progress`.
+///
+/// Verifies that:
+/// 1. Vectors are cleared for rows that had them (Phase A)
+/// 2. Rows are upserted correctly with the right text/active_label_ids (Phase B)
+/// 3. Only complete files have their sentinel marked file_complete=true (Phase C)
+/// 4. Partial files do NOT have their sentinel marked complete
+#[tokio::test]
+async fn test_upsert_without_vectors_with_progress_correctness() {
+    let (_tmp_dir, storage) = create_test_storage().await;
+
+    // === Setup: Create two files ===
+    // File A: complete (all 3 chunks)
+    // File B: incomplete (only chunk 1 of 3)
+
+    // Helper to create a chunk row with specific chunk_count
+    fn make_row(file_id: &str, ordinal: i32, chunk_count: i32) -> ChunkRow {
+        ChunkRow {
+            row_id: format!("{}:{}", file_id, ordinal),
+            text: format!("Content for {} chunk {}", file_id, ordinal),
+            catalog: "test-catalog".to_string(),
+            active_label_ids: vec!["test-catalog:main".to_string()],
+            embedder_id: "test-embedder:v1".to_string(),
+            chunker_id: "test-chunker:v1".to_string(),
+            blob_id: "abc123".to_string(),
+            content_hash: format!("hash-{}-{}", file_id, ordinal),
+            file_id: file_id.to_string(),
+            relative_path: format!("src/{}.ts", file_id),
+            package_name: "test-package".to_string(),
+            source_uri: format!("/path/to/{}.ts", file_id),
+            chunk_ordinal: ordinal,
+            chunk_count,
+            start_line: ordinal * 10,
+            end_line: ordinal * 10 + 9,
+            symbol_name: Some(format!("func_{}", file_id)),
+            chunk_type: "function".to_string(),
+            chunk_kind: "content".to_string(),
+            breadcrumb: Some(format!("test-package:{}.ts:func_{}", file_id, file_id)),
+            split_part_ordinal: None,
+            split_part_count: None,
+            file_complete: false,
+        }
+    }
+
+    // Pre-populate storage with file A's rows having vectors (to exercise Phase A)
+    let file_a_rows: Vec<ChunkRow> = (1..=3).map(|i| make_row("fileA", i, 3)).collect();
+    let vectors: Vec<Vec<f32>> = file_a_rows
+        .iter()
+        .map(|_| {
+            let mut v = vec![0.0f32; VECTOR_DIMENSION];
+            v[0] = 1.0; // Non-zero vector
+            v
+        })
+        .collect();
+    storage
+        .upsert_with_vectors(&file_a_rows, &vectors)
+        .await
+        .unwrap();
+
+    // Verify file A rows have vectors before FTS-only upsert
+    for row in &file_a_rows {
+        let status = storage
+            .get_sentinel_status(&row.row_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            status.has_vector,
+            "File A row {} should have vector initially",
+            row.row_id
+        );
+    }
+
+    // Create the input for FTS-only upsert:
+    // File A: all 3 chunks (complete)
+    // File B: only chunk 1 of 3 (incomplete)
+    let mut rows_to_upsert: Vec<ChunkRow> = Vec::new();
+    rows_to_upsert.extend((1..=3).map(|i| make_row("fileA", i, 3)));
+    rows_to_upsert.push(make_row("fileB", 1, 3));
+
+    // Sentinel list should only include file A (complete)
+    let sentinel_row_ids = vec!["fileA:1".to_string()];
+
+    // Run the upsert
+    let events = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let events_clone = events.clone();
+    let callback = move |event: StorageProgressEvent| {
+        events_clone.lock().unwrap().push(event);
+    };
+
+    storage
+        .upsert_without_vectors_with_progress(&rows_to_upsert, &sentinel_row_ids, callback)
+        .await
+        .unwrap();
+
+    // === Verify correctness ===
+
+    // 1. File A's rows should have vectors cleared (Phase A worked)
+    for row in &file_a_rows {
+        let status = storage
+            .get_sentinel_status(&row.row_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            !status.has_vector,
+            "File A row {} should have NULL vector after upsert_without_vectors",
+            row.row_id
+        );
+    }
+
+    // 2. File A's rows should exist with correct text
+    for i in 1..=3 {
+        let row = storage
+            .get_by_row_id(&format!("fileA:{}", i))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            row.text,
+            format!("Content for fileA chunk {}", i),
+            "Row fileA:{} should have correct text",
+            i
+        );
+        assert!(
+            row.active_label_ids
+                .contains(&"test-catalog:main".to_string()),
+            "Row fileA:{} should have the label",
+            i
+        );
+    }
+
+    // 3. File A's sentinel (fileA:1) should have file_complete = true
+    let sentinel_a = storage.get_by_row_id("fileA:1").await.unwrap().unwrap();
+    assert!(
+        sentinel_a.file_complete,
+        "File A sentinel should be marked complete"
+    );
+
+    // 4. File B's row should exist but NOT be complete
+    let row_b = storage.get_by_row_id("fileB:1").await.unwrap().unwrap();
+    assert_eq!(
+        row_b.text, "Content for fileB chunk 1",
+        "File B row should have correct text"
+    );
+    assert!(
+        !row_b.file_complete,
+        "File B sentinel should NOT be marked complete (partial file)"
+    );
+
+    // 5. Verify we got progress events from all phases
+    let events = events.lock().unwrap();
+    let phases: std::collections::HashSet<_> = events.iter().map(|e| e.phase).collect();
+    assert!(
+        phases.contains("Clearing vectors"),
+        "Should have Phase A events"
+    );
+    assert!(
+        phases.contains("Upserting chunks"),
+        "Should have Phase B events"
+    );
+    assert!(
+        phases.contains("Marking file sentinels"),
+        "Should have Phase C events"
+    );
+}

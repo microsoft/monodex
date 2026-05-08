@@ -263,6 +263,21 @@ impl ProgressGuard {
             handle: Some(handle),
         }
     }
+
+    /// Explicitly finish the reporter thread before the guard's natural drop.
+    ///
+    /// This ensures the progress reporter is fully joined before any subsequent
+    /// output (e.g., "Storage complete") on the main thread, preventing stdout/stderr
+    /// interleaving. On success, call this before printing final output; on error
+    /// paths, the Drop impl still handles cleanup.
+    fn finish(mut self) {
+        // Drop sender first so the reporter thread's recv returns Disconnected.
+        drop(self.sender.take());
+        // Join the thread to ensure clean shutdown.
+        if let Some(h) = self.handle.take() {
+            let _ = h.join();
+        }
+    }
 }
 
 impl Drop for ProgressGuard {
@@ -313,15 +328,48 @@ pub async fn run_upsert_without_vectors(
     // Convert chunks to rows
     let rows: Vec<ChunkRow> = all_chunks.iter().map(chunk_to_row).collect();
 
-    // Build sentinel row IDs for completed files (file_id:1 for each unique file)
-    let mut file_ids: HashSet<String> = HashSet::new();
-    for chunk in &all_chunks {
-        if !chunk.file_id.is_empty() {
-            file_ids.insert(chunk.file_id.clone());
+    // Build sentinel row IDs for completed files only.
+    // A file is complete when all its chunks are present (uploaded_count == expected_count).
+    // This maintains the invariant that file_complete=true means all chunks exist.
+    use std::collections::HashMap;
+
+    // Build expected count per file (all chunks of a file have the same chunk_count)
+    let mut expected_count: HashMap<String, usize> = HashMap::new();
+    for row in &rows {
+        if !row.file_id.is_empty() {
+            expected_count
+                .entry(row.file_id.clone())
+                .or_insert(row.chunk_count as usize);
         }
     }
-    let sentinel_row_ids: Vec<String> = file_ids
-        .into_iter()
+
+    // Build uploaded count per file
+    let mut uploaded_count: HashMap<String, usize> = HashMap::new();
+    for row in &rows {
+        if !row.file_id.is_empty() {
+            *uploaded_count.entry(row.file_id.clone()).or_insert(0) += 1;
+        }
+    }
+
+    // Debug assert the invariant: all files have complete chunk sets
+    for file_id in expected_count.keys().chain(uploaded_count.keys()) {
+        let expected = expected_count.get(file_id).copied().unwrap_or(0);
+        let uploaded = uploaded_count.get(file_id).copied().unwrap_or(0);
+        debug_assert_eq!(
+            expected, uploaded,
+            "File {} has incomplete chunks: expected {}, got {}",
+            file_id, expected, uploaded
+        );
+    }
+
+    // Build sentinel row IDs only for complete files
+    let sentinel_row_ids: Vec<String> = expected_count
+        .keys()
+        .filter(|file_id| {
+            let expected = expected_count.get(*file_id).copied().unwrap_or(0);
+            let uploaded = uploaded_count.get(*file_id).copied().unwrap_or(0);
+            expected == uploaded
+        })
         .map(|file_id| format!("{}:1", file_id))
         .collect();
 
@@ -332,16 +380,18 @@ pub async fn run_upsert_without_vectors(
     ) = mpsc::channel();
 
     let reporter_handle = thread::spawn(move || {
-        // First iteration: blocking recv, prints immediately
-        let mut last_event = match rx.recv() {
+        use std::time::Instant;
+
+        // First iteration: blocking recv, always prints (phase start)
+        let (mut last_printed_at, mut last_printed_phase) = match rx.recv() {
             Ok(event) => {
                 print_progress_event(&event);
-                Some(event)
+                (Some(Instant::now()), Some(event.phase))
             }
             Err(_) => return, // Channel disconnected immediately
         };
 
-        // Subsequent iterations: timeout-based
+        // Subsequent iterations: timeout-based with cadence gating
         loop {
             match rx.recv_timeout(Duration::from_secs(10)) {
                 Ok(event) => {
@@ -350,17 +400,33 @@ pub async fn run_upsert_without_vectors(
                     while let Ok(newer) = rx.try_recv() {
                         current = newer;
                     }
-                    print_progress_event(&current);
-                    last_event = Some(current);
-                }
-                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-                    // Print the most recent event seen this cycle (if any)
-                    if let Some(ref evt) = last_event {
-                        print_progress_event(evt);
+
+                    // Determine if we should print
+                    let should_print = {
+                        let phase_changed = last_printed_phase != Some(current.phase);
+                        let is_complete = current.completed == current.total;
+                        let cadence_elapsed = last_printed_at
+                            .map(|t| t.elapsed() >= Duration::from_secs(10))
+                            .unwrap_or(true);
+
+                        phase_changed || is_complete || cadence_elapsed
+                    };
+
+                    if should_print {
+                        // Save phase before printing (printing takes ownership of event)
+                        let phase = current.phase;
+                        print_progress_event(&current);
+                        last_printed_at = Some(Instant::now());
+                        last_printed_phase = Some(phase);
                     }
                 }
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                    // Cadence check happens inside the Ok branch; Timeout is just a wakeup
+                    // to re-check the channel. Do not re-print here.
+                }
                 Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
-                    // Sender dropped, exit cleanly
+                    // Sender dropped, exit cleanly. Do not print a final event;
+                    // the main thread is responsible for the "Storage complete" line.
                     break;
                 }
             }
@@ -372,7 +438,7 @@ pub async fn run_upsert_without_vectors(
     let callback_tx = tx.clone();
 
     // RAII guard ensures thread cleanup on all exit paths
-    let _guard = ProgressGuard::new(tx, reporter_handle);
+    let guard = ProgressGuard::new(tx, reporter_handle);
 
     // Run the combined storage operation with progress reporting
     chunk_storage
@@ -381,7 +447,9 @@ pub async fn run_upsert_without_vectors(
         })
         .await?;
 
-    // Guard drops here, cleaning up the reporter thread
+    // Join the reporter thread before printing to stdout, to avoid interleaving
+    // stderr (progress) with stdout (completion message).
+    guard.finish();
 
     let elapsed = start.elapsed();
     let rate = total_chunks as f64 / elapsed.as_secs_f64().max(0.001);
