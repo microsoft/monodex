@@ -1,0 +1,940 @@
+//! Search output rendering infrastructure.
+//!
+//! Purpose: Unified rendering for search results, warnings, and metadata.
+//! Edit here when: Changing search output format, adding warning types, modifying preamble.
+//! Do not edit here for: Retrieval dispatch (see commands/search.rs), fusion algorithm (see engine/fusion.rs).
+//!
+//! ## Output ordering rule
+//!
+//! The renderer emits output in a fixed order:
+//! 1. Preamble (Catalog/Label/Searching line)
+//! 2. Decision-time warnings (incomplete-method warnings), in RetrievalMethod enum order
+//! 3. Search-time pre-result warnings (FTS NoIndex degradation under hybrid)
+//! 4. Result block (each result preceded by its leading_inline_warnings)
+//! 5. Trailing inline warnings (stale-hydration warnings after last result or when zero results)
+//! 6. End marker (No results or End of results)
+
+use std::io::{self, Write};
+
+use crate::engine::{
+    retrieval::RetrievalMethod,
+    storage::ChunkRow,
+    warning::DecisionWarning,
+    {fusion::FusedHit, storage::LabelMetadataRow},
+};
+
+use super::util::format_source_pointer;
+
+// =============================================================================
+// Warning types
+// =============================================================================
+
+/// Search-time warnings, emitted through the renderer.
+///
+/// These carry pre-formatted strings (source_pointer already resolved)
+/// so the renderer only does template substitution.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SearchWarning {
+    /// A method in the persistent selection has not completed indexing.
+    IncompleteMethod {
+        method: RetrievalMethod,
+        source_pointer: String,
+    },
+    /// FTS state is missing on disk, no fallback available (FTS-only path).
+    FtsNoIndexNoFallback {
+        label: String,
+        source_pointer: String,
+    },
+    /// FTS state is missing on disk, falling back to vector-only (hybrid path).
+    FtsNoIndexDegrade {
+        label: String,
+        source_pointer: String,
+    },
+    /// A chunk in the FTS index was not found in LanceDB (stale state).
+    StaleHydration { row_id: String },
+}
+
+// =============================================================================
+// Render model types
+// =============================================================================
+
+/// End-of-results marker.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EndMarker {
+    /// Print "End of results" (non-empty result set, shorter than limit, genuinely exhausted)
+    Sentinel,
+    /// Print "No results." (zero results)
+    NoResults,
+    /// No extra output (limit satisfied or candidate window saturated)
+    None,
+}
+
+/// Preamble for search output.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Preamble {
+    pub catalog: String,
+    pub label: String,
+    /// "fts only" | "vector only" | "fts, vector"
+    pub searching: String,
+}
+
+/// A single rendered result with its associated warnings.
+#[derive(Debug, Clone)]
+pub struct RenderedResult {
+    /// The fused hit (row_id, RRF score, contributors)
+    pub fused_hit: FusedHit,
+    /// The chunk data hydrated from LanceDB
+    pub chunk: ChunkRow,
+    /// Stale-hydration warnings for row_ids skipped between previous result and this one
+    pub leading_inline_warnings: Vec<SearchWarning>,
+}
+
+/// The complete model for rendering search output.
+///
+/// The orchestrator builds this model, then passes it to `render()`.
+/// The renderer is the only code that touches the output writer.
+#[derive(Debug, Clone)]
+pub struct SearchRenderModel {
+    pub preamble: Preamble,
+    /// Decision-time warnings + search-time pre-result warnings, in emission order
+    pub pre_result_warnings: Vec<SearchWarning>,
+    /// Results in fused-score-descending order
+    pub results: Vec<RenderedResult>,
+    /// Stale-hydration warnings collected after the last emitted result
+    pub trailing_inline_warnings: Vec<SearchWarning>,
+    /// Whether to show debug continuation lines
+    pub debug: bool,
+    /// End-of-results marker
+    pub end_marker: EndMarker,
+}
+
+// =============================================================================
+// Rendering functions
+// =============================================================================
+
+/// Render search output to a writer.
+///
+/// This is the single entry point for all search output. The orchestrator
+/// builds a `SearchRenderModel` and passes it here; the renderer walks
+/// the model in fixed order and emits to the writer.
+pub fn render<W: Write>(writer: &mut W, model: &SearchRenderModel) -> io::Result<()> {
+    // 1. Preamble
+    writeln!(
+        writer,
+        "Catalog: {} / Label: {} / Searching: {}",
+        model.preamble.catalog, model.preamble.label, model.preamble.searching
+    )?;
+    writeln!(writer)?;
+
+    // 2. Pre-result warnings (decision-time + search-time pre-result)
+    for warning in &model.pre_result_warnings {
+        render_warning(writer, warning)?;
+    }
+
+    // 3. Result block
+    for result in &model.results {
+        // Emit leading inline warnings (stale-hydration) before this result
+        for warning in &result.leading_inline_warnings {
+            render_warning(writer, warning)?;
+        }
+
+        // Render result header line
+        render_result_header(writer, result, model.debug)?;
+
+        // Render debug continuation if enabled
+        if model.debug {
+            render_debug_continuation(writer, &result.fused_hit)?;
+        }
+
+        // Render preview lines (first 3 lines of chunk text)
+        render_preview_lines(writer, &result.chunk.text)?;
+
+        // Blank line between results
+        writeln!(writer)?;
+    }
+
+    // 4. Trailing inline warnings (stale-hydration after last result)
+    for warning in &model.trailing_inline_warnings {
+        render_warning(writer, warning)?;
+    }
+
+    // 5. End marker
+    match model.end_marker {
+        EndMarker::Sentinel => {
+            writeln!(writer, "End of results")?;
+            writeln!(writer)?;
+        }
+        EndMarker::NoResults => {
+            writeln!(writer, "No results.")?;
+            writeln!(writer)?;
+        }
+        EndMarker::None => {}
+    }
+
+    Ok(())
+}
+
+/// Render a single result header line.
+///
+/// Format: `{file_id}:{ord} [{marker}] {breadcrumb_report}`
+/// Single-space delimiters, no score/distance columns.
+fn render_result_header<W: Write>(
+    writer: &mut W,
+    result: &RenderedResult,
+    _debug: bool,
+) -> io::Result<()> {
+    let chunk = &result.chunk;
+    let hit = &result.fused_hit;
+
+    // Build provenance marker
+    let marker = build_provenance_marker(&hit.contributors);
+
+    // Build breadcrumb report
+    let breadcrumb_report = super::util::format_chunk_report(
+        chunk.breadcrumb.as_deref(),
+        chunk.split_part_ordinal.zip(chunk.split_part_count),
+        &chunk.chunk_kind,
+    );
+
+    writeln!(
+        writer,
+        "{}:{} [{}] {}",
+        chunk.file_id, chunk.chunk_ordinal, marker, breadcrumb_report
+    )
+}
+
+/// Build provenance marker from contributors.
+///
+/// Returns "f", "v", or "f+v" (alphabetical order).
+fn build_provenance_marker(contributors: &[crate::engine::fusion::RankedContribution]) -> String {
+    let has_fts = contributors
+        .iter()
+        .any(|c| c.method == RetrievalMethod::Fts);
+    let has_vector = contributors
+        .iter()
+        .any(|c| c.method == RetrievalMethod::Vector);
+
+    match (has_fts, has_vector) {
+        (true, true) => "f+v".to_string(),
+        (true, false) => "f".to_string(),
+        (false, true) => "v".to_string(),
+        (false, false) => "unknown".to_string(), // Should never happen
+    }
+}
+
+/// Render debug continuation line.
+///
+/// Format: `Debug: rrf={:.4}, fts_bm25={:.3}, vector_distance={:.3}`
+/// Only emits keys whose contributors are present. RRF is omitted for single-method.
+fn render_debug_continuation<W: Write>(writer: &mut W, hit: &FusedHit) -> io::Result<()> {
+    let mut parts = Vec::new();
+
+    // RRF score (only for hybrid results)
+    if hit.contributors.len() > 1 {
+        parts.push(format!("rrf={:.4}", hit.rrf_score));
+    }
+
+    // Per-method scores (in enum order: Fts before Vector)
+    for method in [RetrievalMethod::Fts, RetrievalMethod::Vector] {
+        if let Some(contrib) = hit.contributors.iter().find(|c| c.method == method) {
+            let label = match method {
+                RetrievalMethod::Fts => "fts_bm25",
+                RetrievalMethod::Vector => "vector_distance",
+            };
+            if let Some(score) = contrib.backend_score {
+                parts.push(format!("{}={:.3}", label, score));
+            }
+        }
+    }
+
+    if !parts.is_empty() {
+        writeln!(writer, "Debug: {}", parts.join(", "))?;
+    }
+
+    Ok(())
+}
+
+/// Render preview lines from chunk text.
+///
+/// Emits up to 3 lines, each prefixed with "> ".
+fn render_preview_lines<W: Write>(writer: &mut W, text: &str) -> io::Result<()> {
+    for line in text.lines().take(3) {
+        writeln!(writer, "> {}", line)?;
+    }
+    Ok(())
+}
+
+/// Render a warning to the writer.
+fn render_warning<W: Write>(writer: &mut W, warning: &SearchWarning) -> io::Result<()> {
+    match warning {
+        SearchWarning::IncompleteMethod {
+            method,
+            source_pointer,
+        } => {
+            writeln!(
+                writer,
+                "⚠️  {} state for this label is incomplete; results may be missing entries indexed since the last successful crawl.",
+                method
+            )?;
+            writeln!(
+                writer,
+                "   To complete: monodex crawl --label <label> {} --retrieval {}",
+                source_pointer, method
+            )?;
+        }
+        SearchWarning::FtsNoIndexNoFallback {
+            label,
+            source_pointer,
+        } => {
+            writeln!(
+                writer,
+                "⚠️  FTS state for label {} is missing on disk; re-crawl to rebuild.",
+                label
+            )?;
+            writeln!(
+                writer,
+                "   To rebuild: monodex crawl --label {} {} --retrieval fts",
+                label, source_pointer
+            )?;
+        }
+        SearchWarning::FtsNoIndexDegrade {
+            label,
+            source_pointer,
+        } => {
+            writeln!(
+                writer,
+                "⚠️  FTS state for label {} is missing on disk; falling back to vector-only.",
+                label
+            )?;
+            writeln!(
+                writer,
+                "   To rebuild: monodex crawl --label {} {} --retrieval fts",
+                label, source_pointer
+            )?;
+        }
+        SearchWarning::StaleHydration { row_id } => {
+            writeln!(
+                writer,
+                "⚠️  Chunk {} in FTS index but not in LanceDB (stale state), skipping",
+                row_id
+            )?;
+        }
+    }
+    Ok(())
+}
+
+// =============================================================================
+// Helper functions
+// =============================================================================
+
+/// Compute the end marker based on result count and saturation.
+///
+/// Rule:
+/// - Sentinel iff rendered_count > 0 && rendered_count < limit && all backends unsaturated
+/// - NoResults iff rendered_count == 0
+/// - None otherwise
+pub fn decide_end_marker(rendered_count: usize, limit: usize, saturations: &[bool]) -> EndMarker {
+    if rendered_count == 0 {
+        EndMarker::NoResults
+    } else if rendered_count < limit && saturations.iter().all(|&s| !s) {
+        EndMarker::Sentinel
+    } else {
+        EndMarker::None
+    }
+}
+
+/// Translate decision warnings to search warnings.
+///
+/// Calls `format_source_pointer` against metadata to produce the source_pointer field.
+pub fn translate_decision_warnings(
+    warnings: Vec<DecisionWarning>,
+    metadata: &LabelMetadataRow,
+) -> Vec<SearchWarning> {
+    let source_pointer = format_source_pointer(metadata);
+
+    warnings
+        .into_iter()
+        .map(|w| match w {
+            DecisionWarning::IncompleteMethod { method } => SearchWarning::IncompleteMethod {
+                method,
+                source_pointer: source_pointer.clone(),
+            },
+        })
+        .collect()
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::engine::fusion::{FusedHit, RankedContribution};
+
+    fn make_fused_hit(row_id: &str, rrf_score: f32, methods: &[RetrievalMethod]) -> FusedHit {
+        let contributors: Vec<RankedContribution> = methods
+            .iter()
+            .enumerate()
+            .map(|(i, &method)| RankedContribution {
+                method,
+                rank: i + 1,
+                backend_score: Some(0.5),
+            })
+            .collect();
+        FusedHit {
+            row_id: row_id.to_string(),
+            rrf_score,
+            contributors,
+        }
+    }
+
+    fn make_chunk(row_id: &str, file_id: &str) -> ChunkRow {
+        ChunkRow {
+            row_id: row_id.to_string(),
+            text: "line1\nline2\nline3\nline4".to_string(),
+            catalog: "test-catalog".to_string(),
+            active_label_ids: vec!["test-catalog:main".to_string()],
+            embedder_id: "test".to_string(),
+            chunker_id: "test".to_string(),
+            blob_id: "test".to_string(),
+            content_hash: "test".to_string(),
+            file_id: file_id.to_string(),
+            relative_path: "test.ts".to_string(),
+            package_name: "test".to_string(),
+            source_uri: "test.ts".to_string(),
+            chunk_ordinal: 1,
+            chunk_count: 1,
+            start_line: 1,
+            end_line: 10,
+            symbol_name: None,
+            chunk_type: "function".to_string(),
+            chunk_kind: "content".to_string(),
+            breadcrumb: Some("test:func".to_string()),
+            split_part_ordinal: None,
+            split_part_count: None,
+            file_complete: true,
+        }
+    }
+
+    #[test]
+    fn test_build_provenance_marker() {
+        let hit_fts = make_fused_hit("a:1", 0.5, &[RetrievalMethod::Fts]);
+        assert_eq!(build_provenance_marker(&hit_fts.contributors), "f");
+
+        let hit_vector = make_fused_hit("a:1", 0.5, &[RetrievalMethod::Vector]);
+        assert_eq!(build_provenance_marker(&hit_vector.contributors), "v");
+
+        let hit_hybrid =
+            make_fused_hit("a:1", 0.5, &[RetrievalMethod::Fts, RetrievalMethod::Vector]);
+        assert_eq!(build_provenance_marker(&hit_hybrid.contributors), "f+v");
+    }
+
+    #[test]
+    fn test_decide_end_marker() {
+        // Zero results -> NoResults
+        assert_eq!(decide_end_marker(0, 10, &[]), EndMarker::NoResults);
+        assert_eq!(decide_end_marker(0, 10, &[false]), EndMarker::NoResults);
+
+        // Results = limit -> None
+        assert_eq!(decide_end_marker(10, 10, &[false]), EndMarker::None);
+        assert_eq!(decide_end_marker(10, 10, &[true]), EndMarker::None);
+
+        // Results < limit, no saturation -> Sentinel
+        assert_eq!(decide_end_marker(5, 10, &[false]), EndMarker::Sentinel);
+        assert_eq!(
+            decide_end_marker(5, 10, &[false, false]),
+            EndMarker::Sentinel
+        );
+
+        // Results < limit, any saturation -> None
+        assert_eq!(decide_end_marker(5, 10, &[true]), EndMarker::None);
+        assert_eq!(decide_end_marker(5, 10, &[false, true]), EndMarker::None);
+    }
+
+    #[test]
+    fn test_render_single_method_fts() {
+        let hit = make_fused_hit("abc123:1", 0.5, &[RetrievalMethod::Fts]);
+        let chunk = make_chunk("abc123:1", "abc123");
+
+        let model = SearchRenderModel {
+            preamble: Preamble {
+                catalog: "my-catalog".to_string(),
+                label: "main".to_string(),
+                searching: "fts only".to_string(),
+            },
+            pre_result_warnings: vec![],
+            results: vec![RenderedResult {
+                fused_hit: hit,
+                chunk,
+                leading_inline_warnings: vec![],
+            }],
+            trailing_inline_warnings: vec![],
+            debug: false,
+            end_marker: EndMarker::None,
+        };
+
+        let mut output = Vec::new();
+        render(&mut output, &model).unwrap();
+        let output = String::from_utf8(output).unwrap();
+
+        assert!(output.contains("Catalog: my-catalog / Label: main / Searching: fts only"));
+        assert!(output.contains("abc123:1 [f] test:func"));
+        assert!(output.contains("> line1"));
+    }
+
+    #[test]
+    fn test_render_single_method_vector() {
+        let hit = make_fused_hit("abc123:1", 0.5, &[RetrievalMethod::Vector]);
+        let chunk = make_chunk("abc123:1", "abc123");
+
+        let model = SearchRenderModel {
+            preamble: Preamble {
+                catalog: "my-catalog".to_string(),
+                label: "main".to_string(),
+                searching: "vector only".to_string(),
+            },
+            pre_result_warnings: vec![],
+            results: vec![RenderedResult {
+                fused_hit: hit,
+                chunk,
+                leading_inline_warnings: vec![],
+            }],
+            trailing_inline_warnings: vec![],
+            debug: false,
+            end_marker: EndMarker::None,
+        };
+
+        let mut output = Vec::new();
+        render(&mut output, &model).unwrap();
+        let output = String::from_utf8(output).unwrap();
+
+        assert!(output.contains("abc123:1 [v] test:func"));
+    }
+
+    #[test]
+    fn test_render_hybrid_marker() {
+        let hit = make_fused_hit(
+            "abc123:1",
+            0.0323,
+            &[RetrievalMethod::Fts, RetrievalMethod::Vector],
+        );
+        let chunk = make_chunk("abc123:1", "abc123");
+
+        let model = SearchRenderModel {
+            preamble: Preamble {
+                catalog: "my-catalog".to_string(),
+                label: "main".to_string(),
+                searching: "fts, vector".to_string(),
+            },
+            pre_result_warnings: vec![],
+            results: vec![RenderedResult {
+                fused_hit: hit,
+                chunk,
+                leading_inline_warnings: vec![],
+            }],
+            trailing_inline_warnings: vec![],
+            debug: false,
+            end_marker: EndMarker::None,
+        };
+
+        let mut output = Vec::new();
+        render(&mut output, &model).unwrap();
+        let output = String::from_utf8(output).unwrap();
+
+        assert!(output.contains("abc123:1 [f+v] test:func"));
+    }
+
+    #[test]
+    fn test_render_debug_hybrid() {
+        let mut hit = make_fused_hit(
+            "abc123:1",
+            0.0323,
+            &[RetrievalMethod::Fts, RetrievalMethod::Vector],
+        );
+        // Set specific scores for debug output
+        hit.contributors[0].backend_score = Some(1.754); // FTS BM25
+        hit.contributors[1].backend_score = Some(0.234); // Vector distance
+        let chunk = make_chunk("abc123:1", "abc123");
+
+        let model = SearchRenderModel {
+            preamble: Preamble {
+                catalog: "my-catalog".to_string(),
+                label: "main".to_string(),
+                searching: "fts, vector".to_string(),
+            },
+            pre_result_warnings: vec![],
+            results: vec![RenderedResult {
+                fused_hit: hit,
+                chunk,
+                leading_inline_warnings: vec![],
+            }],
+            trailing_inline_warnings: vec![],
+            debug: true,
+            end_marker: EndMarker::None,
+        };
+
+        let mut output = Vec::new();
+        render(&mut output, &model).unwrap();
+        let output = String::from_utf8(output).unwrap();
+
+        // Check debug line format and precision
+        assert!(output.contains("Debug: rrf=0.0323, fts_bm25=1.754, vector_distance=0.234"));
+    }
+
+    #[test]
+    fn test_render_debug_single_method_fts() {
+        let mut hit = make_fused_hit("abc123:1", 0.5, &[RetrievalMethod::Fts]);
+        hit.contributors[0].backend_score = Some(1.754);
+        let chunk = make_chunk("abc123:1", "abc123");
+
+        let model = SearchRenderModel {
+            preamble: Preamble {
+                catalog: "my-catalog".to_string(),
+                label: "main".to_string(),
+                searching: "fts only".to_string(),
+            },
+            pre_result_warnings: vec![],
+            results: vec![RenderedResult {
+                fused_hit: hit,
+                chunk,
+                leading_inline_warnings: vec![],
+            }],
+            trailing_inline_warnings: vec![],
+            debug: true,
+            end_marker: EndMarker::None,
+        };
+
+        let mut output = Vec::new();
+        render(&mut output, &model).unwrap();
+        let output = String::from_utf8(output).unwrap();
+
+        // Single-method should NOT have rrf=, only the method-local score
+        assert!(output.contains("Debug: fts_bm25=1.754"));
+        assert!(!output.contains("rrf="));
+    }
+
+    #[test]
+    fn test_render_debug_single_method_vector() {
+        let mut hit = make_fused_hit("abc123:1", 0.5, &[RetrievalMethod::Vector]);
+        hit.contributors[0].backend_score = Some(0.234);
+        let chunk = make_chunk("abc123:1", "abc123");
+
+        let model = SearchRenderModel {
+            preamble: Preamble {
+                catalog: "my-catalog".to_string(),
+                label: "main".to_string(),
+                searching: "vector only".to_string(),
+            },
+            pre_result_warnings: vec![],
+            results: vec![RenderedResult {
+                fused_hit: hit,
+                chunk,
+                leading_inline_warnings: vec![],
+            }],
+            trailing_inline_warnings: vec![],
+            debug: true,
+            end_marker: EndMarker::None,
+        };
+
+        let mut output = Vec::new();
+        render(&mut output, &model).unwrap();
+        let output = String::from_utf8(output).unwrap();
+
+        assert!(output.contains("Debug: vector_distance=0.234"));
+        assert!(!output.contains("rrf="));
+    }
+
+    #[test]
+    fn test_render_end_marker_sentinel() {
+        let model = SearchRenderModel {
+            preamble: Preamble {
+                catalog: "my-catalog".to_string(),
+                label: "main".to_string(),
+                searching: "fts only".to_string(),
+            },
+            pre_result_warnings: vec![],
+            results: vec![],
+            trailing_inline_warnings: vec![],
+            debug: false,
+            end_marker: EndMarker::Sentinel,
+        };
+
+        let mut output = Vec::new();
+        render(&mut output, &model).unwrap();
+        let output = String::from_utf8(output).unwrap();
+
+        assert!(output.contains("End of results"));
+    }
+
+    #[test]
+    fn test_render_end_marker_no_results() {
+        let model = SearchRenderModel {
+            preamble: Preamble {
+                catalog: "my-catalog".to_string(),
+                label: "main".to_string(),
+                searching: "fts only".to_string(),
+            },
+            pre_result_warnings: vec![],
+            results: vec![],
+            trailing_inline_warnings: vec![],
+            debug: false,
+            end_marker: EndMarker::NoResults,
+        };
+
+        let mut output = Vec::new();
+        render(&mut output, &model).unwrap();
+        let output = String::from_utf8(output).unwrap();
+
+        assert!(output.contains("No results."));
+    }
+
+    #[test]
+    fn test_render_warning_incomplete_method() {
+        let warning = SearchWarning::IncompleteMethod {
+            method: RetrievalMethod::Fts,
+            source_pointer: "--commit abc123".to_string(),
+        };
+
+        let model = SearchRenderModel {
+            preamble: Preamble {
+                catalog: "my-catalog".to_string(),
+                label: "main".to_string(),
+                searching: "fts only".to_string(),
+            },
+            pre_result_warnings: vec![warning],
+            results: vec![],
+            trailing_inline_warnings: vec![],
+            debug: false,
+            end_marker: EndMarker::NoResults,
+        };
+
+        let mut output = Vec::new();
+        render(&mut output, &model).unwrap();
+        let output = String::from_utf8(output).unwrap();
+
+        assert!(output.contains("⚠️  fts state for this label is incomplete"));
+        assert!(output.contains("--commit abc123"));
+    }
+
+    #[test]
+    fn test_render_warning_fts_no_index_no_fallback() {
+        let warning = SearchWarning::FtsNoIndexNoFallback {
+            label: "my-catalog:main".to_string(),
+            source_pointer: "--commit abc123".to_string(),
+        };
+
+        let model = SearchRenderModel {
+            preamble: Preamble {
+                catalog: "my-catalog".to_string(),
+                label: "main".to_string(),
+                searching: "fts only".to_string(),
+            },
+            pre_result_warnings: vec![warning],
+            results: vec![],
+            trailing_inline_warnings: vec![],
+            debug: false,
+            end_marker: EndMarker::NoResults,
+        };
+
+        let mut output = Vec::new();
+        render(&mut output, &model).unwrap();
+        let output = String::from_utf8(output).unwrap();
+
+        assert!(output.contains(
+            "⚠️  FTS state for label my-catalog:main is missing on disk; re-crawl to rebuild"
+        ));
+    }
+
+    #[test]
+    fn test_render_warning_fts_no_index_degrade() {
+        let warning = SearchWarning::FtsNoIndexDegrade {
+            label: "my-catalog:main".to_string(),
+            source_pointer: "--commit abc123".to_string(),
+        };
+
+        let model = SearchRenderModel {
+            preamble: Preamble {
+                catalog: "my-catalog".to_string(),
+                label: "main".to_string(),
+                searching: "fts, vector".to_string(),
+            },
+            pre_result_warnings: vec![warning],
+            results: vec![],
+            trailing_inline_warnings: vec![],
+            debug: false,
+            end_marker: EndMarker::NoResults,
+        };
+
+        let mut output = Vec::new();
+        render(&mut output, &model).unwrap();
+        let output = String::from_utf8(output).unwrap();
+
+        assert!(output.contains("⚠️  FTS state for label my-catalog:main is missing on disk; falling back to vector-only"));
+    }
+
+    #[test]
+    fn test_render_warning_stale_hydration() {
+        let warning = SearchWarning::StaleHydration {
+            row_id: "abc123:1".to_string(),
+        };
+
+        let model = SearchRenderModel {
+            preamble: Preamble {
+                catalog: "my-catalog".to_string(),
+                label: "main".to_string(),
+                searching: "fts only".to_string(),
+            },
+            pre_result_warnings: vec![],
+            results: vec![],
+            trailing_inline_warnings: vec![warning],
+            debug: false,
+            end_marker: EndMarker::NoResults,
+        };
+
+        let mut output = Vec::new();
+        render(&mut output, &model).unwrap();
+        let output = String::from_utf8(output).unwrap();
+
+        assert!(output.contains(
+            "⚠️  Chunk abc123:1 in FTS index but not in LanceDB (stale state), skipping"
+        ));
+    }
+
+    #[test]
+    fn test_render_warning_ordering() {
+        // Multiple warnings should emit in input order
+        let warnings = vec![
+            SearchWarning::IncompleteMethod {
+                method: RetrievalMethod::Fts,
+                source_pointer: "--commit abc".to_string(),
+            },
+            SearchWarning::FtsNoIndexDegrade {
+                label: "test:main".to_string(),
+                source_pointer: "--commit abc".to_string(),
+            },
+        ];
+
+        let model = SearchRenderModel {
+            preamble: Preamble {
+                catalog: "my-catalog".to_string(),
+                label: "main".to_string(),
+                searching: "fts, vector".to_string(),
+            },
+            pre_result_warnings: warnings,
+            results: vec![],
+            trailing_inline_warnings: vec![],
+            debug: false,
+            end_marker: EndMarker::NoResults,
+        };
+
+        let mut output = Vec::new();
+        render(&mut output, &model).unwrap();
+        let output = String::from_utf8(output).unwrap();
+
+        // Incomplete method warning should come before NoIndex warning
+        let incomplete_pos = output.find("incomplete").unwrap();
+        let noindex_pos = output.find("missing on disk").unwrap();
+        assert!(incomplete_pos < noindex_pos);
+    }
+
+    #[test]
+    fn test_render_trailing_warnings_with_no_results() {
+        // When all hydration fails, trailing warnings emit before No results
+        let warning = SearchWarning::StaleHydration {
+            row_id: "abc123:1".to_string(),
+        };
+
+        let model = SearchRenderModel {
+            preamble: Preamble {
+                catalog: "my-catalog".to_string(),
+                label: "main".to_string(),
+                searching: "fts only".to_string(),
+            },
+            pre_result_warnings: vec![],
+            results: vec![],
+            trailing_inline_warnings: vec![warning],
+            debug: false,
+            end_marker: EndMarker::NoResults,
+        };
+
+        let mut output = Vec::new();
+        render(&mut output, &model).unwrap();
+        let output = String::from_utf8(output).unwrap();
+
+        // Stale-hydration warning should come before "No results."
+        let stale_pos = output.find("stale state").unwrap();
+        let no_results_pos = output.find("No results.").unwrap();
+        assert!(stale_pos < no_results_pos);
+    }
+
+    #[test]
+    fn test_render_leading_inline_warnings() {
+        let warning = SearchWarning::StaleHydration {
+            row_id: "abc123:0".to_string(),
+        };
+        let hit = make_fused_hit("abc123:1", 0.5, &[RetrievalMethod::Fts]);
+        let chunk = make_chunk("abc123:1", "abc123");
+
+        let model = SearchRenderModel {
+            preamble: Preamble {
+                catalog: "my-catalog".to_string(),
+                label: "main".to_string(),
+                searching: "fts only".to_string(),
+            },
+            pre_result_warnings: vec![],
+            results: vec![RenderedResult {
+                fused_hit: hit,
+                chunk,
+                leading_inline_warnings: vec![warning],
+            }],
+            trailing_inline_warnings: vec![],
+            debug: false,
+            end_marker: EndMarker::None,
+        };
+
+        let mut output = Vec::new();
+        render(&mut output, &model).unwrap();
+        let output = String::from_utf8(output).unwrap();
+
+        // Warning should come before the result line
+        let warning_pos = output.find("stale state").unwrap();
+        let result_pos = output.find("abc123:1 [f]").unwrap();
+        assert!(warning_pos < result_pos);
+    }
+
+    #[test]
+    fn test_translate_decision_warnings() {
+        use crate::engine::storage::LabelMetadataRow;
+
+        let metadata = LabelMetadataRow {
+            label_id: "test-catalog:main".to_string(),
+            catalog: "test-catalog".to_string(),
+            label: "main".to_string(),
+            source_kind: "git-commit".to_string(),
+            vector_source: Some("abc123".to_string()),
+            vector_complete: true,
+            fts_source: Some("abc123".to_string()),
+            fts_complete: true,
+            updated_at_unix_secs: 0,
+        };
+
+        let warnings = vec![DecisionWarning::IncompleteMethod {
+            method: RetrievalMethod::Fts,
+        }];
+
+        let search_warnings = translate_decision_warnings(warnings, &metadata);
+
+        assert_eq!(search_warnings.len(), 1);
+        match &search_warnings[0] {
+            SearchWarning::IncompleteMethod {
+                method,
+                source_pointer,
+            } => {
+                assert_eq!(*method, RetrievalMethod::Fts);
+                assert_eq!(source_pointer, "--commit abc123");
+            }
+            _ => panic!("Expected IncompleteMethod warning"),
+        }
+    }
+}
