@@ -23,6 +23,8 @@ use crate::engine::{
     {fusion::FusedHit, storage::LabelMetadataRow},
 };
 
+use std::collections::HashMap;
+
 use super::util::format_source_pointer;
 
 // =============================================================================
@@ -361,6 +363,59 @@ pub fn translate_decision_warnings(
             },
         })
         .collect()
+}
+
+// =============================================================================
+// Hydration helper
+// =============================================================================
+
+/// Hydrate ranked hits with chunk data, handling stale rows correctly.
+///
+/// Walks `fused_hits` in order, accumulating stale-row warnings in a pending buffer.
+/// When a valid hit is found, the pending warnings are attached to that result's
+/// `leading_inline_warnings`. This ensures warnings appear immediately before the
+/// result that "displaced" the stale row.
+///
+/// Returns `(results, trailing_inline_warnings)`:
+/// - `results`: up to `limit` successfully hydrated results
+/// - `trailing_inline_warnings`: warnings for stale rows after the last valid result,
+///   or when no valid results were found at all
+pub fn hydrate_ranked_hits(
+    fused_hits: Vec<FusedHit>,
+    chunks_by_row_id: &HashMap<String, ChunkRow>,
+    limit: usize,
+) -> (Vec<RenderedResult>, Vec<SearchWarning>) {
+    let mut results = Vec::with_capacity(limit.min(fused_hits.len()));
+    let mut pending_warnings: Vec<SearchWarning> = Vec::new();
+
+    for fused_hit in fused_hits.into_iter() {
+        if results.len() >= limit {
+            // We've reached the limit; stop iterating.
+            // Any remaining stale rows are not our concern (they're beyond the limit).
+            break;
+        }
+
+        match chunks_by_row_id.get(&fused_hit.row_id) {
+            Some(chunk) => {
+                // Valid hit: attach pending warnings to this result
+                results.push(RenderedResult {
+                    fused_hit,
+                    chunk: chunk.clone(),
+                    leading_inline_warnings: std::mem::take(&mut pending_warnings),
+                });
+            }
+            None => {
+                // Stale row: accumulate warning for the next valid result
+                pending_warnings.push(SearchWarning::StaleHydration {
+                    row_id: fused_hit.row_id,
+                });
+            }
+        }
+    }
+
+    // Any remaining pending warnings are trailing (after the last valid result,
+    // or when no valid results were found at all)
+    (results, pending_warnings)
 }
 
 // =============================================================================
@@ -936,5 +991,169 @@ mod tests {
             }
             _ => panic!("Expected IncompleteMethod warning"),
         }
+    }
+
+    // =========================================================================
+    // hydrate_ranked_hits tests
+    // =========================================================================
+
+    #[test]
+    fn test_hydrate_no_stale_rows() {
+        // All row_ids hydrate. Result count = input count (or limit, whichever is smaller).
+        // Trailing warnings empty.
+        let fused_hits = vec![
+            make_fused_hit("row_a", 0.1, &[RetrievalMethod::Fts]),
+            make_fused_hit("row_b", 0.09, &[RetrievalMethod::Vector]),
+            make_fused_hit("row_c", 0.08, &[RetrievalMethod::Fts]),
+        ];
+        let chunks = vec![
+            ("row_a".to_string(), make_chunk("row_a", "file1")),
+            ("row_b".to_string(), make_chunk("row_b", "file2")),
+            ("row_c".to_string(), make_chunk("row_c", "file3")),
+        ]
+        .into_iter()
+        .collect();
+
+        let (results, trailing) = hydrate_ranked_hits(fused_hits, &chunks, 10);
+
+        assert_eq!(results.len(), 3);
+        assert_eq!(results[0].fused_hit.row_id, "row_a");
+        assert_eq!(results[1].fused_hit.row_id, "row_b");
+        assert_eq!(results[2].fused_hit.row_id, "row_c");
+        assert!(results[0].leading_inline_warnings.is_empty());
+        assert!(results[1].leading_inline_warnings.is_empty());
+        assert!(results[2].leading_inline_warnings.is_empty());
+        assert!(trailing.is_empty());
+    }
+
+    #[test]
+    fn test_hydrate_stale_before_first_valid() {
+        // Stale before first valid: fused order [stale_a, valid_b].
+        // Assert results[0] is b and its leading_inline_warnings contains the warning for a.
+        // Trailing empty.
+        let fused_hits = vec![
+            make_fused_hit("stale_a", 0.1, &[RetrievalMethod::Fts]),
+            make_fused_hit("valid_b", 0.09, &[RetrievalMethod::Vector]),
+        ];
+        let chunks = vec![("valid_b".to_string(), make_chunk("valid_b", "file2"))]
+            .into_iter()
+            .collect();
+
+        let (results, trailing) = hydrate_ranked_hits(fused_hits, &chunks, 10);
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].fused_hit.row_id, "valid_b");
+        assert_eq!(results[0].leading_inline_warnings.len(), 1);
+        match &results[0].leading_inline_warnings[0] {
+            SearchWarning::StaleHydration { row_id } => assert_eq!(row_id, "stale_a"),
+            _ => panic!("Expected StaleHydration warning"),
+        }
+        assert!(trailing.is_empty());
+    }
+
+    #[test]
+    fn test_hydrate_stale_between_two_valid() {
+        // Stale between two valid rows: fused order [valid_b, stale_c, valid_d].
+        // Assert results[0] is b with empty leading; results[1] is d with leading
+        // containing the warning for c. Trailing empty.
+        let fused_hits = vec![
+            make_fused_hit("valid_b", 0.1, &[RetrievalMethod::Fts]),
+            make_fused_hit("stale_c", 0.09, &[RetrievalMethod::Vector]),
+            make_fused_hit("valid_d", 0.08, &[RetrievalMethod::Fts]),
+        ];
+        let chunks = vec![
+            ("valid_b".to_string(), make_chunk("valid_b", "file1")),
+            ("valid_d".to_string(), make_chunk("valid_d", "file3")),
+        ]
+        .into_iter()
+        .collect();
+
+        let (results, trailing) = hydrate_ranked_hits(fused_hits, &chunks, 10);
+
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].fused_hit.row_id, "valid_b");
+        assert!(results[0].leading_inline_warnings.is_empty());
+        assert_eq!(results[1].fused_hit.row_id, "valid_d");
+        assert_eq!(results[1].leading_inline_warnings.len(), 1);
+        match &results[1].leading_inline_warnings[0] {
+            SearchWarning::StaleHydration { row_id } => assert_eq!(row_id, "stale_c"),
+            _ => panic!("Expected StaleHydration warning"),
+        }
+        assert!(trailing.is_empty());
+    }
+
+    #[test]
+    fn test_hydrate_stale_after_last_valid() {
+        // Stale after last valid: fused order [valid_b, stale_c].
+        // Assert results[0] is b with empty leading; trailing contains the warning for c.
+        let fused_hits = vec![
+            make_fused_hit("valid_b", 0.1, &[RetrievalMethod::Fts]),
+            make_fused_hit("stale_c", 0.09, &[RetrievalMethod::Vector]),
+        ];
+        let chunks = vec![("valid_b".to_string(), make_chunk("valid_b", "file1"))]
+            .into_iter()
+            .collect();
+
+        let (results, trailing) = hydrate_ranked_hits(fused_hits, &chunks, 10);
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].fused_hit.row_id, "valid_b");
+        assert!(results[0].leading_inline_warnings.is_empty());
+        assert_eq!(trailing.len(), 1);
+        match &trailing[0] {
+            SearchWarning::StaleHydration { row_id } => assert_eq!(row_id, "stale_c"),
+            _ => panic!("Expected StaleHydration warning"),
+        }
+    }
+
+    #[test]
+    fn test_hydrate_all_stale() {
+        // All stale (no hydratable rows): fused order all stale.
+        // Assert results empty; trailing contains a warning per stale row, in order.
+        let fused_hits = vec![
+            make_fused_hit("stale_a", 0.1, &[RetrievalMethod::Fts]),
+            make_fused_hit("stale_b", 0.09, &[RetrievalMethod::Vector]),
+        ];
+        let chunks: HashMap<String, ChunkRow> = HashMap::new();
+
+        let (results, trailing) = hydrate_ranked_hits(fused_hits, &chunks, 10);
+
+        assert!(results.is_empty());
+        assert_eq!(trailing.len(), 2);
+        match &trailing[0] {
+            SearchWarning::StaleHydration { row_id } => assert_eq!(row_id, "stale_a"),
+            _ => panic!("Expected StaleHydration warning for stale_a"),
+        }
+        match &trailing[1] {
+            SearchWarning::StaleHydration { row_id } => assert_eq!(row_id, "stale_b"),
+            _ => panic!("Expected StaleHydration warning for stale_b"),
+        }
+    }
+
+    #[test]
+    fn test_hydrate_limit_truncation_with_stale_after_limit() {
+        // Limit-truncation with stale after limit: fused order [valid_a, valid_b, valid_c, stale_d]
+        // with limit = 2. Assert results.len() == 2; the warning for d does NOT appear
+        // (the helper stopped before iterating it). Trailing empty.
+        let fused_hits = vec![
+            make_fused_hit("valid_a", 0.1, &[RetrievalMethod::Fts]),
+            make_fused_hit("valid_b", 0.09, &[RetrievalMethod::Vector]),
+            make_fused_hit("valid_c", 0.08, &[RetrievalMethod::Fts]),
+            make_fused_hit("stale_d", 0.07, &[RetrievalMethod::Vector]),
+        ];
+        let chunks = vec![
+            ("valid_a".to_string(), make_chunk("valid_a", "file1")),
+            ("valid_b".to_string(), make_chunk("valid_b", "file2")),
+            ("valid_c".to_string(), make_chunk("valid_c", "file3")),
+        ]
+        .into_iter()
+        .collect();
+
+        let (results, trailing) = hydrate_ranked_hits(fused_hits, &chunks, 2);
+
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].fused_hit.row_id, "valid_a");
+        assert_eq!(results[1].fused_hit.row_id, "valid_b");
+        assert!(trailing.is_empty());
     }
 }

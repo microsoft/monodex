@@ -6,7 +6,7 @@ use std::io::Write;
 
 use crate::app::{
     Config, format_source_pointer, resolve_database_path, resolve_label_context,
-    search::{self, EndMarker, Preamble, RenderedResult, SearchRenderModel, SearchWarning},
+    search::{self, EndMarker, Preamble, SearchRenderModel, SearchWarning},
 };
 use crate::engine::storage::ChunkRow;
 use crate::engine::{
@@ -391,40 +391,8 @@ async fn run_single_method_search<W: Write>(
     let chunk_map: HashMap<String, ChunkRow> =
         chunks.into_iter().map(|c| (c.row_id.clone(), c)).collect();
 
-    // Walk fused hits in order, emit first `limit` that hydrate
-    let mut results: Vec<RenderedResult> = Vec::new();
-    let mut trailing_warnings: Vec<SearchWarning> = Vec::new();
-
-    for fused_hit in fused_hits.into_iter() {
-        if results.len() >= limit {
-            break;
-        }
-
-        match chunk_map.get(&fused_hit.row_id) {
-            Some(chunk) => {
-                results.push(RenderedResult {
-                    fused_hit,
-                    chunk: chunk.clone(),
-                    leading_inline_warnings: vec![],
-                });
-            }
-            None => {
-                // Stale state - chunk was deleted
-                let warning = SearchWarning::StaleHydration {
-                    row_id: fused_hit.row_id.clone(),
-                };
-                if results.is_empty() {
-                    // Collect as trailing warnings
-                    trailing_warnings.push(warning);
-                } else {
-                    // Attach to next result
-                    if let Some(last) = results.last_mut() {
-                        last.leading_inline_warnings.push(warning);
-                    }
-                }
-            }
-        }
-    }
+    // Hydrate fused hits with chunk data
+    let (results, trailing_warnings) = search::hydrate_ranked_hits(fused_hits, &chunk_map, limit);
 
     // Decide end marker
     let saturations = &[collected.saturated];
@@ -542,40 +510,8 @@ async fn run_hybrid_search<W: Write>(
     let chunk_map: HashMap<String, ChunkRow> =
         chunks.into_iter().map(|c| (c.row_id.clone(), c)).collect();
 
-    // Walk fused hits in order, emit first `limit` that hydrate
-    let mut results: Vec<RenderedResult> = Vec::new();
-    let mut trailing_warnings: Vec<SearchWarning> = Vec::new();
-
-    for fused_hit in fused_hits.into_iter() {
-        if results.len() >= limit {
-            break;
-        }
-
-        match chunk_map.get(&fused_hit.row_id) {
-            Some(chunk) => {
-                results.push(RenderedResult {
-                    fused_hit,
-                    chunk: chunk.clone(),
-                    leading_inline_warnings: vec![],
-                });
-            }
-            None => {
-                // Stale state - chunk was deleted
-                let warning = SearchWarning::StaleHydration {
-                    row_id: fused_hit.row_id.clone(),
-                };
-                if results.is_empty() {
-                    // Collect as trailing warnings
-                    trailing_warnings.push(warning);
-                } else {
-                    // Attach to next result
-                    if let Some(last) = results.last_mut() {
-                        last.leading_inline_warnings.push(warning);
-                    }
-                }
-            }
-        }
-    }
+    // Hydrate fused hits with chunk data
+    let (results, trailing_warnings) = search::hydrate_ranked_hits(fused_hits, &chunk_map, limit);
 
     // Step 5: Decide end marker
     // Saturations contains one entry per backend that actually ran and returned results
