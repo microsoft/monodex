@@ -18,7 +18,7 @@ use crate::app::crawl::phases::{
 };
 use crate::app::crawl::types::{CrawlSourceMetadata, PhaseResults};
 use crate::app::crawl::warning::create_warning_sink;
-use crate::app::util::stderr_lock_progress;
+use crate::app::util::{format_count, stderr_lock_progress};
 use crate::app::{
     Config, load_warning_state, resolve_database_path, run_embed_upload_pipeline,
     run_upsert_without_vectors, validate_config_path,
@@ -108,7 +108,7 @@ pub fn run_crawl_label(
     if !prior_warning_files.is_empty() {
         println!(
             "Found {} files with prior chunking warnings",
-            prior_warning_files.len()
+            format_count(prior_warning_files.len() as u64)
         );
     }
     println!();
@@ -199,7 +199,7 @@ pub fn run_crawl_working_dir(
     if !prior_warning_files.is_empty() {
         println!(
             "Found {} files with prior chunking warnings",
-            prior_warning_files.len()
+            format_count(prior_warning_files.len() as u64)
         );
     }
     println!();

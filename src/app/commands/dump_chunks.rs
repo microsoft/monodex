@@ -4,6 +4,7 @@
 
 use std::path::PathBuf;
 
+use crate::app::format_count;
 use crate::engine::SMALL_CHUNK_CHARS;
 use crate::engine::partitioner::{
     ChunkQualityReport, PartitionConfig, PartitionDebug, partition_typescript,
@@ -80,7 +81,7 @@ pub fn run_dump_chunks(
 
         println!("=== QUALITY SCORE ===");
         println!("Score: {:.1}%", report.score);
-        println!("Total chunks: {}", chunks.len());
+        println!("Total chunks: {}", format_count(chunks.len() as u64));
         println!(
             "Small chunks (<{} chars): {}",
             SMALL_CHUNK_CHARS, report.small_chunks
@@ -91,7 +92,7 @@ pub fn run_dump_chunks(
         );
     } else {
         // Default mode: show summary with previews
-        println!("Total chunks: {}", chunks.len());
+        println!("Total chunks: {}", format_count(chunks.len() as u64));
         println!("Target size: {} chars", target_size);
         println!();
 
@@ -143,7 +144,7 @@ pub fn run_dump_chunks(
         }
 
         println!("━━━━━ Summary ━━━━━");
-        println!("Total chunks: {}", chunks.len());
+        println!("Total chunks: {}", format_count(chunks.len() as u64));
         println!("Total chars: {}", total_chars);
         println!(
             "Average size: {:.0} chars",

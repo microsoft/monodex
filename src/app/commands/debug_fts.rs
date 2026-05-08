@@ -8,8 +8,8 @@
 use anyhow::{Result, anyhow};
 
 use crate::app::{
-    ChunkSelector, Config, format_source_pointer, parse_chunk_selector, resolve_database_path,
-    resolve_label_context,
+    ChunkSelector, Config, format_count, format_source_pointer, parse_chunk_selector,
+    resolve_database_path, resolve_label_context,
 };
 use crate::engine::fts::index::FtsIndex;
 use crate::engine::fts::tokenizer::tokenize_text;
@@ -90,7 +90,7 @@ pub fn run_debug_fts(
         if tokens.is_empty() {
             println!("No tokens (chunk text produced zero tokens after tokenization).");
         } else {
-            println!("Tokens ({}):", tokens.len());
+            println!("Tokens ({}):", format_count(tokens.len() as u64));
             print_tokens_wrapped(&tokens, MAX_TOKENS_DISPLAY);
         }
 
@@ -178,7 +178,10 @@ fn print_tokens_wrapped(tokens: &[String], max_tokens: usize) {
 
     // If we truncated tokens, indicate how many more
     if tokens.len() > max_tokens {
-        println!("  ... and {} more.", tokens.len() - max_tokens);
+        println!(
+            "  ... and {} more.",
+            format_count((tokens.len() - max_tokens) as u64)
+        );
     }
 }
 

@@ -64,7 +64,7 @@ pub async fn run_embed_upload_pipeline(
 
     println!(
         "🔶 Phase 3: Embedding {} chunks with {} parallel sessions...",
-        total_chunks,
+        format_count(total_chunks as u64),
         embedder.num_workers()
     );
     println!("  (Checkpoints every 60s - safe to CTRL+C)");
@@ -97,8 +97,8 @@ pub async fn run_embed_upload_pipeline(
                 eprintln!(
                     "[{}] Embedded {}/{} ({:.0}%) - {:.1} chunks/sec - ETA: {}",
                     chrono_timestamp(),
-                    current,
-                    total_chunks,
+                    format_count(current as u64),
+                    format_count(total_chunks as u64),
                     (current as f64 / total_chunks as f64) * 100.0,
                     rate,
                     eta
@@ -220,7 +220,7 @@ pub async fn run_embed_upload_pipeline(
     let rate = total_chunks as f64 / embed_elapsed.as_secs_f64().max(0.001);
     println!(
         "\n  Embedding complete: {} chunks in {} ({:.1} chunks/sec)",
-        total_chunks,
+        format_count(total_chunks as u64),
         format_duration(embed_elapsed.as_secs_f64()),
         rate
     );
@@ -235,7 +235,7 @@ pub async fn run_embed_upload_pipeline(
         println!();
         println!(
             "  ⚠️  Encountered {} embedding failures",
-            failures.embedding_failures.len()
+            format_count(failures.embedding_failures.len() as u64)
         );
         println!("      These files may not be searchable. Check logs above for details.");
     }
@@ -498,7 +498,7 @@ async fn upload_and_mark_complete(
         "[{}] {} ({} chunks)...",
         chrono_timestamp(),
         log_message,
-        count
+        format_count(count as u64)
     );
 
     // Convert chunks to ChunkRows and upsert
