@@ -139,12 +139,12 @@ fn setup_test_db(monodex_home: &Path) -> (tempfile::TempDir, ChunkStorage, Label
     })
 }
 
-/// Test that search with both methods in selection produces PR1 stub error.
+/// Test that search with both methods in selection succeeds with hybrid search.
 ///
 /// This verifies the decision table: when active subset has 2+ methods with equal sources,
-/// PR1 should stub-error pointing at --retrieval.
+/// PR2 hybrid search should succeed.
 #[test]
-fn test_search_both_methods_stub_error() {
+fn test_search_both_methods_hybrid() {
     let monodex_home = tempfile::TempDir::new().unwrap();
     write_minimal_config(monodex_home.path());
 
@@ -179,7 +179,7 @@ fn test_search_both_methods_stub_error() {
         embedding_model: Default::default(),
     };
 
-    // Run search without --retrieval (should trigger stub error)
+    // Run search without --retrieval (should succeed with hybrid search)
     let mut output = Vec::new();
     let result = run_search(
         &mut output,
@@ -193,19 +193,9 @@ fn test_search_both_methods_stub_error() {
     );
 
     assert!(
-        result.is_err(),
-        "Search should return error for multi-method in PR1"
-    );
-    let err_msg = result.unwrap_err().to_string();
-    assert!(
-        err_msg.contains("Hybrid search across multiple retrieval methods is not yet implemented"),
-        "Error should mention hybrid search not implemented, got: {}",
-        err_msg
-    );
-    assert!(
-        err_msg.contains("--retrieval"),
-        "Error should suggest --retrieval flag, got: {}",
-        err_msg
+        result.is_ok(),
+        "Hybrid search should succeed, got error: {:?}",
+        result.err()
     );
 
     // Explicitly drop to release file handles before cleanup

@@ -180,8 +180,8 @@ fn test_crawl_then_search__quick_excluded() {
         )
         .expect("crawl failed");
 
-        // Test 1: Search with no --retrieval should produce PR1 stub error
-        // (both methods in selection, sources equal, RRF not implemented)
+        // Test 1: Search with no --retrieval should succeed with hybrid search
+        // (both methods in selection, sources equal, hybrid retrieval implemented)
         let mut output = Vec::new();
         let search_result = run_search(
             &mut output,
@@ -190,25 +190,14 @@ fn test_crawl_then_search__quick_excluded() {
             10,
             Some("main"),
             Some("test-catalog"),
-            None, // no --retrieval flag
+            None, // no --retrieval flag = all methods
             false,
         );
 
         assert!(
-            search_result.is_err(),
-            "Search should return error for multi-method in PR1"
-        );
-        let err_msg = search_result.unwrap_err().to_string();
-        assert!(
-            err_msg
-                .contains("Hybrid search across multiple retrieval methods is not yet implemented"),
-            "Error should mention hybrid search not implemented, got: {}",
-            err_msg
-        );
-        assert!(
-            err_msg.contains("--retrieval"),
-            "Error should suggest --retrieval flag, got: {}",
-            err_msg
+            search_result.is_ok(),
+            "Hybrid search should succeed, got error: {:?}",
+            search_result.err()
         );
 
         // Test 2: Search with --retrieval fts should succeed
@@ -424,8 +413,8 @@ fn test_selection_widening__quick_excluded() {
         )
         .expect("third crawl (widening) failed");
 
-        // Verify: search with no --retrieval should produce PR1 stub error again
-        // (both methods in selection, sources equal, RRF not implemented)
+        // Verify: search with no --retrieval should succeed with hybrid search
+        // (both methods in selection, sources equal, hybrid retrieval implemented)
         let mut output = Vec::new();
         let search_result = run_search(
             &mut output,
@@ -434,20 +423,14 @@ fn test_selection_widening__quick_excluded() {
             10,
             Some("main"),
             Some("test-catalog"),
-            None, // no --retrieval flag
+            None, // no --retrieval flag = all methods
             false,
         );
 
         assert!(
-            search_result.is_err(),
-            "Search should return PR1 stub error for multi-method selection"
-        );
-        let err_msg = search_result.unwrap_err().to_string();
-        assert!(
-            err_msg
-                .contains("Hybrid search across multiple retrieval methods is not yet implemented"),
-            "Error should mention hybrid search not implemented, got: {}",
-            err_msg
+            search_result.is_ok(),
+            "Hybrid search should succeed, got error: {:?}",
+            search_result.err()
         );
 
         // Verify: search --retrieval fts should succeed
@@ -818,10 +801,10 @@ fn test_fts_query_parse_error__quick_excluded() {
 // Test 8: Multi-method explicit search
 // =============================================================================
 
-/// Test multi-method explicit search (PR1 stub error):
+/// Test multi-method explicit search (PR2 hybrid search):
 /// - After a --retrieval-less crawl (selection={fts, vector})
 /// - Run `monodex search --retrieval fts --retrieval vector`
-/// - Confirm the PR1 stub error fires (same as no-flag with size-2+ selection)
+/// - Confirm the hybrid search succeeds
 #[test]
 #[allow(non_snake_case)]
 fn test_multi_method_explicit_search__quick_excluded() {
@@ -869,33 +852,21 @@ fn test_multi_method_explicit_search__quick_excluded() {
             false,
         );
 
-        // Should error with PR1 stub error (hybrid not implemented)
+        // Should succeed with hybrid search (PR2)
         assert!(
-            search_result.is_err(),
-            "Multi-method search should return PR1 stub error"
-        );
-        let err_msg = search_result.unwrap_err().to_string();
-        assert!(
-            err_msg
-                .contains("Hybrid search across multiple retrieval methods is not yet implemented"),
-            "Error should mention hybrid search not implemented, got: {}",
-            err_msg
-        );
-        assert!(
-            err_msg.contains("--retrieval"),
-            "Error should mention --retrieval flag, got: {}",
-            err_msg
+            search_result.is_ok(),
+            "Hybrid search should succeed, got error: {:?}",
+            search_result.err()
         );
 
         (monodex_home, repo_dir)
     };
 }
 
-/// Test that the search preamble appears before the multi-method stub error.
+/// Test that the search preamble appears for hybrid search.
 ///
 /// This verifies that the "Catalog: ... / Label: ... / Searching: ..." line
-/// is printed before the PR1 stub error for hybrid search, making the
-/// retrieval-selection concept legible even when errors follow.
+/// is printed for hybrid search, showing both methods.
 #[test]
 #[allow(non_snake_case)]
 fn test_multi_method_search_shows_preamble__quick_excluded() {
@@ -954,13 +925,15 @@ fn test_multi_method_search_shows_preamble__quick_excluded() {
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
 
-        // The command should fail with PR1 stub error
+        // The command should succeed with hybrid search (PR2)
         assert!(
-            !output.status.success(),
-            "Multi-method search should fail with PR1 stub error"
+            output.status.success(),
+            "Hybrid search should succeed, got stdout: {:?}, stderr: {:?}",
+            stdout,
+            stderr
         );
 
-        // The preamble should appear in stdout before the error
+        // The preamble should appear in stdout
         // Check for "Searching:" and both method names
         assert!(
             stdout.contains("Searching:"),
