@@ -1,6 +1,10 @@
 //! Purpose: Integration tests for FTS end-to-end behavior — full pipeline tests for Stage 9.
 //! Edit here when: Adding or modifying end-to-end FTS integration tests.
 //! Do not edit here for: Production crawl/search code (see `app/commands/`); per-module unit tests.
+//!
+//! Every test in this file carries the `__quick_excluded` suffix.
+//! See the "Quick CI tier" section of
+//! `docs/code_organization_policy.md` for the policy.
 
 use std::collections::BTreeSet;
 use std::fs;
@@ -172,7 +176,8 @@ fn create_test_config(monodex_home: &Path, catalog_name: &str, repo_path: &Path)
 /// - `monodex search --text "..." --retrieval vector` → confirms vector results.
 #[test]
 #[serial(monodex_home)]
-fn test_crawl_then_search() {
+#[allow(non_snake_case)]
+fn test_crawl_then_search__quick_excluded() {
     let (_monodex_home, _repo_dir) = {
         // Set up temp directories
         let monodex_home = unique_temp_dir();
@@ -286,7 +291,8 @@ fn test_crawl_then_search() {
 /// - Confirms search --retrieval vector errors with "not in selection"
 #[test]
 #[serial(monodex_home)]
-fn test_selection_narrowing() {
+#[allow(non_snake_case)]
+fn test_selection_narrowing__quick_excluded() {
     let (_monodex_home, _repo_dir) = {
         // Set up temp directories
         let monodex_home = unique_temp_dir();
@@ -390,7 +396,8 @@ fn test_selection_narrowing() {
 /// - Confirms search with no --retrieval produces PR1 stub error again
 #[test]
 #[serial(monodex_home)]
-fn test_selection_widening() {
+#[allow(non_snake_case)]
+fn test_selection_widening__quick_excluded() {
     let (_monodex_home, _repo_dir) = {
         // Set up temp directories
         let monodex_home = unique_temp_dir();
@@ -520,7 +527,8 @@ fn test_selection_widening() {
 /// - Confirms search --retrieval vector errors with "not in selection"
 #[test]
 #[serial(monodex_home)]
-fn test_first_time_crawl_fts_only() {
+#[allow(non_snake_case)]
+fn test_first_time_crawl_fts_only__quick_excluded() {
     let (_monodex_home, _repo_dir) = {
         // Set up temp directories
         let monodex_home = unique_temp_dir();
@@ -607,7 +615,8 @@ fn test_first_time_crawl_fts_only() {
 /// - purge --all removes entire fts/ directory
 #[test]
 #[serial(monodex_home)]
-fn test_purge_cleanup() {
+#[allow(non_snake_case)]
+fn test_purge_cleanup__quick_excluded() {
     let (_monodex_home, _repo_dir) = {
         // Set up temp directories
         let monodex_home = unique_temp_dir();
@@ -709,7 +718,8 @@ fn test_purge_cleanup() {
 /// - Confirm error fires with expected message
 #[test]
 #[serial(monodex_home)]
-fn test_schema_mismatch_error() {
+#[allow(non_snake_case)]
+fn test_schema_mismatch_error__quick_excluded() {
     let (_monodex_home, _repo_dir) = {
         // Set up temp directories
         let monodex_home = unique_temp_dir();
@@ -771,7 +781,8 @@ fn test_schema_mismatch_error() {
 /// - Confirm output is "Couldn't parse FTS query: <message>" and NOT "No results."
 #[test]
 #[serial(monodex_home)]
-fn test_fts_query_parse_error() {
+#[allow(non_snake_case)]
+fn test_fts_query_parse_error__quick_excluded() {
     let (_monodex_home, _repo_dir) = {
         // Set up temp directories
         let monodex_home = unique_temp_dir();
@@ -849,7 +860,8 @@ fn test_fts_query_parse_error() {
 /// - Confirm the PR1 stub error fires (same as no-flag with size-2+ selection)
 #[test]
 #[serial(monodex_home)]
-fn test_multi_method_explicit_search() {
+#[allow(non_snake_case)]
+fn test_multi_method_explicit_search__quick_excluded() {
     let (_monodex_home, _repo_dir) = {
         // Set up temp directories
         let monodex_home = unique_temp_dir();
@@ -925,7 +937,8 @@ fn test_multi_method_explicit_search() {
 /// retrieval-selection concept legible even when errors follow.
 #[test]
 #[serial(monodex_home)]
-fn test_multi_method_search_shows_preamble() {
+#[allow(non_snake_case)]
+fn test_multi_method_search_shows_preamble__quick_excluded() {
     let (_monodex_home, _repo_dir) = {
         // Set up temp directories
         let monodex_home = unique_temp_dir();
@@ -1024,7 +1037,8 @@ fn test_multi_method_search_shows_preamble() {
 /// 4. Search under label B should find the chunk
 #[test]
 #[serial(monodex_home)]
-fn test_cross_label_active_labels_preserved() {
+#[allow(non_snake_case)]
+fn test_cross_label_active_labels_preserved__quick_excluded() {
     let (_monodex_home, _repo_dir) = {
         // Set up temp directories
         let monodex_home = unique_temp_dir();
@@ -1122,7 +1136,8 @@ fn test_cross_label_active_labels_preserved() {
 /// `--working-dir`, not `--commit <opaque sentinel>`.
 #[test]
 #[serial(monodex_home)]
-fn test_working_dir_remediation_message() {
+#[allow(non_snake_case)]
+fn test_working_dir_remediation_message__quick_excluded() {
     let (_monodex_home, _repo_dir) = {
         // Set up temp directories
         let monodex_home = unique_temp_dir();
@@ -1212,7 +1227,8 @@ fn test_working_dir_remediation_message() {
 /// The crawl should fail with an error referencing the warning state.
 #[test]
 #[serial(monodex_home)]
-fn test_post_finalize_error_propagates_when_no_phase_error() {
+#[allow(non_snake_case)]
+fn test_post_finalize_error_propagates_when_no_phase_error__quick_excluded() {
     let (_monodex_home, _repo_dir) = {
         // Set up temp directories
         let monodex_home = unique_temp_dir();

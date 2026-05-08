@@ -104,6 +104,28 @@ When editing an existing file whose header doesn't match this rule, update it on
 - **Sibling test file** (`#[cfg(test)] mod tests;` in `mod.rs`, code in `tests.rs`): default for any directory-module.
 - **Integration tests** (`tests/` at crate root): CLI-level and end-to-end behavior only.
 
+## Quick CI tier
+
+### Purpose
+
+`just ci-quick` is the fast variant of `just ci`. Same fmt and clippy checks, but with the slowest tests filtered out at runtime. It exists for the developer inner loop, the moments between edits when fast feedback matters. Repository CI workflow selection is managed separately; this section only defines the local quick tier and the invariant that `just ci` remains the full gate.
+
+### Mechanism
+
+A test function whose name contains `__quick_excluded` is filtered out by `cargo test -- --skip __quick_excluded`. The match is a substring against the full test path, so the suffix works wherever the test lives, in `src/` or in `tests/`. The slow code still compiles and links on every run; only its execution is skipped.
+
+Do not conflate `__quick_excluded` with `#[ignore]`. They are orthogonal. `#[ignore]` means "do not run by default anywhere," used for tests too expensive even for full CI, flaky pending fix, or requiring external setup. `__quick_excluded` means "runs in `just ci`, skipped in `just ci-quick`." A test can carry either, both, or neither.
+
+### Where the time goes
+
+On CI, a clean workspace recompile is part of every run. On a developer machine with cargo's incremental cache warm, compile is usually cheap and most of the wall-clock is the tests themselves. The tagging mechanism only affects test execution, not compile, so the speedup it delivers is most visible to developers. CI timings are a nice deterministic report but not the right decision-making criterion for what to tag.
+
+### When to retag
+
+When `just ci-quick` stops feeling quick, retag. The diagnostic question is which tests are eating the most test-execution time. A clean `cargo test --workspace --locked` shows per-binary timings: each file under `tests/` is its own binary, and `src/` unit tests aggregate into one. The slowest binaries or the slowest tests inside them are the candidates.
+
+There is no fixed threshold. The judgment is relative: tag the largest contributors until `ci-quick` is meaningfully faster than `ci`. If most of the time is one file, tagging that file is enough. If the time is spread evenly across many tests, the suffix mechanism is the wrong tool and the feature itself should be reconsidered.
+
 ## Naming
 
 - Command handlers: named after the CLI subcommand (`purge.rs`, `search.rs`). Use `use_cmd.rs` for `use` (reserved keyword).
