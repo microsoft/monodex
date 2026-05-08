@@ -1,5 +1,8 @@
-# Run all CI checks (format, clippy, test)
+# Run all CI checks (format, clippy, all tests)
 ci: fmt-check clippy test
+
+# Run quick CI checks (format, clippy, fast tests only)
+ci-quick: fmt-check clippy test-quick
 
 # Format check
 fmt-check:
@@ -13,9 +16,13 @@ fmt:
 clippy:
 	cargo clippy --workspace --all-targets --locked -- -D warnings
 
-# Run tests
+# Run all tests
 test:
 	cargo test --workspace --locked
+
+# Run tests excluding ones tagged `__quick_excluded` in the function name
+test-quick:
+	cargo test --workspace --locked -- --skip __quick_excluded
 
 # Build release binary
 build:

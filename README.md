@@ -370,17 +370,22 @@ Run CI checks using [Just](https://github.com/casey/just) (recommended):
 # Install just
 cargo install just
 
-# Run all CI checks (format, clippy, check, test)
+# Run all CI checks: format, clippy, all tests
 just ci
+
+# Run quick CI checks: format, clippy, fast tests only (slow tests skipped)
+just ci-quick
 
 # Individual commands
 just fmt          # Auto-format code
 just fmt-check    # Check formatting
 just clippy       # Run lints
-just check        # Type check
-just test         # Run tests
+just test         # Run all tests
+just test-quick   # Run tests excluding slow ones
 just build        # Build release binary
 ```
+
+Use `just ci-quick` during iteration. Run `just ci` before declaring work complete, and at any intermediate point worth a deeper check. See the "Quick CI tier" section of [docs/code_organization_policy.md](docs/code_organization_policy.md) for the policy.
 
 Or run directly with cargo:
 
