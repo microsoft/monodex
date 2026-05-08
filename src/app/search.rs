@@ -71,6 +71,15 @@ pub enum EndMarker {
     None,
 }
 
+/// Search mode, used to determine debug output format.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SearchMode {
+    /// Single-method search (FTS-only or vector-only)
+    SingleMethod,
+    /// Hybrid search (RRF fusion of multiple methods)
+    Hybrid,
+}
+
 /// Preamble for search output.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Preamble {
@@ -108,6 +117,8 @@ pub struct SearchRenderModel {
     pub debug: bool,
     /// End-of-results marker
     pub end_marker: EndMarker,
+    /// Search mode (single-method vs hybrid)
+    pub mode: SearchMode,
 }
 
 // =============================================================================
@@ -145,7 +156,7 @@ pub fn render<W: Write>(writer: &mut W, model: &SearchRenderModel) -> io::Result
 
         // Render debug continuation if enabled
         if model.debug {
-            render_debug_continuation(writer, &result.fused_hit)?;
+            render_debug_continuation(writer, &result.fused_hit, model.mode)?;
         }
 
         // Render preview lines (first 3 lines of chunk text)
@@ -227,12 +238,16 @@ fn build_provenance_marker(contributors: &[crate::engine::fusion::RankedContribu
 /// Render debug continuation line.
 ///
 /// Format: `Debug: rrf={:.4}, fts_bm25={:.3}, vector_distance={:.3}`
-/// Only emits keys whose contributors are present. RRF is omitted for single-method.
-fn render_debug_continuation<W: Write>(writer: &mut W, hit: &FusedHit) -> io::Result<()> {
+/// Only emits keys whose contributors are present. RRF is emitted only for hybrid mode.
+fn render_debug_continuation<W: Write>(
+    writer: &mut W,
+    hit: &FusedHit,
+    mode: SearchMode,
+) -> io::Result<()> {
     let mut parts = Vec::new();
 
-    // RRF score (only for hybrid results)
-    if hit.contributors.len() > 1 {
+    // RRF score (only for hybrid mode)
+    if mode == SearchMode::Hybrid {
         parts.push(format!("rrf={:.4}", hit.rrf_score));
     }
 
@@ -527,6 +542,7 @@ mod tests {
             trailing_inline_warnings: vec![],
             debug: false,
             end_marker: EndMarker::None,
+            mode: SearchMode::SingleMethod,
         };
 
         let mut output = Vec::new();
@@ -558,6 +574,7 @@ mod tests {
             trailing_inline_warnings: vec![],
             debug: false,
             end_marker: EndMarker::None,
+            mode: SearchMode::SingleMethod,
         };
 
         let mut output = Vec::new();
@@ -591,6 +608,7 @@ mod tests {
             trailing_inline_warnings: vec![],
             debug: false,
             end_marker: EndMarker::None,
+            mode: SearchMode::Hybrid,
         };
 
         let mut output = Vec::new();
@@ -627,6 +645,7 @@ mod tests {
             trailing_inline_warnings: vec![],
             debug: true,
             end_marker: EndMarker::None,
+            mode: SearchMode::Hybrid,
         };
 
         let mut output = Vec::new();
@@ -658,6 +677,7 @@ mod tests {
             trailing_inline_warnings: vec![],
             debug: true,
             end_marker: EndMarker::None,
+            mode: SearchMode::SingleMethod,
         };
 
         let mut output = Vec::new();
@@ -690,6 +710,7 @@ mod tests {
             trailing_inline_warnings: vec![],
             debug: true,
             end_marker: EndMarker::None,
+            mode: SearchMode::SingleMethod,
         };
 
         let mut output = Vec::new();
@@ -698,6 +719,74 @@ mod tests {
 
         assert!(output.contains("Debug: vector_distance=0.234"));
         assert!(!output.contains("rrf="));
+    }
+
+    #[test]
+    fn test_render_debug_hybrid_fts_only_contributor() {
+        // Hybrid mode with a [f]-only contributor should still show rrf=
+        let mut hit = make_fused_hit("abc123:1", 0.0164, &[RetrievalMethod::Fts]);
+        hit.contributors[0].backend_score = Some(1.718);
+        let chunk = make_chunk("abc123:1", "abc123");
+
+        let model = SearchRenderModel {
+            preamble: Preamble {
+                catalog: "my-catalog".to_string(),
+                label: "main".to_string(),
+                searching: "fts, vector".to_string(),
+            },
+            pre_result_warnings: vec![],
+            results: vec![RenderedResult {
+                fused_hit: hit,
+                chunk,
+                leading_inline_warnings: vec![],
+            }],
+            trailing_inline_warnings: vec![],
+            debug: true,
+            end_marker: EndMarker::None,
+            mode: SearchMode::Hybrid,
+        };
+
+        let mut output = Vec::new();
+        render(&mut output, &model).unwrap();
+        let output = String::from_utf8(output).unwrap();
+
+        // Should show rrf= even with single contributor because mode is Hybrid
+        assert!(output.contains("Debug: rrf=0.0164, fts_bm25=1.718"));
+        assert!(!output.contains("vector_distance="));
+    }
+
+    #[test]
+    fn test_render_debug_hybrid_vector_only_contributor() {
+        // Hybrid mode with a [v]-only contributor should still show rrf=
+        let mut hit = make_fused_hit("abc123:1", 0.0164, &[RetrievalMethod::Vector]);
+        hit.contributors[0].backend_score = Some(0.234);
+        let chunk = make_chunk("abc123:1", "abc123");
+
+        let model = SearchRenderModel {
+            preamble: Preamble {
+                catalog: "my-catalog".to_string(),
+                label: "main".to_string(),
+                searching: "fts, vector".to_string(),
+            },
+            pre_result_warnings: vec![],
+            results: vec![RenderedResult {
+                fused_hit: hit,
+                chunk,
+                leading_inline_warnings: vec![],
+            }],
+            trailing_inline_warnings: vec![],
+            debug: true,
+            end_marker: EndMarker::None,
+            mode: SearchMode::Hybrid,
+        };
+
+        let mut output = Vec::new();
+        render(&mut output, &model).unwrap();
+        let output = String::from_utf8(output).unwrap();
+
+        // Should show rrf= even with single contributor because mode is Hybrid
+        assert!(output.contains("Debug: rrf=0.0164, vector_distance=0.234"));
+        assert!(!output.contains("fts_bm25="));
     }
 
     #[test]
@@ -713,6 +802,7 @@ mod tests {
             trailing_inline_warnings: vec![],
             debug: false,
             end_marker: EndMarker::Sentinel,
+            mode: SearchMode::SingleMethod,
         };
 
         let mut output = Vec::new();
@@ -735,6 +825,7 @@ mod tests {
             trailing_inline_warnings: vec![],
             debug: false,
             end_marker: EndMarker::NoResults,
+            mode: SearchMode::SingleMethod,
         };
 
         let mut output = Vec::new();
@@ -762,6 +853,7 @@ mod tests {
             trailing_inline_warnings: vec![],
             debug: false,
             end_marker: EndMarker::NoResults,
+            mode: SearchMode::SingleMethod,
         };
 
         let mut output = Vec::new();
@@ -790,6 +882,7 @@ mod tests {
             trailing_inline_warnings: vec![],
             debug: false,
             end_marker: EndMarker::NoResults,
+            mode: SearchMode::SingleMethod,
         };
 
         let mut output = Vec::new();
@@ -819,6 +912,7 @@ mod tests {
             trailing_inline_warnings: vec![],
             debug: false,
             end_marker: EndMarker::NoResults,
+            mode: SearchMode::Hybrid,
         };
 
         let mut output = Vec::new();
@@ -845,6 +939,7 @@ mod tests {
             trailing_inline_warnings: vec![warning],
             debug: false,
             end_marker: EndMarker::NoResults,
+            mode: SearchMode::SingleMethod,
         };
 
         let mut output = Vec::new();
@@ -881,6 +976,7 @@ mod tests {
             trailing_inline_warnings: vec![],
             debug: false,
             end_marker: EndMarker::NoResults,
+            mode: SearchMode::Hybrid,
         };
 
         let mut output = Vec::new();
@@ -911,6 +1007,7 @@ mod tests {
             trailing_inline_warnings: vec![warning],
             debug: false,
             end_marker: EndMarker::NoResults,
+            mode: SearchMode::SingleMethod,
         };
 
         let mut output = Vec::new();
@@ -946,6 +1043,7 @@ mod tests {
             trailing_inline_warnings: vec![],
             debug: false,
             end_marker: EndMarker::None,
+            mode: SearchMode::SingleMethod,
         };
 
         let mut output = Vec::new();

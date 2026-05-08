@@ -194,6 +194,7 @@ pub fn run_search<W: Write>(
                     trailing_inline_warnings: vec![],
                     debug,
                     end_marker: EndMarker::None,
+                    mode: search::SearchMode::SingleMethod, // Error path emits no results; default is safe
                 };
                 search::render(writer, &model)?;
 
@@ -348,6 +349,7 @@ async fn run_single_method_search<W: Write>(
                             trailing_inline_warnings: vec![],
                             debug,
                             end_marker: EndMarker::NoResults,
+                            mode: search::SearchMode::SingleMethod,
                         };
                         search::render(writer, &model)?;
                         return Ok(());
@@ -363,6 +365,7 @@ async fn run_single_method_search<W: Write>(
                         trailing_inline_warnings: vec![],
                         debug,
                         end_marker: EndMarker::NoResults,
+                        mode: search::SearchMode::SingleMethod,
                     };
                     search::render(writer, &model)?;
                     return Ok(());
@@ -406,6 +409,7 @@ async fn run_single_method_search<W: Write>(
         trailing_inline_warnings: trailing_warnings,
         debug,
         end_marker,
+        mode: search::SearchMode::SingleMethod,
     };
 
     // Render
@@ -525,6 +529,7 @@ async fn run_hybrid_search<W: Write>(
         trailing_inline_warnings: trailing_warnings,
         debug,
         end_marker,
+        mode: search::SearchMode::Hybrid,
     };
 
     // Step 7: Render
