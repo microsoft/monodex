@@ -208,7 +208,9 @@ fn test_crawl_then_search__quick_excluded() {
 
         // Test 1: Search with no --retrieval should produce PR1 stub error
         // (both methods in selection, sources equal, RRF not implemented)
+        let mut output = Vec::new();
         let search_result = run_search(
+            &mut output,
             &config,
             "getUserProfile",
             10,
@@ -238,7 +240,9 @@ fn test_crawl_then_search__quick_excluded() {
         // Test 2: Search with --retrieval fts should succeed
         let fts_retrieval: Option<BTreeSet<RetrievalMethod>> =
             Some([RetrievalMethod::Fts].into_iter().collect());
+        let mut output = Vec::new();
         let search_result = run_search(
+            &mut output,
             &config,
             "getUserProfile",
             10,
@@ -258,7 +262,9 @@ fn test_crawl_then_search__quick_excluded() {
         // Test 3: Search with --retrieval vector should succeed
         let vector_retrieval: Option<BTreeSet<RetrievalMethod>> =
             Some([RetrievalMethod::Vector].into_iter().collect());
+        let mut output = Vec::new();
         let search_result = run_search(
+            &mut output,
             &config,
             "getUserProfile",
             10,
@@ -336,7 +342,9 @@ fn test_selection_narrowing__quick_excluded() {
         .expect("second crawl (narrowing) failed");
 
         // Verify: search with no --retrieval should now work (only fts in selection)
+        let mut output = Vec::new();
         let search_result = run_search(
+            &mut output,
             &config,
             "getUserProfile",
             10,
@@ -356,7 +364,9 @@ fn test_selection_narrowing__quick_excluded() {
         // Verify: search --retrieval vector should error (not in selection)
         let vector_retrieval: Option<BTreeSet<RetrievalMethod>> =
             Some([RetrievalMethod::Vector].into_iter().collect());
+        let mut output = Vec::new();
         let search_result = run_search(
+            &mut output,
             &config,
             "getUserProfile",
             10,
@@ -452,7 +462,9 @@ fn test_selection_widening__quick_excluded() {
 
         // Verify: search with no --retrieval should produce PR1 stub error again
         // (both methods in selection, sources equal, RRF not implemented)
+        let mut output = Vec::new();
         let search_result = run_search(
+            &mut output,
             &config,
             "getUserProfile",
             10,
@@ -477,7 +489,9 @@ fn test_selection_widening__quick_excluded() {
         // Verify: search --retrieval fts should succeed
         let fts_retrieval: Option<BTreeSet<RetrievalMethod>> =
             Some([RetrievalMethod::Fts].into_iter().collect());
+        let mut output = Vec::new();
         let search_result = run_search(
+            &mut output,
             &config,
             "getUserProfile",
             10,
@@ -495,7 +509,9 @@ fn test_selection_widening__quick_excluded() {
         // Verify: search --retrieval vector should succeed
         let vector_retrieval: Option<BTreeSet<RetrievalMethod>> =
             Some([RetrievalMethod::Vector].into_iter().collect());
+        let mut output = Vec::new();
         let search_result = run_search(
+            &mut output,
             &config,
             "getUserProfile",
             10,
@@ -558,7 +574,9 @@ fn test_first_time_crawl_fts_only__quick_excluded() {
         .expect("first crawl failed");
 
         // Verify: search with no --retrieval should succeed (only fts in selection)
+        let mut output = Vec::new();
         let search_result = run_search(
+            &mut output,
             &config,
             "getUserProfile",
             10,
@@ -578,7 +596,9 @@ fn test_first_time_crawl_fts_only__quick_excluded() {
         // Verify: search --retrieval vector should error (not in selection)
         let vector_retrieval: Option<BTreeSet<RetrievalMethod>> =
             Some([RetrievalMethod::Vector].into_iter().collect());
+        let mut output = Vec::new();
         let search_result = run_search(
+            &mut output,
             &config,
             "getUserProfile",
             10,
@@ -813,7 +833,9 @@ fn test_fts_query_parse_error__quick_excluded() {
 
         // Search with a syntactically-invalid query
         // Using unmatched quotes or malformed field syntax that Tantivy's parser rejects
+        let mut output = Vec::new();
         let search_result = run_search(
+            &mut output,
             &config,
             "foo:bar:", // Invalid field syntax (field requires a term after colon)
             10,
@@ -896,7 +918,9 @@ fn test_multi_method_explicit_search__quick_excluded() {
                 .into_iter()
                 .collect(),
         );
+        let mut output = Vec::new();
         let search_result = run_search(
+            &mut output,
             &config,
             "getUserProfile",
             10,
@@ -1082,7 +1106,9 @@ fn test_cross_label_active_labels_preserved__quick_excluded() {
         // Step 3: Search under label A should find the chunk (FTS)
         let fts_only: Option<BTreeSet<RetrievalMethod>> =
             Some(std::iter::once(RetrievalMethod::Fts).collect());
+        let mut output = Vec::new();
         run_search(
+            &mut output,
             &config,
             "getUserProfile",
             10,
@@ -1095,7 +1121,9 @@ fn test_cross_label_active_labels_preserved__quick_excluded() {
         // run_search returns Ok(()) on success; result count is printed to stdout
 
         // Step 4: Search under label B should find the chunk (FTS)
+        let mut output = Vec::new();
         run_search(
+            &mut output,
             &config,
             "getUserProfile",
             10,
@@ -1110,7 +1138,9 @@ fn test_cross_label_active_labels_preserved__quick_excluded() {
         // Also verify vector search works for label B (which has vectors)
         let vector_only: Option<BTreeSet<RetrievalMethod>> =
             Some(std::iter::once(RetrievalMethod::Vector).collect());
+        let mut output = Vec::new();
         run_search(
+            &mut output,
             &config,
             "getUserProfile",
             10,
@@ -1168,7 +1198,9 @@ fn test_working_dir_remediation_message__quick_excluded() {
         // Now try to search with vector (not in selection) - should error
         let vector_only: Option<BTreeSet<RetrievalMethod>> =
             Some(std::iter::once(RetrievalMethod::Vector).collect());
+        let mut output = Vec::new();
         let search_result = run_search(
+            &mut output,
             &config,
             "getUserProfile",
             10,

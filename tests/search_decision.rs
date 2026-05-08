@@ -200,7 +200,9 @@ fn test_search_both_methods_stub_error() {
     };
 
     // Run search without --retrieval (should trigger stub error)
+    let mut output = Vec::new();
     let result = run_search(
+        &mut output,
         &config,
         "test query",
         10,
@@ -291,7 +293,9 @@ fn test_search_fts_only_selection() {
     };
 
     // Run search - should succeed (FTS-only selection)
+    let mut output = Vec::new();
     let result = run_search(
+        &mut output,
         &config,
         "test content",
         10,
@@ -363,7 +367,9 @@ fn test_search_vector_not_in_selection_error() {
     // Run search with --retrieval vector (not in selection)
     let retrieval: Option<BTreeSet<RetrievalMethod>> =
         Some([RetrievalMethod::Vector].into_iter().collect());
+    let mut output = Vec::new();
     let result = run_search(
+        &mut output,
         &config,
         "test query",
         10,
@@ -449,7 +455,9 @@ fn test_search_sources_disagree_error() {
     };
 
     // Run search without --retrieval (should detect source mismatch)
+    let mut output = Vec::new();
     let result = run_search(
+        &mut output,
         &config,
         "test query",
         10,
@@ -551,7 +559,9 @@ fn test_search_incomplete_method_warning() {
     // Post-fix, it should warn and proceed
     let retrieval: Option<BTreeSet<RetrievalMethod>> =
         Some([RetrievalMethod::Fts].into_iter().collect());
+    let mut output = Vec::new();
     let result = run_search(
+        &mut output,
         &config,
         "test content",
         10,

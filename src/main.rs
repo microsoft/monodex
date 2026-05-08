@@ -93,7 +93,11 @@ fn main() -> anyhow::Result<()> {
                 Some(retrieval.into_iter().collect())
             };
 
+            // Acquire stdout lock and pass to run_search
+            let stdout = std::io::stdout();
+            let mut stdout_lock = stdout.lock();
             monodex::app::commands::run_search(
+                &mut stdout_lock,
                 &config,
                 &text,
                 limit,
