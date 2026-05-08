@@ -93,7 +93,7 @@ fn test_label_metadata_row_with_selection(
     }
 }
 
-/// Set up a test database at the default location under MONODEX_HOME.
+/// Set up a test database at the default location under the test tool home.
 /// Returns the database path and storage handles.
 fn setup_test_db(monodex_home: &Path) -> (tempfile::TempDir, ChunkStorage, LabelStorage) {
     // Run init-db to create the database at the default location

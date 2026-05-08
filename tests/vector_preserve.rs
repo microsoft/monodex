@@ -13,12 +13,6 @@ use monodex::engine::{
     storage::{ChunkRow, ChunkStorage},
 };
 
-fn write_minimal_config(monodex_home: &std::path::Path) {
-    let config_path = monodex_home.join("config.json");
-    std::fs::create_dir_all(monodex_home).ok();
-    std::fs::write(&config_path, r#"{"catalogs": {}}"#).unwrap();
-}
-
 fn test_chunk(
     path: &str,
     text: &str,
@@ -85,15 +79,6 @@ async fn create_test_storage() -> (tempfile::TempDir, ChunkStorage) {
 /// 3. Verify vector search still finds the chunk (proving vector was preserved)
 #[tokio::test]
 async fn test_upsert_without_vectors_preserves_vector() {
-    // Use a blocking scope to set up the test environment, then drop the lock
-    // before any async operations
-    let (_monodex_home, _tmp_dir) = {
-        let tmp_dir = tempfile::TempDir::new().unwrap();
-        let monodex_home = tmp_dir.path().to_path_buf();
-        write_minimal_config(&monodex_home);
-        (monodex_home, tmp_dir)
-    };
-
     // Create test storage
     let (_db_dir, chunk_storage) = create_test_storage().await;
 
@@ -199,13 +184,6 @@ async fn test_upsert_without_vectors_preserves_vector() {
 /// the existing vectors must be cleared so the file ends up with uniform NULL vectors.
 #[tokio::test]
 async fn test_fts_only_clears_partial_vectors() {
-    let (_monodex_home, _tmp_dir) = {
-        let tmp_dir = tempfile::TempDir::new().unwrap();
-        let monodex_home = tmp_dir.path().to_path_buf();
-        write_minimal_config(&monodex_home);
-        (monodex_home, tmp_dir)
-    };
-
     // Create test storage
     let (_db_dir, chunk_storage) = create_test_storage().await;
 

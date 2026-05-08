@@ -13,12 +13,6 @@ use monodex::engine::{
     storage::{ChunkRow, ChunkStorage},
 };
 
-fn write_minimal_config(monodex_home: &std::path::Path) {
-    let config_path = monodex_home.join("config.json");
-    std::fs::create_dir_all(monodex_home).ok();
-    std::fs::write(&config_path, r#"{"catalogs": {}}"#).unwrap();
-}
-
 fn test_chunk_with_labels(
     path: &str,
     text: &str,
@@ -111,13 +105,6 @@ fn chunk_to_row(chunk: &Chunk) -> ChunkRow {
 /// 3. Verify the chunk now has active_label_ids containing both A and B
 #[tokio::test]
 async fn test_active_label_ids_preserved_vector_path() {
-    let (_monodex_home, _tmp_dir) = {
-        let tmp_dir = tempfile::TempDir::new().unwrap();
-        let monodex_home = tmp_dir.path().to_path_buf();
-        write_minimal_config(&monodex_home);
-        (monodex_home, tmp_dir)
-    };
-
     let (_db_dir, chunk_storage) = create_test_storage().await;
 
     let catalog = "test-catalog";
@@ -185,13 +172,6 @@ async fn test_active_label_ids_preserved_vector_path() {
 /// 3. Verify the chunk has both labels AND the vector works
 #[tokio::test]
 async fn test_active_label_ids_preserved_fts_then_vector() {
-    let (_monodex_home, _tmp_dir) = {
-        let tmp_dir = tempfile::TempDir::new().unwrap();
-        let monodex_home = tmp_dir.path().to_path_buf();
-        write_minimal_config(&monodex_home);
-        (monodex_home, tmp_dir)
-    };
-
     let (_db_dir, chunk_storage) = create_test_storage().await;
 
     let catalog = "test-catalog";
@@ -273,13 +253,6 @@ async fn test_active_label_ids_preserved_fts_then_vector() {
 /// 3. Verify active_label_ids still has exactly [A], not [A, A]
 #[tokio::test]
 async fn test_active_label_ids_self_upsert_idempotent() {
-    let (_monodex_home, _tmp_dir) = {
-        let tmp_dir = tempfile::TempDir::new().unwrap();
-        let monodex_home = tmp_dir.path().to_path_buf();
-        write_minimal_config(&monodex_home);
-        (monodex_home, tmp_dir)
-    };
-
     let (_db_dir, chunk_storage) = create_test_storage().await;
 
     let catalog = "test-catalog";

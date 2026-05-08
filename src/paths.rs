@@ -206,23 +206,29 @@ mod tests {
     use serial_test::serial;
     use std::env;
 
-    /// RAII guard to restore MONODEX_HOME on drop.
-    /// Captures the current value on construction and restores it (or removes it)
+    /// RAII guard to restore MONODEX_HOME and MONODEX_CONFIG on drop.
+    /// Captures the current values on construction and restores them (or removes them)
     /// when dropped, even on panic.
-    struct MonodexHomeGuard {
-        original: Option<String>,
+    struct EnvGuard {
+        original_home: Option<String>,
+        original_config: Option<String>,
     }
 
-    impl MonodexHomeGuard {
+    impl EnvGuard {
         fn capture() -> Self {
-            let original = env::var("MONODEX_HOME").ok();
-            MonodexHomeGuard { original }
+            let original_home = env::var("MONODEX_HOME").ok();
+            let original_config = env::var("MONODEX_CONFIG").ok();
+            EnvGuard {
+                original_home,
+                original_config,
+            }
         }
     }
 
-    impl Drop for MonodexHomeGuard {
+    impl Drop for EnvGuard {
         fn drop(&mut self) {
-            if let Some(ref val) = self.original {
+            // Restore MONODEX_HOME
+            if let Some(ref val) = self.original_home {
                 unsafe {
                     env::set_var("MONODEX_HOME", val);
                 }
@@ -231,17 +237,28 @@ mod tests {
                     env::remove_var("MONODEX_HOME");
                 }
             }
+            // Restore MONODEX_CONFIG
+            if let Some(ref val) = self.original_config {
+                unsafe {
+                    env::set_var("MONODEX_CONFIG", val);
+                }
+            } else {
+                unsafe {
+                    env::remove_var("MONODEX_CONFIG");
+                }
+            }
         }
     }
 
     #[test]
     #[serial(monodex_home_resolver)]
     fn test_resolve_from_env_uses_monodex_home() {
-        let _guard = MonodexHomeGuard::capture();
+        let _guard = EnvGuard::capture();
         let temp_dir = tempfile::tempdir().unwrap();
 
         unsafe {
             env::set_var("MONODEX_HOME", temp_dir.path());
+            env::remove_var("MONODEX_CONFIG");
         }
 
         let paths = Paths::resolve_from_env(None).unwrap();
@@ -254,15 +271,101 @@ mod tests {
     #[test]
     #[serial(monodex_home_resolver)]
     fn test_resolve_from_env_falls_back_to_home() {
-        let _guard = MonodexHomeGuard::capture();
+        let _guard = EnvGuard::capture();
 
         unsafe {
             env::remove_var("MONODEX_HOME");
+            env::remove_var("MONODEX_CONFIG");
         }
 
         let paths = Paths::resolve_from_env(None).unwrap();
         assert!(paths.tool_home.ends_with(".monodex"));
         assert_eq!(paths.config_path, paths.tool_home.join("config.json"));
+    }
+
+    #[test]
+    #[serial(monodex_home_resolver)]
+    fn test_resolve_from_env_config_override_wins() {
+        let _guard = EnvGuard::capture();
+        let temp_dir = tempfile::tempdir().unwrap();
+        let override_path = PathBuf::from("/override/config.json");
+
+        unsafe {
+            env::set_var("MONODEX_HOME", temp_dir.path());
+            env::set_var("MONODEX_CONFIG", "/env/config.json");
+        }
+
+        let paths = Paths::resolve_from_env(Some(override_path.clone())).unwrap();
+        assert_eq!(paths.config_path, override_path);
+    }
+
+    #[test]
+    #[serial(monodex_home_resolver)]
+    fn test_resolve_from_env_uses_monodex_config() {
+        let _guard = EnvGuard::capture();
+        let temp_dir = tempfile::tempdir().unwrap();
+
+        unsafe {
+            env::set_var("MONODEX_HOME", temp_dir.path());
+            env::set_var("MONODEX_CONFIG", "/env/config.json");
+        }
+
+        let paths = Paths::resolve_from_env(None).unwrap();
+        assert_eq!(paths.config_path, PathBuf::from("/env/config.json"));
+    }
+
+    #[test]
+    #[serial(monodex_home_resolver)]
+    fn test_resolve_from_env_empty_monodex_config_falls_back() {
+        let _guard = EnvGuard::capture();
+        let temp_dir = tempfile::tempdir().unwrap();
+
+        unsafe {
+            env::set_var("MONODEX_HOME", temp_dir.path());
+            env::set_var("MONODEX_CONFIG", "");
+        }
+
+        let paths = Paths::resolve_from_env(None).unwrap();
+        assert_eq!(paths.config_path, temp_dir.path().join("config.json"));
+
+        // Also test whitespace-only
+        unsafe {
+            env::set_var("MONODEX_CONFIG", "   ");
+        }
+
+        let paths = Paths::resolve_from_env(None).unwrap();
+        assert_eq!(paths.config_path, temp_dir.path().join("config.json"));
+    }
+
+    #[test]
+    #[serial(monodex_home_resolver)]
+    fn test_resolve_from_env_relative_monodex_config_preserved() {
+        let _guard = EnvGuard::capture();
+        let temp_dir = tempfile::tempdir().unwrap();
+
+        unsafe {
+            env::set_var("MONODEX_HOME", temp_dir.path());
+            env::set_var("MONODEX_CONFIG", "rel/path.json");
+        }
+
+        let paths = Paths::resolve_from_env(None).unwrap();
+        assert_eq!(paths.config_path, PathBuf::from("rel/path.json"));
+    }
+
+    #[test]
+    #[serial(monodex_home_resolver)]
+    fn test_resolve_from_env_relative_monodex_home_absolutized() {
+        let _guard = EnvGuard::capture();
+
+        unsafe {
+            env::set_var("MONODEX_HOME", "relative/path");
+            env::remove_var("MONODEX_CONFIG");
+        }
+
+        let paths = Paths::resolve_from_env(None).unwrap();
+        let cwd = std::fs::canonicalize(".").unwrap();
+        let expected = cwd.join("relative/path");
+        assert_eq!(paths.tool_home, expected);
     }
 
     #[test]

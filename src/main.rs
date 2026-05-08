@@ -14,11 +14,12 @@ fn main() -> anyhow::Result<()> {
     // Resolve paths from environment and CLI overrides
     let paths = Paths::resolve_from_env(cli.config.clone())?;
 
+    // Warn if old tool home files exist (before load_config, so it fires even
+    // when there's no config file at the new location)
+    monodex::paths::warn_old_tool_home_if_present(&paths);
+
     // Load config
     let config = load_config(paths)?;
-
-    // Warn if old tool home files exist
-    monodex::paths::warn_old_tool_home_if_present(&config.paths);
 
     match cli.command {
         Commands::Use { catalog, label } => {

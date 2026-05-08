@@ -148,7 +148,7 @@ fn create_test_config(monodex_home: &Path, catalog_name: &str, repo_path: &Path)
 /// Test crawl-then-search flow:
 /// - `monodex init-db`
 /// - `monodex crawl --catalog X --label main --commit HEAD`
-/// - `monodex search --text "..."` → confirms PR1 stub error.
+/// - `monodex search --text "..."` → confirms hybrid search succeeds.
 /// - `monodex search --text "..." --retrieval fts` → confirms FTS results.
 /// - `monodex search --text "..." --retrieval vector` → confirms vector results.
 #[test]
@@ -312,7 +312,7 @@ fn test_selection_narrowing__quick_excluded() {
             false,
         );
 
-        // With only fts in selection, search should succeed (not the PR1 stub error)
+        // With only fts in selection, search should succeed
         assert!(
             search_result.is_ok(),
             "FTS-only search should succeed after narrowing, got error: {:?}",
@@ -359,7 +359,7 @@ fn test_selection_narrowing__quick_excluded() {
 /// - Crawl with no --retrieval flag widens selection back to {fts, vector}
 /// - Confirms NO narrowing-announcement block
 /// - Confirms search shows "(fts, vector)" on Label: line
-/// - Confirms search with no --retrieval produces PR1 stub error again
+/// - Confirms search with no --retrieval produces hybrid search results
 #[test]
 #[allow(non_snake_case)]
 fn test_selection_widening__quick_excluded() {
@@ -528,7 +528,7 @@ fn test_first_time_crawl_fts_only__quick_excluded() {
             false,
         );
 
-        // With only fts in selection, search should succeed (not the PR1 stub error)
+        // With only fts in selection, search should succeed
         assert!(
             search_result.is_ok(),
             "FTS-only search should succeed, got error: {:?}",
@@ -919,6 +919,7 @@ fn test_multi_method_search_shows_preamble__quick_excluded() {
                 "vector",
             ])
             .env("MONODEX_HOME", monodex_home.path())
+            .env_remove("MONODEX_CONFIG")
             .output()
             .expect("failed to execute monodex search");
 

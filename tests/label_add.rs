@@ -3,7 +3,6 @@
 //! Do not edit here for: Production crawl code (see `app/commands/crawl.rs`, `app/crawl/`, `engine/git_ops/`); per-module unit tests (see the relevant module's `tests.rs` or inline `#[cfg(test)]` block).
 
 use std::collections::HashSet;
-use std::path::Path;
 use std::sync::Arc;
 
 use lancedb::connect;
@@ -14,12 +13,6 @@ use monodex::engine::{
     schema::chunks_schema,
     storage::{ChunkRow, ChunkStorage},
 };
-
-fn write_minimal_config(monodex_home: &Path) {
-    let config_path = monodex_home.join("config.json");
-    std::fs::create_dir_all(monodex_home).ok();
-    std::fs::write(&config_path, r#"{"catalogs": {}}"#).unwrap();
-}
 
 fn test_chunk(
     path: &str,
@@ -83,15 +76,6 @@ async fn create_test_storage() -> (tempfile::TempDir, ChunkStorage) {
 /// without re-embedding.
 #[tokio::test]
 async fn test_label_add_makes_chunks_searchable() {
-    // Use a blocking scope to set up the test environment, then drop the lock
-    // before any async operations
-    let (_monodex_home, _tmp_dir) = {
-        let tmp_dir = tempfile::TempDir::new().unwrap();
-        let monodex_home = tmp_dir.path().to_path_buf();
-        write_minimal_config(&monodex_home);
-        (monodex_home, tmp_dir)
-    };
-
     // Create test storage
     let (_db_dir, chunk_storage) = create_test_storage().await;
 
@@ -203,15 +187,6 @@ async fn test_label_add_makes_chunks_searchable() {
 /// file_complete is false, the file should be treated as new and re-crawled.
 #[tokio::test]
 async fn test_incomplete_file_is_recrawled() {
-    // Use a blocking scope to set up the test environment, then drop the lock
-    // before any async operations
-    let (_monodex_home, _tmp_dir) = {
-        let tmp_dir = tempfile::TempDir::new().unwrap();
-        let monodex_home = tmp_dir.path().to_path_buf();
-        write_minimal_config(&monodex_home);
-        (monodex_home, tmp_dir)
-    };
-
     // Create test storage
     let (_db_dir, chunk_storage) = create_test_storage().await;
 
