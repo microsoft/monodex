@@ -459,7 +459,7 @@ async fn run_hybrid_search<W: Write>(
     db: &Database,
     db_path: &std::path::Path,
     text: &str,
-    _limit: usize,
+    limit: usize,
     candidate_limit: usize,
     label_id: &str,
     label_metadata: &crate::engine::storage::LabelMetadataRow,
@@ -529,18 +529,69 @@ async fn run_hybrid_search<W: Write>(
     }
 
     // Step 3: Call fuse() to produce fused hits
-    let _fused_hits = fuse(method_results, candidate_limit);
+    let fused_hits = fuse(method_results, candidate_limit);
 
-    // TODO: Hydration, build render model, render
-    // For now, just render with no results to verify structure
+    // Step 4: Hydrate chunks with fill-from-lower-candidates
+    // Single bulk LanceDB fetch over all fused row_ids (up to candidate_limit)
+    let row_ids: Vec<String> = fused_hits.iter().map(|h| h.row_id.clone()).collect();
+    let chunks = chunk_storage
+        .get_chunks_by_row_ids_for_label(label_id, &row_ids)
+        .await?;
+
+    // Build lookup map
+    let chunk_map: HashMap<String, ChunkRow> =
+        chunks.into_iter().map(|c| (c.row_id.clone(), c)).collect();
+
+    // Walk fused hits in order, emit first `limit` that hydrate
+    let mut results: Vec<RenderedResult> = Vec::new();
+    let mut trailing_warnings: Vec<SearchWarning> = Vec::new();
+
+    for fused_hit in fused_hits.into_iter() {
+        if results.len() >= limit {
+            break;
+        }
+
+        match chunk_map.get(&fused_hit.row_id) {
+            Some(chunk) => {
+                results.push(RenderedResult {
+                    fused_hit,
+                    chunk: chunk.clone(),
+                    leading_inline_warnings: vec![],
+                });
+            }
+            None => {
+                // Stale state - chunk was deleted
+                let warning = SearchWarning::StaleHydration {
+                    row_id: fused_hit.row_id.clone(),
+                };
+                if results.is_empty() {
+                    // Collect as trailing warnings
+                    trailing_warnings.push(warning);
+                } else {
+                    // Attach to next result
+                    if let Some(last) = results.last_mut() {
+                        last.leading_inline_warnings.push(warning);
+                    }
+                }
+            }
+        }
+    }
+
+    // Step 5: Decide end marker
+    // Saturations contains one entry per backend that actually ran and returned results
+    let end_marker = search::decide_end_marker(results.len(), limit, &saturations);
+
+    // Step 6: Build render model
     let model = SearchRenderModel {
         preamble,
         pre_result_warnings: search_warnings,
-        results: vec![],
-        trailing_inline_warnings: vec![],
+        results,
+        trailing_inline_warnings: trailing_warnings,
         debug,
-        end_marker: EndMarker::NoResults,
+        end_marker,
     };
+
+    // Step 7: Render
     search::render(writer, &model)?;
 
     Ok(())
