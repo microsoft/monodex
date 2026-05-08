@@ -1342,11 +1342,14 @@ fn test_fts_noindex_degradation_under_hybrid__quick_excluded() {
             search_result.err()
         );
 
-        // Output should contain the degradation warning
+        // Output should contain the degradation warning with exact template
         let output_str = String::from_utf8_lossy(&output);
         assert!(
-            output_str.contains("missing on disk") || output_str.contains("falling back"),
-            "Output should contain FTS NoIndex degradation warning, got: {}",
+            output_str.contains(&format!(
+                "⚠️  FTS state for label main is missing on disk; falling back to vector-only.\n   To rebuild: monodex crawl --label main --commit {} --retrieval fts",
+                commit_oid
+            )),
+            "Output should contain exact FTS NoIndex degradation warning, got:\n{}",
             output_str
         );
 
@@ -1476,8 +1479,9 @@ fn test_empty_corpus__quick_excluded() {
 
 /// Test that "End of results" sentinel fires when results are exhausted.
 /// - Create a small corpus
-/// - Search with a limit larger than available results
-/// - Verify "End of results" appears
+/// - Search with FTS-only and a limit larger than available results
+/// - Verify "End of results" appears (FTS is more likely to return fewer
+///   than candidate_limit hits since it uses lexical matching)
 #[test]
 #[allow(non_snake_case)]
 fn test_end_of_results_sentinel__quick_excluded() {
@@ -1507,7 +1511,9 @@ fn test_end_of_results_sentinel__quick_excluded() {
         )
         .expect("crawl failed");
 
-        // Search with a large limit (larger than the corpus)
+        // Search with FTS-only and a large limit
+        // FTS is more likely to return fewer hits than candidate_limit (50)
+        // Use --retrieval fts so vector doesn't saturate the candidate limit
         let mut output = Vec::new();
         let search_result = run_search(
             &mut output,
@@ -1516,7 +1522,11 @@ fn test_end_of_results_sentinel__quick_excluded() {
             1000,             // Large limit
             Some("main"),
             Some("test-catalog"),
-            None, // no --retrieval flag = all methods
+            Some({
+                let mut set = BTreeSet::new();
+                set.insert(monodex::engine::retrieval::RetrievalMethod::Fts);
+                set
+            }), // FTS-only
             false,
         );
 
@@ -1528,14 +1538,11 @@ fn test_end_of_results_sentinel__quick_excluded() {
         );
 
         let output_str = String::from_utf8_lossy(&output);
-        // The output should either have "End of results" or have saturated the limit
-        // (exact behavior depends on corpus size vs candidate_limit)
-        // At minimum, we should have results
+        // The output should contain "End of results" since FTS returns fewer than
+        // candidate_limit (50) hits for this small corpus
         assert!(
-            output_str.contains("[v]")
-                || output_str.contains("[f]")
-                || output_str.contains("[f+v]"),
-            "Output should contain result markers, got: {}",
+            output_str.contains("End of results"),
+            "Output should contain 'End of results' sentinel, got:\n{}",
             output_str
         );
 
