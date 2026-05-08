@@ -12,7 +12,7 @@ use crate::engine::storage::ChunkRow;
 use crate::engine::{
     ParallelEmbedder, RetrievalMethod,
     fts::{FtsSearchOutcome, fts_search},
-    fusion::{FusedHit, MethodHit, RankedContribution},
+    fusion::{FusedHit, MethodHit, RankedContribution, fuse},
     retrieval::format_selection,
     search_decision::{Decision, decide},
     storage::{Database, ScoredChunkRow},
@@ -217,22 +217,21 @@ pub fn run_search<W: Write>(
                     debug,
                 ).await?;
             }
-            Decision::Hybrid { methods: _, .. } => {
-                // PR1 stub error for multi-method search
-                // Render preamble first
-                let model = SearchRenderModel {
+            Decision::Hybrid { methods, .. } => {
+                run_hybrid_search(
+                    writer,
+                    &db,
+                    &db_path,
+                    text,
+                    limit,
+                    candidate_limit,
+                    &label_id,
+                    &label_metadata,
+                    methods,
                     preamble,
                     pre_result_warnings,
-                    results: vec![],
-                    trailing_inline_warnings: vec![],
                     debug,
-                    end_marker: EndMarker::None,
-                };
-                search::render(writer, &model)?;
-
-                return Err(anyhow!(
-                    "Hybrid search across multiple retrieval methods is not yet implemented in this version.\nRe-run with --retrieval to pick a single method:\n  monodex search --text ... --retrieval fts\n  monodex search --text ... --retrieval vector"
-                ));
+                ).await?;
             }
         }
 
@@ -442,6 +441,106 @@ async fn run_single_method_search<W: Write>(
     };
 
     // Render
+    search::render(writer, &model)?;
+
+    Ok(())
+}
+
+/// Run hybrid search across multiple retrieval methods.
+///
+/// Sequential orchestration: FTS first, then vector.
+/// - FTS ParseError: hard error (fail-fast before embedder construction)
+/// - FTS NoIndex: degrade to vector-only with warning
+/// - Vector failure: hard error
+/// - Empty results from one method: fusion proceeds with other method
+#[allow(clippy::too_many_arguments)]
+async fn run_hybrid_search<W: Write>(
+    writer: &mut W,
+    db: &Database,
+    db_path: &std::path::Path,
+    text: &str,
+    _limit: usize,
+    candidate_limit: usize,
+    label_id: &str,
+    label_metadata: &crate::engine::storage::LabelMetadataRow,
+    methods: BTreeSet<RetrievalMethod>,
+    preamble: Preamble,
+    pre_result_warnings: Vec<SearchWarning>,
+    debug: bool,
+) -> anyhow::Result<()> {
+    let chunk_storage = db.chunks_storage().await?;
+
+    // Step 1: Collect FTS results first (fail-fast for ParseError)
+    let mut method_results: Vec<(RetrievalMethod, Vec<MethodHit>)> = Vec::new();
+    let mut search_warnings = pre_result_warnings;
+    let mut saturations: Vec<bool> = Vec::new();
+
+    if methods.contains(&RetrievalMethod::Fts) {
+        // Parse label_id into LabelId
+        let parts: Vec<&str> = label_id.splitn(2, ':').collect();
+        if parts.len() != 2 {
+            return Err(anyhow!("Invalid label_id format: {}", label_id));
+        }
+        let label_id_struct = crate::engine::identifier::LabelId::new(parts[0], parts[1])?;
+
+        let outcome = collect_fts(db_path, &label_id_struct, text, candidate_limit).await?;
+
+        match outcome {
+            FtsCollectOutcome::Collected(collected) => {
+                saturations.push(collected.saturated);
+                method_results.push((RetrievalMethod::Fts, collected.hits));
+            }
+            FtsCollectOutcome::NoIndex => {
+                // Check if this is incomplete or genuinely missing
+                if !label_metadata.fts_complete {
+                    // Incomplete - warning already emitted via decision_warnings
+                    // Don't add to method_results, skip FTS
+                } else {
+                    // Complete but directory is gone - degrade with warning
+                    let source_pointer = format_source_pointer(label_metadata);
+                    search_warnings.push(SearchWarning::FtsNoIndexDegrade {
+                        label: preamble.label.clone(),
+                        source_pointer,
+                    });
+                    // Don't add to method_results, skip FTS
+                }
+            }
+            FtsCollectOutcome::ParseError(msg) => {
+                // Hard error - fail fast before embedder construction
+                return Err(anyhow!("Couldn't parse FTS query: {}", msg));
+            }
+        }
+    }
+
+    // Step 2: Collect vector results (only if FTS didn't hard-error)
+    if methods.contains(&RetrievalMethod::Vector) {
+        // Initialize embedder
+        let embedder = ParallelEmbedder::new()?;
+        let embedding = embedder.encode(text, 0)?;
+
+        // Query LanceDB with candidate_limit
+        let results = chunk_storage
+            .vector_search(&embedding, label_id, candidate_limit)
+            .await?;
+
+        let collected = collect_vector(results, candidate_limit);
+        saturations.push(collected.saturated);
+        method_results.push((RetrievalMethod::Vector, collected.hits));
+    }
+
+    // Step 3: Call fuse() to produce fused hits
+    let _fused_hits = fuse(method_results, candidate_limit);
+
+    // TODO: Hydration, build render model, render
+    // For now, just render with no results to verify structure
+    let model = SearchRenderModel {
+        preamble,
+        pre_result_warnings: search_warnings,
+        results: vec![],
+        trailing_inline_warnings: vec![],
+        debug,
+        end_marker: EndMarker::NoResults,
+    };
     search::render(writer, &model)?;
 
     Ok(())
