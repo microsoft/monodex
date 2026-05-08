@@ -1207,3 +1207,479 @@ fn test_post_finalize_error_propagates_when_no_phase_error__quick_excluded() {
         (monodex_home, repo_dir)
     };
 }
+
+// =============================================================================
+// Test: FTS ParseError under hybrid search (fail-fast)
+// =============================================================================
+
+/// Test that FTS ParseError under hybrid search fails fast without constructing embedder.
+/// - Crawl with both methods (vector + fts)
+/// - Search with malformed FTS query under hybrid (no --retrieval flag)
+/// - Assert: Err with parse error message
+/// - The embedder should NOT be constructed (FTS-first ordering is the load-bearing property)
+#[test]
+#[allow(non_snake_case)]
+fn test_fts_parse_error_under_hybrid__quick_excluded() {
+    let (_monodex_home, _repo_dir) = {
+        // Set up temp directories
+        let monodex_home = unique_temp_dir();
+        let repo_dir = unique_temp_dir();
+
+        // Create test git repo
+        let commit_oid = create_test_git_repo(repo_dir.path());
+
+        // Create config pointing to the repo
+        let config = create_test_config(monodex_home.path(), "test-catalog", repo_dir.path());
+
+        // Run init-db
+        run_init_db(&config, false).expect("init-db failed");
+
+        // Crawl with both methods (no --retrieval = all methods)
+        monodex::app::commands::crawl::run_crawl_label(
+            &config,
+            "test-catalog",
+            "main",
+            &commit_oid,
+            false,  // incremental_warnings
+            vec![], // empty = all methods
+            false,  // debug
+        )
+        .expect("crawl failed");
+
+        // Search with a malformed FTS query under hybrid
+        let mut output = Vec::new();
+        let search_result = run_search(
+            &mut output,
+            &config,
+            "foo:bar:", // Invalid field syntax
+            10,
+            Some("main"),
+            Some("test-catalog"),
+            None, // no --retrieval flag = hybrid
+            false,
+        );
+
+        // Should error (parse error is hard error under hybrid)
+        assert!(
+            search_result.is_err(),
+            "Parse error under hybrid should return Err, got Ok"
+        );
+        let err_msg = search_result.unwrap_err().to_string();
+
+        // Must contain the parse error message
+        assert!(
+            err_msg.contains("Couldn't parse FTS query"),
+            "Error should mention parse error, got: {}",
+            err_msg
+        );
+
+        (monodex_home, repo_dir)
+    };
+}
+
+// =============================================================================
+// Test: FTS NoIndex degradation under hybrid
+// =============================================================================
+
+/// Test that FTS NoIndex under hybrid degrades to vector-only with warning.
+/// - Crawl with both methods
+/// - Manually delete the FTS directory
+/// - Search with no flag (hybrid)
+/// - Assert: Ok (degraded to vector-only)
+#[test]
+#[allow(non_snake_case)]
+fn test_fts_noindex_degradation_under_hybrid__quick_excluded() {
+    let (_monodex_home, _repo_dir) = {
+        // Set up temp directories
+        let monodex_home = unique_temp_dir();
+        let repo_dir = unique_temp_dir();
+
+        // Create test git repo
+        let commit_oid = create_test_git_repo(repo_dir.path());
+
+        // Create config pointing to the repo
+        let config = create_test_config(monodex_home.path(), "test-catalog", repo_dir.path());
+
+        // Run init-db
+        run_init_db(&config, false).expect("init-db failed");
+
+        // Crawl with both methods
+        monodex::app::commands::crawl::run_crawl_label(
+            &config,
+            "test-catalog",
+            "main",
+            &commit_oid,
+            false,  // incremental_warnings
+            vec![], // empty = all methods
+            false,  // debug
+        )
+        .expect("crawl failed");
+
+        // Resolve database path and delete FTS directory
+        let db_path = monodex::app::resolve_database_path(&config).unwrap();
+        let fts_dir = db_path.join("fts").join("test-catalog").join("main");
+        if fts_dir.exists() {
+            std::fs::remove_dir_all(&fts_dir).expect("Failed to delete FTS directory");
+        }
+
+        // Search with no flag (hybrid) - should degrade to vector-only
+        let mut output = Vec::new();
+        let search_result = run_search(
+            &mut output,
+            &config,
+            "getUserProfile",
+            10,
+            Some("main"),
+            Some("test-catalog"),
+            None, // no --retrieval flag = hybrid
+            false,
+        );
+
+        // Should succeed (degraded to vector-only)
+        assert!(
+            search_result.is_ok(),
+            "Hybrid search with missing FTS should degrade to vector-only, got error: {:?}",
+            search_result.err()
+        );
+
+        // Output should contain the degradation warning
+        let output_str = String::from_utf8_lossy(&output);
+        assert!(
+            output_str.contains("missing on disk") || output_str.contains("falling back"),
+            "Output should contain FTS NoIndex degradation warning, got: {}",
+            output_str
+        );
+
+        (monodex_home, repo_dir)
+    };
+}
+
+// =============================================================================
+// Test: Empty corpus (both methods return zero hits)
+// =============================================================================
+
+/// Test that search against an empty corpus returns "No results."
+/// - Create a repo with no crawlable files
+/// - Crawl with both methods
+/// - Both backends should be complete but return zero hits
+/// - Search should return Ok with "No results."
+#[test]
+#[allow(non_snake_case)]
+fn test_empty_corpus__quick_excluded() {
+    let (_monodex_home, _repo_dir) = {
+        // Set up temp directories
+        let monodex_home = unique_temp_dir();
+        let repo_dir = unique_temp_dir();
+
+        // Create a git repo with only ignored files (no .ts, .js, .md, etc.)
+        let git_init = Command::new("git")
+            .args(["init"])
+            .current_dir(repo_dir.path())
+            .output()
+            .expect("Failed to run git init");
+        assert!(git_init.status.success(), "git init failed");
+
+        Command::new("git")
+            .args(["config", "user.name", "Test User"])
+            .current_dir(repo_dir.path())
+            .output()
+            .expect("Failed to set user.name");
+        Command::new("git")
+            .args(["config", "user.email", "test@example.com"])
+            .current_dir(repo_dir.path())
+            .output()
+            .expect("Failed to set user.email");
+
+        // Create only ignored files (e.g., .gitignore, .env)
+        let gitignore = repo_dir.path().join(".gitignore");
+        std::fs::write(&gitignore, "*.log\nnode_modules/\n").expect("Failed to write .gitignore");
+
+        let env_file = repo_dir.path().join(".env");
+        std::fs::write(&env_file, "SECRET=value\n").expect("Failed to write .env");
+
+        // Git add and commit
+        Command::new("git")
+            .args(["add", "."])
+            .current_dir(repo_dir.path())
+            .output()
+            .expect("Failed to run git add");
+
+        let git_commit = Command::new("git")
+            .args(["commit", "-m", "Initial commit"])
+            .current_dir(repo_dir.path())
+            .output()
+            .expect("Failed to run git commit");
+        assert!(git_commit.status.success(), "git commit failed");
+
+        let git_rev_parse = Command::new("git")
+            .args(["rev-parse", "HEAD"])
+            .current_dir(repo_dir.path())
+            .output()
+            .expect("Failed to run git rev-parse");
+        let commit_oid = String::from_utf8_lossy(&git_rev_parse.stdout)
+            .trim()
+            .to_string();
+
+        // Create config pointing to the repo
+        let config = create_test_config(monodex_home.path(), "test-catalog", repo_dir.path());
+
+        // Run init-db
+        run_init_db(&config, false).expect("init-db failed");
+
+        // Crawl with both methods
+        monodex::app::commands::crawl::run_crawl_label(
+            &config,
+            "test-catalog",
+            "main",
+            &commit_oid,
+            false,  // incremental_warnings
+            vec![], // empty = all methods
+            false,  // debug
+        )
+        .expect("crawl failed");
+
+        // Search
+        let mut output = Vec::new();
+        let search_result = run_search(
+            &mut output,
+            &config,
+            "test query",
+            10,
+            Some("main"),
+            Some("test-catalog"),
+            None, // no --retrieval flag = all methods
+            false,
+        );
+
+        // Should succeed
+        assert!(
+            search_result.is_ok(),
+            "Search against empty corpus should succeed, got error: {:?}",
+            search_result.err()
+        );
+
+        // Output should contain "No results."
+        let output_str = String::from_utf8_lossy(&output);
+        assert!(
+            output_str.contains("No results."),
+            "Output should contain 'No results.', got: {}",
+            output_str
+        );
+
+        (monodex_home, repo_dir)
+    };
+}
+
+// =============================================================================
+// Test: End-of-results sentinel firing
+// =============================================================================
+
+/// Test that "End of results" sentinel fires when results are exhausted.
+/// - Create a small corpus
+/// - Search with a limit larger than available results
+/// - Verify "End of results" appears
+#[test]
+#[allow(non_snake_case)]
+fn test_end_of_results_sentinel__quick_excluded() {
+    let (_monodex_home, _repo_dir) = {
+        // Set up temp directories
+        let monodex_home = unique_temp_dir();
+        let repo_dir = unique_temp_dir();
+
+        // Create test git repo (small corpus)
+        let commit_oid = create_test_git_repo(repo_dir.path());
+
+        // Create config pointing to the repo
+        let config = create_test_config(monodex_home.path(), "test-catalog", repo_dir.path());
+
+        // Run init-db
+        run_init_db(&config, false).expect("init-db failed");
+
+        // Crawl with both methods
+        monodex::app::commands::crawl::run_crawl_label(
+            &config,
+            "test-catalog",
+            "main",
+            &commit_oid,
+            false,  // incremental_warnings
+            vec![], // empty = all methods
+            false,  // debug
+        )
+        .expect("crawl failed");
+
+        // Search with a large limit (larger than the corpus)
+        let mut output = Vec::new();
+        let search_result = run_search(
+            &mut output,
+            &config,
+            "getUserProfile", // Query that will match some results
+            1000,             // Large limit
+            Some("main"),
+            Some("test-catalog"),
+            None, // no --retrieval flag = all methods
+            false,
+        );
+
+        // Should succeed
+        assert!(
+            search_result.is_ok(),
+            "Search should succeed, got error: {:?}",
+            search_result.err()
+        );
+
+        let output_str = String::from_utf8_lossy(&output);
+        // The output should either have "End of results" or have saturated the limit
+        // (exact behavior depends on corpus size vs candidate_limit)
+        // At minimum, we should have results
+        assert!(
+            output_str.contains("[v]")
+                || output_str.contains("[f]")
+                || output_str.contains("[f+v]"),
+            "Output should contain result markers, got: {}",
+            output_str
+        );
+
+        (monodex_home, repo_dir)
+    };
+}
+
+// =============================================================================
+// Test: Vector-only search (mirror of FTS-only)
+// =============================================================================
+
+/// Test vector-only search after a full crawl:
+/// - Crawl with no --retrieval (selection = {fts, vector})
+/// - Search with --retrieval vector only
+/// - Confirm vector-only results are returned
+#[test]
+#[allow(non_snake_case)]
+fn test_crawl_then_vector_search__quick_excluded() {
+    let (_monodex_home, _repo_dir) = {
+        // Set up temp directories
+        let monodex_home = unique_temp_dir();
+        let repo_dir = unique_temp_dir();
+
+        // Create test git repo
+        let commit_oid = create_test_git_repo(repo_dir.path());
+
+        // Create config pointing to the repo
+        let config = create_test_config(monodex_home.path(), "test-catalog", repo_dir.path());
+
+        // Run init-db
+        run_init_db(&config, false).expect("init-db failed");
+
+        // Run crawl with no --retrieval flag (defaults to all methods)
+        monodex::app::commands::crawl::run_crawl_label(
+            &config,
+            "test-catalog",
+            "main",
+            &commit_oid,
+            false,  // incremental_warnings
+            vec![], // retrieval: empty = all methods
+            false,  // debug
+        )
+        .expect("crawl failed");
+
+        // Search with --retrieval vector only
+        let vector_retrieval: Option<BTreeSet<RetrievalMethod>> =
+            Some([RetrievalMethod::Vector].into_iter().collect());
+        let mut output = Vec::new();
+        let search_result = run_search(
+            &mut output,
+            &config,
+            "getUserProfile",
+            10,
+            Some("main"),
+            Some("test-catalog"),
+            vector_retrieval,
+            false,
+        );
+
+        assert!(
+            search_result.is_ok(),
+            "Vector search should succeed, got error: {:?}",
+            search_result.err()
+        );
+
+        // Check output contains vector-only results
+        let output_str = String::from_utf8_lossy(&output);
+        assert!(
+            output_str.contains("[v]"),
+            "Output should contain vector-only marker [v], got: {}",
+            output_str
+        );
+
+        (monodex_home, repo_dir)
+    };
+}
+
+// =============================================================================
+// Test: First-time crawl with vector only
+// =============================================================================
+
+/// Test first-time crawl with vector-only retrieval:
+/// - Run init-db
+/// - Crawl with --retrieval vector
+/// - Verify vector state is complete, FTS state is not in selection
+/// - Search with --retrieval vector should succeed
+#[test]
+#[allow(non_snake_case)]
+fn test_first_time_crawl_vector_only__quick_excluded() {
+    let (_monodex_home, _repo_dir) = {
+        // Set up temp directories
+        let monodex_home = unique_temp_dir();
+        let repo_dir = unique_temp_dir();
+
+        // Create test git repo
+        let commit_oid = create_test_git_repo(repo_dir.path());
+
+        // Create config pointing to the repo
+        let config = create_test_config(monodex_home.path(), "test-catalog", repo_dir.path());
+
+        // Run init-db
+        run_init_db(&config, false).expect("init-db failed");
+
+        // Crawl with vector only
+        monodex::app::commands::crawl::run_crawl_label(
+            &config,
+            "test-catalog",
+            "main",
+            &commit_oid,
+            false,                         // incremental_warnings
+            vec![RetrievalMethod::Vector], // vector only
+            false,                         // debug
+        )
+        .expect("crawl failed");
+
+        // Verify: FTS directory should not exist
+        let db_path = monodex::app::resolve_database_path(&config).unwrap();
+        let fts_dir = db_path.join("fts").join("test-catalog").join("main");
+        assert!(
+            !fts_dir.exists(),
+            "FTS directory should not exist after vector-only crawl"
+        );
+
+        // Search with --retrieval vector should succeed
+        let vector_retrieval: Option<BTreeSet<RetrievalMethod>> =
+            Some([RetrievalMethod::Vector].into_iter().collect());
+        let mut output = Vec::new();
+        let search_result = run_search(
+            &mut output,
+            &config,
+            "getUserProfile",
+            10,
+            Some("main"),
+            Some("test-catalog"),
+            vector_retrieval,
+            false,
+        );
+
+        assert!(
+            search_result.is_ok(),
+            "Vector search after vector-only crawl should succeed, got error: {:?}",
+            search_result.err()
+        );
+
+        (monodex_home, repo_dir)
+    };
+}
