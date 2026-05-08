@@ -19,7 +19,7 @@ A coherent file at 750 lines is better than two incoherent files at 400. The thr
 | Types-only file           | any           | 500              | 800                     |
 | Test-only file            | any           | 800              | 1200                    |
 
-Lines = production code excluding `#[cfg(test)]` blocks and the module header. `mod.rs`, `lib.rs`, and `main.rs` files containing only declarations, re-exports, and small dispatch logic are not counted. Implementation-heavy `mod.rs` files are classified by what they contain and follow that row. A `mod.rs` full of algorithm code is an algorithm module, not exempt because of its filename.
+Lines = production code excluding `#[cfg(test)]` blocks and the module header. `mod.rs`, `lib.rs`, and `main.rs` files containing only declarations, re-exports, and small dispatch logic are not counted. (Substantive code in `mod.rs` is forbidden per the banned patterns below.)
 
 Production modules that don't fit a more specific row use the algorithm/engine row.
 
@@ -139,6 +139,7 @@ There is no fixed threshold. The judgment is relative: tag the largest contribut
 - No wildcard re-exports (`pub use submodule::*`). List re-exports explicitly.
 - No putting unrelated items together just because they're small.
 - No structural splits in the same change as feature or fix work. Splits are their own change unless explicitly authorized by the maintainer or the planned reorganization being applied.
+- No substantive code in `mod.rs`. A `mod.rs` should contain module declarations, explicit re-exports, the module header comment, and small glue (brief dispatch arms, trivial trait impls). Algorithms, command handlers, storage operations, and types beyond a small central type live in named sibling files. The point is that `mod.rs` is the directory's table of contents, not its content; named files are easier to navigate, search, and refer to.
 
 ## Small files
 

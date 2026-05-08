@@ -2,7 +2,7 @@
 
 This document expands on the crawl pipeline introduced in [architecture.md](./architecture.md). The same six named steps are used as section headings here, with operational detail per step. After the steps, two longer sections cover the package index and working-directory mode in depth, followed by a section on partial-crawl semantics.
 
-The relevant source files are `src/app/commands/crawl.rs` (top-level command handler), `src/app/crawl/pipeline.rs` (parallel embedding and storage writes), and `src/engine/git_ops/` (Git tree enumeration, blob reading, working-directory walk).
+The relevant source files are `src/app/commands/crawl.rs` (top-level command handler), `src/app/crawl/phases.rs` (the per-phase functions corresponding to the steps below), `src/app/crawl/pipeline.rs` (parallel embedding and storage writes inside the file-processing step), and `src/engine/git_ops/` (Git tree enumeration, blob reading, working-directory walk).
 
 ## Step 1: Label upsert
 
