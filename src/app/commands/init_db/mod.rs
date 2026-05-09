@@ -17,7 +17,6 @@ use crate::engine::schema::{
 use crate::engine::storage::{
     Database, META_FILE, MetaFile, acquire_database_exclusive, err_schema_mismatch,
 };
-use crate::paths;
 
 // ============================================================================
 // Error message helpers
@@ -70,20 +69,20 @@ fn log_already_initialized(db_path: &Path, schema_version: u32) -> String {
 /// This ensures the --config flag is respected uniformly across all commands.
 pub fn run_init_db(config: &Config, delete_everything: bool) -> Result<()> {
     // Step 1: Resolve database path from config
-    let db_path = resolve_database_path(Some(config))?;
+    let db_path = resolve_database_path(config)?;
 
     // Step 2: Validate parent directory exists (with exception for default-db)
     // This must happen BEFORE any directory creation.
-    validate_parent_directory(&db_path)?;
+    validate_parent_directory(&config.paths, &db_path)?;
 
     // Step 3: Create the database root directory (if it doesn't exist)
     // For default-db, we can create tool_home if needed. For custom paths, parent must exist.
-    let tool_home = paths::tool_home()?;
+    let tool_home = &config.paths.tool_home;
     let default_db_path = tool_home.join("default-db");
 
     if db_path == default_db_path {
         // default-db: ensure tool_home exists, then create default-db if needed
-        fs::create_dir_all(&tool_home)?;
+        fs::create_dir_all(tool_home)?;
         fs::create_dir_all(&db_path)?;
     } else if !db_path.exists() {
         // Custom path: parent must exist (validated above), create only db_path
@@ -319,11 +318,10 @@ fn check_existing_database(db_path: &Path) -> Result<Option<MetaFile>> {
 }
 
 /// Validate that the parent directory exists, with exception for default-db.
-fn validate_parent_directory(db_path: &Path) -> Result<()> {
+fn validate_parent_directory(paths: &crate::paths::Paths, db_path: &Path) -> Result<()> {
     // Special case: if the path is exactly the default-db path under tool_home,
     // we can create tool_home itself.
-    let tool_home = paths::tool_home()?;
-    let default_db_path = tool_home.join("default-db");
+    let default_db_path = paths.tool_home.join("default-db");
 
     if db_path == default_db_path {
         // default-db: tool_home will be created by run_init_db

@@ -1,10 +1,7 @@
 use super::*;
-use crate::app::commands::test_helpers::{
-    remove_monodex_home, set_monodex_home, write_minimal_config,
-};
+use crate::app::commands::test_helpers::write_minimal_config;
 use crate::app::config::load_config;
-use crate::paths::clear_tool_home_cache;
-use serial_test::serial;
+use crate::paths::Paths;
 use std::io::Write;
 use tempfile::TempDir;
 
@@ -23,20 +20,16 @@ fn write_config_with_db_path(config_path: &Path, db_path: &str) {
 }
 
 #[test]
-#[serial(monodex_home)]
 fn test_happy_path_creates_database() {
-    clear_tool_home_cache();
     let temp_dir = TempDir::new().unwrap();
-
-    // Set MONODEX_HOME to temp directory
-    set_monodex_home(temp_dir.path());
 
     // Create minimal config
     let config_path = temp_dir.path().join("config.json");
     write_minimal_config(&config_path);
 
     // Load config (simulating main.rs behavior)
-    let config = load_config(&config_path).expect("Config should load");
+    let paths = Paths::for_test(temp_dir.path().into());
+    let config = load_config(paths).expect("Config should load");
 
     // Run init-db
     let result = run_init_db(&config, false);
@@ -60,48 +53,35 @@ fn test_happy_path_creates_database() {
 
     // Verify fts directory was created
     assert!(db_path.join("fts").exists(), "fts directory should exist");
-
-    // Cleanup env
-    remove_monodex_home();
 }
 
 #[test]
-#[serial(monodex_home)]
 fn test_idempotent_second_run_succeeds() {
-    clear_tool_home_cache();
     let temp_dir = TempDir::new().unwrap();
-
-    set_monodex_home(temp_dir.path());
 
     let config_path = temp_dir.path().join("config.json");
     write_minimal_config(&config_path);
 
     // Load config (simulating main.rs behavior)
-    let config = load_config(&config_path).expect("Config should load");
+    let paths = Paths::for_test(temp_dir.path().into());
+    let config = load_config(paths).expect("Config should load");
 
     // First run
     let result1 = run_init_db(&config, false);
     assert!(result1.is_ok(), "First init-db should succeed");
 
     // Second run
-    clear_tool_home_cache(); // Clear cache for second run
     let result2 = run_init_db(&config, false);
     assert!(result2.is_ok(), "Second init-db should succeed");
 
     // Verify database still valid
     let db_path = temp_dir.path().join("default-db");
     assert!(db_path.join(META_FILE).exists());
-
-    remove_monodex_home();
 }
 
 #[test]
-#[serial(monodex_home)]
 fn test_parent_missing_non_default_db() {
-    clear_tool_home_cache();
     let temp_dir = TempDir::new().unwrap();
-
-    set_monodex_home(temp_dir.path());
 
     // Use an absolute path whose parent definitely doesn't exist
     let db_path_str = "/nonexistent-xyz-12345/db";
@@ -109,7 +89,8 @@ fn test_parent_missing_non_default_db() {
     write_config_with_db_path(&config_path, db_path_str);
 
     // Load config (simulating main.rs behavior)
-    let config = load_config(&config_path).expect("Config should load");
+    let paths = Paths::for_test(temp_dir.path().into());
+    let config = load_config(paths).expect("Config should load");
 
     let result = run_init_db(&config, false);
     let err = result.unwrap_err();
@@ -117,17 +98,11 @@ fn test_parent_missing_non_default_db() {
     // Exact match on error message
     let expected_db_path = std::path::PathBuf::from(db_path_str);
     assert_eq!(err.to_string(), err_parent_missing(&expected_db_path));
-
-    remove_monodex_home();
 }
 
 #[test]
-#[serial(monodex_home)]
 fn test_path_exists_but_not_monodex_database() {
-    clear_tool_home_cache();
     let temp_dir = TempDir::new().unwrap();
-
-    set_monodex_home(temp_dir.path());
 
     // Create a directory with a stray file (not a monodex database)
     let db_path = temp_dir.path().join("my-db");
@@ -141,31 +116,27 @@ fn test_path_exists_but_not_monodex_database() {
     write_config_with_db_path(&config_path, db_path.to_str().unwrap());
 
     // Load config (simulating main.rs behavior)
-    let config = load_config(&config_path).expect("Config should load");
+    let paths = Paths::for_test(temp_dir.path().into());
+    let config = load_config(paths).expect("Config should load");
 
     let result = run_init_db(&config, false);
     let err = result.unwrap_err();
 
     // Exact match on error message
     assert_eq!(err.to_string(), err_not_monodex_db(&db_path));
-
-    remove_monodex_home();
 }
 
 #[test]
-#[serial(monodex_home)]
 fn test_corrupt_meta_file() {
-    clear_tool_home_cache();
     let temp_dir = TempDir::new().unwrap();
-
-    set_monodex_home(temp_dir.path());
 
     // First, create a valid database
     let config_path = temp_dir.path().join("config.json");
     write_minimal_config(&config_path);
 
     // Load config (simulating main.rs behavior)
-    let config = load_config(&config_path).expect("Config should load");
+    let paths = Paths::for_test(temp_dir.path().into());
+    let config = load_config(paths).expect("Config should load");
 
     let result = run_init_db(&config, false);
     assert!(result.is_ok(), "Initial init-db should succeed");
@@ -177,29 +148,23 @@ fn test_corrupt_meta_file() {
     file.write_all(b"this is not valid json").unwrap();
 
     // Try to run init-db again
-    clear_tool_home_cache(); // Clear cache for second run
     let result = run_init_db(&config, false);
     let err = result.unwrap_err();
 
     // Exact match on error message
     assert_eq!(err.to_string(), err_partial_state(&db_path));
-
-    remove_monodex_home();
 }
 
 #[test]
-#[serial(monodex_home)]
 fn test_schema_version_mismatch() {
-    clear_tool_home_cache();
     let temp_dir = TempDir::new().unwrap();
-
-    set_monodex_home(temp_dir.path());
 
     // First, create a valid database
     let config_path = temp_dir.path().join("config.json");
     write_minimal_config(&config_path);
 
-    let config = load_config(&config_path).expect("Config should load");
+    let paths = Paths::for_test(temp_dir.path().into());
+    let config = load_config(paths).expect("Config should load");
     let result = run_init_db(&config, false);
     assert!(result.is_ok(), "Initial init-db should succeed");
 
@@ -211,24 +176,17 @@ fn test_schema_version_mismatch() {
     Database::write_meta(&meta_path, &meta).unwrap();
 
     // Try to run init-db again
-    clear_tool_home_cache();
     let result = run_init_db(&config, false);
     let err = result.unwrap_err();
 
     // Should get schema mismatch error
     assert!(err.to_string().contains("Schema mismatch"));
     assert!(err.to_string().contains("version 99"));
-
-    remove_monodex_home();
 }
 
 #[test]
-#[serial(monodex_home)]
 fn test_meta_exists_tables_missing() {
-    clear_tool_home_cache();
     let temp_dir = TempDir::new().unwrap();
-
-    set_monodex_home(temp_dir.path());
 
     // Create database directory with meta file but no tables
     let db_path = temp_dir.path().join("default-db");
@@ -240,23 +198,18 @@ fn test_meta_exists_tables_missing() {
     let config_path = temp_dir.path().join("config.json");
     write_minimal_config(&config_path);
 
-    let config = load_config(&config_path).expect("Config should load");
+    let paths = Paths::for_test(temp_dir.path().into());
+    let config = load_config(paths).expect("Config should load");
     let result = run_init_db(&config, false);
     let err = result.unwrap_err();
 
     // Should get partial state error
     assert_eq!(err.to_string(), err_partial_state(&db_path));
-
-    remove_monodex_home();
 }
 
 #[test]
-#[serial(monodex_home)]
 fn test_tables_exist_meta_missing() {
-    clear_tool_home_cache();
     let temp_dir = TempDir::new().unwrap();
-
-    set_monodex_home(temp_dir.path());
 
     // Create database directory with tables but no meta
     let db_path = temp_dir.path().join("default-db");
@@ -267,24 +220,19 @@ fn test_tables_exist_meta_missing() {
     let config_path = temp_dir.path().join("config.json");
     write_minimal_config(&config_path);
 
-    let config = load_config(&config_path).expect("Config should load");
+    let paths = Paths::for_test(temp_dir.path().into());
+    let config = load_config(paths).expect("Config should load");
     let result = run_init_db(&config, false);
     let err = result.unwrap_err();
 
     // Should get partial state error
     assert_eq!(err.to_string(), err_partial_state(&db_path));
-
-    remove_monodex_home();
 }
 
 #[test]
-#[serial(monodex_home)]
 fn test_empty_directory_with_locks_dir_succeeds() {
     // Test that a directory containing only locks/ is treated as empty
-    clear_tool_home_cache();
     let temp_dir = TempDir::new().unwrap();
-
-    set_monodex_home(temp_dir.path());
 
     // Create database directory with only locks/database.lock
     let db_path = temp_dir.path().join("default-db");
@@ -294,7 +242,8 @@ fn test_empty_directory_with_locks_dir_succeeds() {
     let config_path = temp_dir.path().join("config.json");
     write_minimal_config(&config_path);
 
-    let config = load_config(&config_path).expect("Config should load");
+    let paths = Paths::for_test(temp_dir.path().into());
+    let config = load_config(paths).expect("Config should load");
     let result = run_init_db(&config, false);
 
     // Should succeed - locks/ is treated as detritus
@@ -306,18 +255,12 @@ fn test_empty_directory_with_locks_dir_succeeds() {
 
     // Verify database was created
     assert!(db_path.join(META_FILE).exists());
-
-    remove_monodex_home();
 }
 
 #[test]
-#[serial(monodex_home)]
 fn test_empty_directory_with_fts_dir_succeeds() {
     // Test that a directory containing only fts/ is treated as empty
-    clear_tool_home_cache();
     let temp_dir = TempDir::new().unwrap();
-
-    set_monodex_home(temp_dir.path());
 
     // Create database directory with only fts/
     let db_path = temp_dir.path().join("default-db");
@@ -326,7 +269,8 @@ fn test_empty_directory_with_fts_dir_succeeds() {
     let config_path = temp_dir.path().join("config.json");
     write_minimal_config(&config_path);
 
-    let config = load_config(&config_path).expect("Config should load");
+    let paths = Paths::for_test(temp_dir.path().into());
+    let config = load_config(paths).expect("Config should load");
     let result = run_init_db(&config, false);
 
     // Should succeed - fts/ is treated as detritus
@@ -338,8 +282,6 @@ fn test_empty_directory_with_fts_dir_succeeds() {
 
     // Verify database was created
     assert!(db_path.join(META_FILE).exists());
-
-    remove_monodex_home();
 }
 
 #[test]
@@ -381,18 +323,15 @@ fn test_pre_lock_check_tolerates_missing_meta_with_tables() {
 }
 
 #[test]
-#[serial(monodex_home)]
 fn test_delete_everything_with_existing_database() {
     // Test that --delete-everything wipes an existing database and recreates it
-    clear_tool_home_cache();
     let temp_dir = TempDir::new().unwrap();
-
-    set_monodex_home(temp_dir.path());
 
     let config_path = temp_dir.path().join("config.json");
     write_minimal_config(&config_path);
 
-    let config = load_config(&config_path).expect("Config should load");
+    let paths = Paths::for_test(temp_dir.path().into());
+    let config = load_config(paths).expect("Config should load");
 
     // First, create a valid database
     let result = run_init_db(&config, false);
@@ -405,7 +344,6 @@ fn test_delete_everything_with_existing_database() {
     fs::write(db_path.join("extra-file.txt"), "test content").unwrap();
 
     // Run init-db --delete-everything
-    clear_tool_home_cache();
     let result = run_init_db(&config, true);
     assert!(
         result.is_ok(),
@@ -425,23 +363,18 @@ fn test_delete_everything_with_existing_database() {
         db_path.join("locks").exists(),
         "locks directory should be preserved"
     );
-
-    remove_monodex_home();
 }
 
 #[test]
-#[serial(monodex_home)]
 fn test_delete_everything_with_nonexistent_database() {
     // Test that --delete-everything on a non-existent database prints a note but succeeds
-    clear_tool_home_cache();
     let temp_dir = TempDir::new().unwrap();
-
-    set_monodex_home(temp_dir.path());
 
     let config_path = temp_dir.path().join("config.json");
     write_minimal_config(&config_path);
 
-    let config = load_config(&config_path).expect("Config should load");
+    let paths = Paths::for_test(temp_dir.path().into());
+    let config = load_config(paths).expect("Config should load");
 
     // Run init-db --delete-everything on a fresh system
     let result = run_init_db(&config, true);
@@ -454,23 +387,18 @@ fn test_delete_everything_with_nonexistent_database() {
     // Verify database was created
     let db_path = temp_dir.path().join("default-db");
     assert!(db_path.join(META_FILE).exists());
-
-    remove_monodex_home();
 }
 
 #[test]
-#[serial(monodex_home)]
 fn test_delete_everything_with_current_version_database() {
     // Test that --delete-everything works even on a database with the current schema version
-    clear_tool_home_cache();
     let temp_dir = TempDir::new().unwrap();
-
-    set_monodex_home(temp_dir.path());
 
     let config_path = temp_dir.path().join("config.json");
     write_minimal_config(&config_path);
 
-    let config = load_config(&config_path).expect("Config should load");
+    let paths = Paths::for_test(temp_dir.path().into());
+    let config = load_config(paths).expect("Config should load");
 
     // Create a valid current-version database
     let result = run_init_db(&config, false);
@@ -479,7 +407,6 @@ fn test_delete_everything_with_current_version_database() {
     let db_path = temp_dir.path().join("default-db");
 
     // Run init-db --delete-everything (delete-and-recreate even though not strictly necessary)
-    clear_tool_home_cache();
     let result = run_init_db(&config, true);
     assert!(
         result.is_ok(),
@@ -489,25 +416,20 @@ fn test_delete_everything_with_current_version_database() {
 
     // Verify database was recreated
     assert!(db_path.join(META_FILE).exists());
-
-    remove_monodex_home();
 }
 
 #[test]
-#[serial(monodex_home)]
 fn test_delete_everything_with_v3_database() {
     // Test that --delete-everything works on a database with an older schema version (v3)
     // This verifies the delete path correctly wipes and recreates even when the schema
     // version doesn't match the current version.
-    clear_tool_home_cache();
     let temp_dir = TempDir::new().unwrap();
-
-    set_monodex_home(temp_dir.path());
 
     let config_path = temp_dir.path().join("config.json");
     write_minimal_config(&config_path);
 
-    let config = load_config(&config_path).expect("Config should load");
+    let paths = Paths::for_test(temp_dir.path().into());
+    let config = load_config(paths).expect("Config should load");
 
     // Create a database directory with a hand-written v3 meta file
     let db_path = temp_dir.path().join("default-db");
@@ -524,7 +446,6 @@ fn test_delete_everything_with_v3_database() {
     fs::create_dir_all(db_path.join("label_metadata.lance")).unwrap();
 
     // Run init-db --delete-everything
-    clear_tool_home_cache();
     let result = run_init_db(&config, true);
     assert!(
         result.is_ok(),
@@ -543,6 +464,4 @@ fn test_delete_everything_with_v3_database() {
         crate::engine::schema::MONODEX_SCHEMA_VERSION as u64,
         "Schema version should be upgraded to current version"
     );
-
-    remove_monodex_home();
 }

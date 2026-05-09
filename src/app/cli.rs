@@ -19,7 +19,8 @@ pub struct Cli {
     #[arg(long)]
     pub config: Option<PathBuf>,
 
-    /// Enable verbose debug logging for storage operations
+    /// Enable verbose debug logging for storage operations.
+    /// When passed to search, shows diagnostic detail per result, including raw method-local scores.
     #[arg(long, global = true)]
     pub debug: bool,
 

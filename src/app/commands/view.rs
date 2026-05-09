@@ -26,7 +26,7 @@ pub fn run_view(
     }
 
     // Resolve label context from explicit flag or default context
-    let (label_id, catalog_name, label) = resolve_label_context(label, catalog)?;
+    let (label_id, catalog_name, label) = resolve_label_context(&config.paths, label, catalog)?;
 
     // Parse all file IDs with selectors
     let mut requests: Vec<(String, ChunkSelector)> = Vec::new();
@@ -36,7 +36,7 @@ pub fn run_view(
     }
 
     // Open database (handshake validates monodex-meta.json)
-    let db_path = resolve_database_path(Some(config))?;
+    let db_path = resolve_database_path(config)?;
     let rt = tokio::runtime::Runtime::new()?;
     let all_results: Vec<(String, ChunkSelector, Vec<ChunkRow>)> = rt.block_on(async {
         let db = Database::open(&db_path).await?;
@@ -165,32 +165,27 @@ pub fn run_view(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::paths::clear_tool_home_cache;
-    use serial_test::serial;
     use tempfile::TempDir;
 
     use crate::app::commands::test_helpers::{
-        create_test_db_with_chunks, remove_monodex_home, set_monodex_home, test_chunk_row,
-        test_label_metadata_row, write_minimal_config,
+        create_test_db_with_chunks, test_chunk_row, test_label_metadata_row, write_minimal_config,
     };
+    use crate::paths::Paths;
 
     // =========================================================================
     // run_view tests
     // =========================================================================
 
     #[test]
-    #[serial(monodex_home)]
     fn test_view_missing_database() {
-        clear_tool_home_cache();
         let temp_dir = TempDir::new().unwrap();
-
-        set_monodex_home(temp_dir.path());
 
         // Create config but no database
         let config_path = temp_dir.path().join("config.json");
         write_minimal_config(&config_path);
 
-        let config = crate::app::config::load_config(&config_path).unwrap();
+        let paths = Paths::for_test(temp_dir.path().into());
+        let config = crate::app::config::load_config(paths).unwrap();
         let result = run_view(
             &config,
             &["abcd1234efab5678".to_string()],
@@ -212,17 +207,11 @@ mod tests {
             "Error should mention init-db: {}",
             err
         );
-
-        remove_monodex_home();
     }
 
     #[test]
-    #[serial(monodex_home)]
     fn test_view_no_ids_provided() {
-        clear_tool_home_cache();
         let temp_dir = TempDir::new().unwrap();
-
-        set_monodex_home(temp_dir.path());
 
         // Create config
         let config_path = temp_dir.path().join("config.json");
@@ -235,7 +224,8 @@ mod tests {
             create_test_db_with_chunks(&db_path, vec![], vec![]).await;
         });
 
-        let config = crate::app::config::load_config(&config_path).unwrap();
+        let paths = Paths::for_test(temp_dir.path().into());
+        let config = crate::app::config::load_config(paths).unwrap();
         let result = run_view(&config, &[], None, None, false, false, false);
 
         let err = result.unwrap_err().to_string();
@@ -244,17 +234,11 @@ mod tests {
             "Error should mention no IDs: {}",
             err
         );
-
-        remove_monodex_home();
     }
 
     #[test]
-    #[serial(monodex_home)]
     fn test_view_chunk_not_found() {
-        clear_tool_home_cache();
         let temp_dir = TempDir::new().unwrap();
-
-        set_monodex_home(temp_dir.path());
 
         // Create config
         let config_path = temp_dir.path().join("config.json");
@@ -278,7 +262,8 @@ mod tests {
             .await;
         });
 
-        let config = crate::app::config::load_config(&config_path).unwrap();
+        let paths = Paths::for_test(temp_dir.path().into());
+        let config = crate::app::config::load_config(paths).unwrap();
 
         // View a different file ID that doesn't exist (valid hex, but not in DB)
         let result = run_view(
@@ -297,17 +282,11 @@ mod tests {
             "View should succeed even for non-existent chunks: {:?}",
             result.err()
         );
-
-        remove_monodex_home();
     }
 
     #[test]
-    #[serial(monodex_home)]
     fn test_view_missing_label_context() {
-        clear_tool_home_cache();
         let temp_dir = TempDir::new().unwrap();
-
-        set_monodex_home(temp_dir.path());
 
         // Create config
         let config_path = temp_dir.path().join("config.json");
@@ -330,7 +309,8 @@ mod tests {
             .await;
         });
 
-        let config = crate::app::config::load_config(&config_path).unwrap();
+        let paths = Paths::for_test(temp_dir.path().into());
+        let config = crate::app::config::load_config(paths).unwrap();
 
         // View without providing catalog or label, and no default context
         let result = run_view(
@@ -349,7 +329,5 @@ mod tests {
             "Error should mention missing context: {}",
             err
         );
-
-        remove_monodex_home();
     }
 }

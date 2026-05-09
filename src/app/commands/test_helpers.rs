@@ -14,22 +14,6 @@ use crate::engine::storage::{
     ChunkRow, Database, LabelMetadataRow, META_FILE, MetaFile, SOURCE_KIND_GIT_COMMIT,
 };
 
-/// Helper to safely set MONODEX_HOME.
-pub fn set_monodex_home(path: &std::path::Path) {
-    // SAFETY: Tests are serialized via #[serial_test::serial(monodex_home)] attribute.
-    unsafe {
-        std::env::set_var("MONODEX_HOME", path);
-    }
-}
-
-/// Helper to safely remove MONODEX_HOME.
-pub fn remove_monodex_home() {
-    // SAFETY: Tests are serialized via #[serial_test::serial(monodex_home)] attribute.
-    unsafe {
-        std::env::remove_var("MONODEX_HOME");
-    }
-}
-
 /// Helper to create a minimal config file.
 pub fn write_minimal_config(config_path: &std::path::Path) {
     let mut file = File::create(config_path).unwrap();

@@ -330,7 +330,10 @@ mod tests {
 
     /// Helper to get default strategy for a path (for tests that want default behavior)
     fn default_strategy(path: &str) -> ChunkingStrategy {
-        let config = load_compiled_crawl_config(None).expect("Embedded config should be valid");
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let paths = crate::paths::Paths::for_test(temp_dir.path().into());
+        let config =
+            load_compiled_crawl_config(&paths, None).expect("Embedded config should be valid");
         config.get_strategy(path)
     }
 

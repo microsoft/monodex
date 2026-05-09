@@ -104,6 +104,10 @@ When editing an existing file whose header doesn't match this rule, update it on
 - **Sibling test file** (`#[cfg(test)] mod tests;` in `mod.rs`, code in `tests.rs`): default for any directory-module.
 - **Integration tests** (`tests/` at crate root): CLI-level and end-to-end behavior only.
 
+**Prefer extracting helpers and unit-testing them before reaching for integration tests.** Integration tests are slow, heavy, and tend to over-assert on incidental behavior. When the work being tested is conceptually a pure function over already-resolved inputs (a decision rule over metadata, a hydration walk over a fused-hit list, a rendering pass over a populated model), extract that function and test it inline or in a sibling `tests.rs` with hand-built fixtures. Integration tests should focus on orchestration and user-visible contract points; byte-level output shape should usually be pinned at the renderer/helper boundary. The decision-rule extraction in `engine/search_decision.rs` and the renderer pass in `app/search.rs` are existing examples of this pattern.
+
+Within the integration-test layer itself, prefer fewer tests that exercise realistic end-to-end user paths over many tests covering edge cases one at a time. When asserting on stable user-facing output (CLI `--help`, fixed banners, structured error templates), snapshot tests are usually a better fit than a battery of substring checks: a snapshot diff shows the change in context and can be reviewed as a single user-experience change.
+
 ## Quick CI tier
 
 ### Purpose

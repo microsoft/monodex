@@ -89,7 +89,7 @@ impl ParallelEmbedder {
         let base_tokenizer = Tokenizer::from_file(tokenizer_path)
             .map_err(|e| anyhow::anyhow!("Failed to load tokenizer: {}", e))?;
 
-        println!(
+        eprintln!(
             "Creating {} ONNX sessions with {} threads each...",
             config.num_workers, config.intra_threads
         );
@@ -111,7 +111,7 @@ impl ParallelEmbedder {
                 let tokenizer = base_tokenizer.clone();
 
                 if i == 0 {
-                    println!(
+                    eprintln!(
                         "Worker pool created: {} workers × {} threads = {} total threads",
                         config.num_workers,
                         config.intra_threads,
@@ -206,8 +206,8 @@ mod tests {
             .unwrap();
         let elapsed = start.elapsed();
 
-        println!("Embedded {} chunks in {:?}", embeddings.len(), elapsed);
-        println!("Per embedding: {:?}", elapsed / embeddings.len() as u32);
+        eprintln!("Embedded {} chunks in {:?}", embeddings.len(), elapsed);
+        eprintln!("Per embedding: {:?}", elapsed / embeddings.len() as u32);
 
         assert_eq!(embeddings.len(), 100);
         for emb in &embeddings {

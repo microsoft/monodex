@@ -7,7 +7,6 @@ use std::path::Path;
 use std::sync::Arc;
 
 use lancedb::connect;
-use serial_test::serial;
 
 use monodex::app::commands::init_db::run_init_db;
 use monodex::app::commands::search::run_search;
@@ -18,26 +17,6 @@ use monodex::engine::{
     retrieval::RetrievalMethod,
     storage::{ChunkRow, ChunkStorage, LabelMetadataRow, LabelStorage, SOURCE_KIND_GIT_COMMIT},
 };
-
-fn set_monodex_home(tmp_dir: &Path) {
-    // Clear any cached tool_home from previous tests
-    monodex::paths::clear_tool_home_cache();
-
-    // SAFETY: Tests are serialized via #[serial_test::serial(monodex_home)] attribute
-    unsafe {
-        std::env::set_var("MONODEX_HOME", tmp_dir);
-    }
-}
-
-fn remove_monodex_home() {
-    // SAFETY: Tests are serialized via #[serial_test::serial(monodex_home)] attribute
-    unsafe {
-        std::env::remove_var("MONODEX_HOME");
-    }
-
-    // Clear the cache so the next test starts fresh
-    monodex::paths::clear_tool_home_cache();
-}
 
 fn write_minimal_config(monodex_home: &Path) {
     let config_path = monodex_home.join("config.json");
@@ -114,11 +93,13 @@ fn test_label_metadata_row_with_selection(
     }
 }
 
-/// Set up a test database at the default location under MONODEX_HOME.
+/// Set up a test database at the default location under the test tool home.
 /// Returns the database path and storage handles.
 fn setup_test_db(monodex_home: &Path) -> (tempfile::TempDir, ChunkStorage, LabelStorage) {
     // Run init-db to create the database at the default location
+    let paths = monodex::paths::Paths::for_test(monodex_home.to_path_buf());
     let config = Config {
+        paths,
         catalogs: std::collections::HashMap::new(),
         database: None,
         embedding_model: Default::default(),
@@ -158,15 +139,13 @@ fn setup_test_db(monodex_home: &Path) -> (tempfile::TempDir, ChunkStorage, Label
     })
 }
 
-/// Test that search with both methods in selection produces PR1 stub error.
+/// Test that search with both methods in selection succeeds with hybrid search.
 ///
 /// This verifies the decision table: when active subset has 2+ methods with equal sources,
-/// PR1 should stub-error pointing at --retrieval.
+/// PR2 hybrid search should succeed.
 #[test]
-#[serial(monodex_home)]
-fn test_search_both_methods_stub_error() {
+fn test_search_both_methods_hybrid() {
     let monodex_home = tempfile::TempDir::new().unwrap();
-    set_monodex_home(monodex_home.path());
     write_minimal_config(monodex_home.path());
 
     let (_tmp_dir, chunk_storage, label_storage) = setup_test_db(monodex_home.path());
@@ -194,13 +173,16 @@ fn test_search_both_methods_stub_error() {
 
     // Build a minimal Config
     let config = Config {
+        paths: monodex::paths::Paths::for_test(monodex_home.path().to_path_buf()),
         catalogs: std::collections::HashMap::new(),
         database: None,
         embedding_model: Default::default(),
     };
 
-    // Run search without --retrieval (should trigger stub error)
+    // Run search without --retrieval (should succeed with hybrid search)
+    let mut output = Vec::new();
     let result = run_search(
+        &mut output,
         &config,
         "test query",
         10,
@@ -211,35 +193,22 @@ fn test_search_both_methods_stub_error() {
     );
 
     assert!(
-        result.is_err(),
-        "Search should return error for multi-method in PR1"
-    );
-    let err_msg = result.unwrap_err().to_string();
-    assert!(
-        err_msg.contains("Hybrid search across multiple retrieval methods is not yet implemented"),
-        "Error should mention hybrid search not implemented, got: {}",
-        err_msg
-    );
-    assert!(
-        err_msg.contains("--retrieval"),
-        "Error should suggest --retrieval flag, got: {}",
-        err_msg
+        result.is_ok(),
+        "Hybrid search should succeed, got error: {:?}",
+        result.err()
     );
 
     // Explicitly drop to release file handles before cleanup
     drop(chunk_storage);
     drop(label_storage);
-    remove_monodex_home();
 }
 
 /// Test that search with fts-only selection succeeds.
 ///
 /// This verifies that when selection has only fts, search proceeds without stub error.
 #[test]
-#[serial(monodex_home)]
 fn test_search_fts_only_selection() {
     let monodex_home = tempfile::TempDir::new().unwrap();
-    set_monodex_home(monodex_home.path());
     write_minimal_config(monodex_home.path());
 
     let (_tmp_dir, chunk_storage, label_storage) = setup_test_db(monodex_home.path());
@@ -285,13 +254,16 @@ fn test_search_fts_only_selection() {
 
     // Build a minimal Config
     let config = Config {
+        paths: monodex::paths::Paths::for_test(monodex_home.path().to_path_buf()),
         catalogs: std::collections::HashMap::new(),
         database: None,
         embedding_model: Default::default(),
     };
 
     // Run search - should succeed (FTS-only selection)
+    let mut output = Vec::new();
     let result = run_search(
+        &mut output,
         &config,
         "test content",
         10,
@@ -310,7 +282,6 @@ fn test_search_fts_only_selection() {
     // Explicitly drop to release file handles before cleanup
     drop(chunk_storage);
     drop(label_storage);
-    remove_monodex_home();
 }
 
 /// Test that search --retrieval vector errors when vector not in selection.
@@ -318,10 +289,8 @@ fn test_search_fts_only_selection() {
 /// This verifies the explicit-flag form: requesting a method not in selection
 /// produces a clear error message with a substituted source pointer.
 #[test]
-#[serial(monodex_home)]
 fn test_search_vector_not_in_selection_error() {
     let monodex_home = tempfile::TempDir::new().unwrap();
-    set_monodex_home(monodex_home.path());
     write_minimal_config(monodex_home.path());
 
     let (_tmp_dir, chunk_storage, label_storage) = setup_test_db(monodex_home.path());
@@ -355,6 +324,7 @@ fn test_search_vector_not_in_selection_error() {
 
     // Build a minimal Config
     let config = Config {
+        paths: monodex::paths::Paths::for_test(monodex_home.path().to_path_buf()),
         catalogs: std::collections::HashMap::new(),
         database: None,
         embedding_model: Default::default(),
@@ -363,7 +333,9 @@ fn test_search_vector_not_in_selection_error() {
     // Run search with --retrieval vector (not in selection)
     let retrieval: Option<BTreeSet<RetrievalMethod>> =
         Some([RetrievalMethod::Vector].into_iter().collect());
+    let mut output = Vec::new();
     let result = run_search(
+        &mut output,
         &config,
         "test query",
         10,
@@ -398,7 +370,6 @@ fn test_search_vector_not_in_selection_error() {
     // Explicitly drop to release file handles before cleanup
     drop(chunk_storage);
     drop(label_storage);
-    remove_monodex_home();
 }
 
 /// Test that search with sources disagree produces hard error.
@@ -406,10 +377,8 @@ fn test_search_vector_not_in_selection_error() {
 /// This verifies the decision table: when vector and fts have different source commits,
 /// search errors with clear message about the mismatch including substituted source pointer.
 #[test]
-#[serial(monodex_home)]
 fn test_search_sources_disagree_error() {
     let monodex_home = tempfile::TempDir::new().unwrap();
-    set_monodex_home(monodex_home.path());
     write_minimal_config(monodex_home.path());
 
     let (_tmp_dir, chunk_storage, label_storage) = setup_test_db(monodex_home.path());
@@ -443,13 +412,16 @@ fn test_search_sources_disagree_error() {
 
     // Build a minimal Config
     let config = Config {
+        paths: monodex::paths::Paths::for_test(monodex_home.path().to_path_buf()),
         catalogs: std::collections::HashMap::new(),
         database: None,
         embedding_model: Default::default(),
     };
 
     // Run search without --retrieval (should detect source mismatch)
+    let mut output = Vec::new();
     let result = run_search(
+        &mut output,
         &config,
         "test query",
         10,
@@ -482,7 +454,6 @@ fn test_search_sources_disagree_error() {
     // Explicitly drop to release file handles before cleanup
     drop(chunk_storage);
     drop(label_storage);
-    remove_monodex_home();
 }
 
 /// Test that incomplete method with explicit --retrieval warns but proceeds.
@@ -491,10 +462,8 @@ fn test_search_sources_disagree_error() {
 /// requests an incomplete method via --retrieval, the search should warn and proceed,
 /// NOT hard-error with "all in-selection methods incomplete".
 #[test]
-#[serial(monodex_home)]
 fn test_search_incomplete_method_warning() {
     let monodex_home = tempfile::TempDir::new().unwrap();
-    set_monodex_home(monodex_home.path());
     write_minimal_config(monodex_home.path());
 
     let (_tmp_dir, chunk_storage, label_storage) = setup_test_db(monodex_home.path());
@@ -541,6 +510,7 @@ fn test_search_incomplete_method_warning() {
 
     // Build a minimal Config
     let config = Config {
+        paths: monodex::paths::Paths::for_test(monodex_home.path().to_path_buf()),
         catalogs: std::collections::HashMap::new(),
         database: None,
         embedding_model: Default::default(),
@@ -551,7 +521,9 @@ fn test_search_incomplete_method_warning() {
     // Post-fix, it should warn and proceed
     let retrieval: Option<BTreeSet<RetrievalMethod>> =
         Some([RetrievalMethod::Fts].into_iter().collect());
+    let mut output = Vec::new();
     let result = run_search(
+        &mut output,
         &config,
         "test content",
         10,
@@ -571,5 +543,4 @@ fn test_search_incomplete_method_warning() {
     // Explicitly drop to release file handles before cleanup
     drop(chunk_storage);
     drop(label_storage);
-    remove_monodex_home();
 }

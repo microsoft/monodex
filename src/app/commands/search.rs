@@ -2,32 +2,137 @@
 //! Edit here when: Modifying search output, result formatting, or the `>`-prefixed line shape.
 //! Do not edit here for: Vector search logic (see `engine/storage/chunks/mod.rs`), embedding (see `engine/parallel_embedder.rs`), FTS search (see `engine/fts/search.rs`).
 
+use std::io::Write;
+
 use crate::app::{
-    Config, format_chunk_report, format_source_pointer, resolve_database_path,
-    resolve_label_context,
+    Config, format_source_pointer, resolve_database_path, resolve_label_context,
+    search::{self, EndMarker, Preamble, SearchRenderModel, SearchWarning},
 };
+use crate::engine::storage::ChunkRow;
 use crate::engine::{
     ParallelEmbedder, RetrievalMethod,
     fts::{FtsSearchOutcome, fts_search},
-    storage::Database,
+    fusion::{FusedHit, MethodHit, RankedContribution, fuse},
+    retrieval::format_selection,
+    search_decision::{Decision, decide},
+    storage::{Database, ScoredChunkRow},
 };
 use anyhow::anyhow;
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 
-pub fn run_search(
+// =============================================================================
+// Collection types (Stage 2)
+// =============================================================================
+
+/// The result of collecting hits from a single retrieval method.
+///
+/// Used by both single-method and hybrid paths.
+pub struct CollectedMethod {
+    pub method: RetrievalMethod,
+    /// Hits in rank order (best first). Position implies rank (1-indexed).
+    pub hits: Vec<MethodHit>,
+    /// Whether the backend returned at least `limit` candidates.
+    /// Used for end-of-results sentinel decision.
+    pub saturated: bool,
+}
+
+/// Outcome of collecting FTS results, handling FTS-specific error cases.
+pub enum FtsCollectOutcome {
+    Collected(CollectedMethod),
+    NoIndex,
+    ParseError(String),
+}
+
+/// Adapt vector search results to `CollectedMethod`.
+///
+/// Discards the `ChunkRow` payload from `ScoredChunkRow` (keeping only `row_id`
+/// and distance for `MethodHit`). The orchestration layer's bulk hydration step
+/// re-fetches chunk data later. This is intentional: it keeps the engine API
+/// unchanged and provides uniform handling between FTS and vector paths.
+pub fn collect_vector(results: Vec<ScoredChunkRow>, limit: usize) -> CollectedMethod {
+    let saturated = results.len() >= limit;
+    let hits: Vec<MethodHit> = results
+        .into_iter()
+        .map(|r| MethodHit {
+            row_id: r.chunk.row_id,
+            backend_score: Some(r.distance),
+        })
+        .collect();
+    CollectedMethod {
+        method: RetrievalMethod::Vector,
+        hits,
+        saturated,
+    }
+}
+
+/// Adapt FTS search results to `FtsCollectOutcome`.
+///
+/// Wraps `fts_search` and dispatches on `FtsSearchOutcome`. `Found(hits)` adapts
+/// to `CollectedMethod`; `NoIndex` and `ParseError` propagate as their own variants.
+pub async fn collect_fts(
+    db_path: &std::path::Path,
+    label_id: &crate::engine::identifier::LabelId,
+    query: &str,
+    limit: usize,
+) -> anyhow::Result<FtsCollectOutcome> {
+    let outcome = fts_search(db_path, label_id, query, limit).await?;
+    match outcome {
+        FtsSearchOutcome::Found(hits) => {
+            let saturated = hits.len() >= limit;
+            let method_hits: Vec<MethodHit> = hits
+                .into_iter()
+                .map(|h| MethodHit {
+                    row_id: h.row_id,
+                    backend_score: Some(h.score),
+                })
+                .collect();
+            Ok(FtsCollectOutcome::Collected(CollectedMethod {
+                method: RetrievalMethod::Fts,
+                hits: method_hits,
+                saturated,
+            }))
+        }
+        FtsSearchOutcome::NoIndex => Ok(FtsCollectOutcome::NoIndex),
+        FtsSearchOutcome::ParseError(msg) => Ok(FtsCollectOutcome::ParseError(msg)),
+    }
+}
+
+/// Build a degenerate `FusedHit` for single-method results.
+///
+/// Single-method results become `FusedHit`s with exactly one contributor.
+/// The RRF score is set to 0.0 (unused for single-method ordering).
+fn make_single_method_fused_hit(hit: MethodHit, method: RetrievalMethod) -> FusedHit {
+    FusedHit {
+        row_id: hit.row_id,
+        rrf_score: 0.0,
+        contributors: vec![RankedContribution {
+            method,
+            rank: 1, // Rank doesn't matter for single-method display
+            backend_score: hit.backend_score,
+        }],
+    }
+}
+
+// =============================================================================
+// Main search entry point
+// =============================================================================
+
+#[allow(clippy::too_many_arguments)]
+pub fn run_search<W: Write>(
+    writer: &mut W,
     config: &Config,
     text: &str,
     limit: usize,
     label: Option<&str>,
     catalog: Option<&str>,
     retrieval: Option<BTreeSet<RetrievalMethod>>,
-    _debug: bool,
+    debug: bool,
 ) -> anyhow::Result<()> {
     // Resolve label context from explicit flags or default context
-    let (label_id, catalog_name, label) = resolve_label_context(label, catalog)?;
+    let (label_id, catalog_name, label) = resolve_label_context(&config.paths, label, catalog)?;
 
     // Open database (handshake validates monodex-meta.json)
-    let db_path = resolve_database_path(Some(config))?;
+    let db_path = resolve_database_path(config)?;
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
         let db = Database::open(&db_path).await?;
@@ -44,113 +149,90 @@ pub fn run_search(
                 )
             })?;
 
-        // Step 2: Compute persistent selection
-        let persistent_selection = crate::engine::storage::read_selection(&label_metadata);
+        // Step 2: Call decide() to get decision
+        let decision = decide(&label_metadata, retrieval.clone());
 
-        // Step 3: Compute requested methods (explicit flags or all in selection)
-        let explicit_retrieval = retrieval.is_some();
-        let requested_methods = retrieval.unwrap_or_else(|| persistent_selection.clone());
-
-        // Step 4: Validate requested methods are in selection
-        for method in &requested_methods {
-            if !persistent_selection.contains(method) {
-                let source_pointer = format_source_pointer(&label_metadata);
-                return Err(anyhow!(
-                    "Method {} is not in this label's retrieval selection. Re-run `monodex crawl --label {} {} --retrieval {}` to add it.",
-                    method, label, source_pointer, method
-                ));
-            }
-        }
-
-        // Step 5: Compute active subset (filter out incomplete methods with warning)
-        let mut active_subset = BTreeSet::new();
-        for method in &requested_methods {
-            let (source, complete) = match method {
-                RetrievalMethod::Vector => {
-                    (&label_metadata.vector_source, label_metadata.vector_complete)
-                }
-                RetrievalMethod::Fts => (&label_metadata.fts_source, label_metadata.fts_complete),
-            };
-
-            if source.is_none() {
-                // Not in selection - should have been caught by validation above
-                continue;
-            }
-
-            if !complete {
-                // Emit yellow warning
-                let source_pointer = format_source_pointer(&label_metadata);
-                eprintln!(
-                    "⚠️  {} indexing on this label is incomplete; results may be missing entries indexed since the last successful crawl.",
-                    method
-                );
-                eprintln!(
-                    "   To complete: monodex crawl --label {} {} --retrieval {}",
-                    label, source_pointer, method
-                );
-                // If the user explicitly requested this method via --retrieval, proceed anyway
-                if explicit_retrieval {
-                    active_subset.insert(*method);
-                }
-            } else {
-                active_subset.insert(*method);
-            }
-        }
-
-        // Step 6: Print preamble before any decision-logic returns
-        // This makes the retrieval-selection concept legible even when errors follow
-        let searching_display = format_active_subset(&active_subset);
-        println!(
-            "Catalog: {} / Label: {} / Searching: {}",
-            catalog_name, label, searching_display
+        // Step 3: Translate decision warnings to search warnings
+        let decision_warnings = match &decision {
+            Decision::SingleMethod { decision_warnings, .. } => decision_warnings.clone(),
+            Decision::Hybrid { decision_warnings, .. } => decision_warnings.clone(),
+            Decision::Error(_) => vec![],
+        };
+        let pre_result_warnings = search::translate_decision_warnings(
+            decision_warnings,
+            &label_metadata,
         );
-        println!();
 
-        // Step 7: Apply search decision rules
-        if active_subset.is_empty() {
-            if persistent_selection.is_empty() {
-                return Err(anyhow!(
-                    "This label has no retrieval methods in its selection. Re-run `monodex crawl` to populate it."
-                ));
-            } else {
-                let source_pointer = format_source_pointer(&label_metadata);
-                return Err(anyhow!(
-                    "All retrieval methods in this label's selection are incomplete (vector_complete = false, fts_complete = false).\nRe-run `monodex crawl --label {} {}` to complete indexing.",
-                    label, source_pointer
-                ));
+        // Step 4: Compute candidate_limit = max(user_limit, 50)
+        let candidate_limit = std::cmp::max(limit, 50);
+
+        // Step 5: Build preamble
+        let active_methods = match &decision {
+            Decision::SingleMethod { method, .. } => {
+                let mut set = BTreeSet::new();
+                set.insert(*method);
+                set
             }
-        }
+            Decision::Hybrid { methods, .. } => methods.clone(),
+            Decision::Error(_) => BTreeSet::new(),
+        };
+        let searching = format_selection(&active_methods);
+        let preamble = Preamble {
+            catalog: catalog_name.clone(),
+            label: label.to_string(),
+            searching,
+        };
 
-        // Check for source disagreement (defensive - shouldn't happen through normal CLI flows)
-        if active_subset.len() >= 2 {
-            let vector_source = label_metadata.vector_source.as_ref();
-            let fts_source = label_metadata.fts_source.as_ref();
+        // Step 6: Dispatch based on decision
+        match decision {
+            Decision::Error(err) => {
+                // Render preamble first, then error
+                let model = SearchRenderModel {
+                    preamble,
+                    pre_result_warnings: vec![],
+                    results: vec![],
+                    trailing_inline_warnings: vec![],
+                    debug,
+                    end_marker: EndMarker::None,
+                    mode: search::SearchMode::SingleMethod, // Error path emits no results; default is safe
+                };
+                search::render(writer, &model)?;
 
-            if let (Some(vs), Some(fs)) = (vector_source, fts_source)
-                && vs != fs
-            {
-                let source_pointer = format_source_pointer(&label_metadata);
-                return Err(anyhow!(
-                    "This label's retrieval methods have inconsistent source state:\n  vector indexed against: {}\n  fts indexed against: {}\nRe-run `monodex crawl --label {} {}` to bring them back in sync.",
-                    vs, fs, label, source_pointer
-                ));
+                // Format error message
+                let error_msg = format_decision_error(&err, &label_metadata, &label, debug);
+                return Err(anyhow!("{}", error_msg));
             }
-
-            // PR1 stub error for multi-method search
-            return Err(anyhow!(
-                "Hybrid search across multiple retrieval methods is not yet implemented in this version.\nRe-run with --retrieval to pick a single method:\n  monodex search --text ... --retrieval fts\n  monodex search --text ... --retrieval vector"
-            ));
-        }
-
-        // Step 8: Dispatch to single method
-        let method = active_subset.iter().next().unwrap();
-
-        match method {
-            RetrievalMethod::Vector => {
-                run_vector_search(&db, text, limit, &label_id).await?;
+            Decision::SingleMethod { method, .. } => {
+                run_single_method_search(
+                    writer,
+                    &db,
+                    &db_path,
+                    text,
+                    limit,
+                    candidate_limit,
+                    &label_id,
+                    &label_metadata,
+                    method,
+                    preamble,
+                    pre_result_warnings,
+                    debug,
+                ).await?;
             }
-            RetrievalMethod::Fts => {
-                run_fts_search(&db_path, &db, text, limit, &label_id, label_metadata.fts_complete).await?;
+            Decision::Hybrid { methods, .. } => {
+                run_hybrid_search(
+                    writer,
+                    &db,
+                    &db_path,
+                    text,
+                    limit,
+                    candidate_limit,
+                    &label_id,
+                    &label_metadata,
+                    methods,
+                    preamble,
+                    pre_result_warnings,
+                    debug,
+                ).await?;
             }
         }
 
@@ -158,197 +240,343 @@ pub fn run_search(
     })
 }
 
-/// Format the active subset for the Searching: line.
-///
-/// Returns "fts only", "vector only", or "fts, vector" for multi-method.
-/// The preamble is printed before decision-logic returns, so multi-method
-/// cases (stub error in PR1) still show the preamble.
-fn format_active_subset(active_subset: &BTreeSet<RetrievalMethod>) -> String {
-    if active_subset.len() == 1 {
-        let method = active_subset.iter().next().unwrap();
-        match method {
-            RetrievalMethod::Fts => "fts only".to_string(),
-            RetrievalMethod::Vector => "vector only".to_string(),
+/// Format a decision error into a user-facing error message.
+fn format_decision_error(
+    err: &crate::engine::search_decision::DecisionError,
+    metadata: &crate::engine::storage::LabelMetadataRow,
+    label: &str,
+    debug: bool,
+) -> String {
+    use crate::engine::search_decision::DecisionError;
+    let source_pointer = format_source_pointer(metadata);
+
+    match err {
+        DecisionError::EmptySelection => {
+            "This label has no retrieval methods in its selection. Re-run `monodex crawl` to populate it.".to_string()
         }
-    } else {
-        // Multi-method case - will be used by PR2 for RRF
-        // Format as "fts + vector (RRF)" when that lands
-        crate::engine::retrieval::format_selection(active_subset)
+        DecisionError::AllInSelectionIncomplete { incomplete_methods } => {
+            let methods_str: Vec<String> = incomplete_methods.iter().map(|m| format!("{}", m)).collect();
+            let base_msg = format!(
+                "All retrieval methods in this label's selection ({}) are incomplete.\nRe-run `monodex crawl --label {} {}` to complete indexing.",
+                methods_str.join(", "),
+                label,
+                source_pointer
+            );
+            if debug {
+                // Append schema details in debug mode
+                let debug_details: Vec<String> = incomplete_methods
+                    .iter()
+                    .map(|m| format!("{}_complete = false", m))
+                    .collect();
+                format!("{} ({})", base_msg, debug_details.join(", "))
+            } else {
+                base_msg
+            }
+        }
+        DecisionError::SourcesDisagree { vector_source, fts_source } => {
+            format!(
+                "This label's retrieval methods have inconsistent source state:\n  vector indexed against: {}\n  fts indexed against: {}\nRe-run `monodex crawl --label {} {}` to bring them back in sync.",
+                vector_source, fts_source, label, source_pointer
+            )
+        }
+        DecisionError::MethodNotInSelection { method } => {
+            format!(
+                "Method {} is not in this label's retrieval selection. Re-run `monodex crawl --label {} {} --retrieval {}` to add it.",
+                method, label, source_pointer, method
+            )
+        }
+        DecisionError::MethodsNotInSelection { methods } => {
+            let methods_str: Vec<String> = methods.iter().map(|m| format!("{}", m)).collect();
+            format!(
+                "Methods {} are not in this label's retrieval selection. Re-run `monodex crawl --label {} {}` to add them.",
+                methods_str.join(", "),
+                label,
+                source_pointer
+            )
+        }
     }
 }
 
-/// Run vector search and display results.
-async fn run_vector_search(
+/// Run a single-method search and render results.
+#[allow(clippy::too_many_arguments)]
+async fn run_single_method_search<W: Write>(
+    writer: &mut W,
     db: &Database,
+    db_path: &std::path::Path,
     text: &str,
     limit: usize,
+    candidate_limit: usize,
     label_id: &str,
+    label_metadata: &crate::engine::storage::LabelMetadataRow,
+    method: RetrievalMethod,
+    preamble: Preamble,
+    pre_result_warnings: Vec<SearchWarning>,
+    debug: bool,
 ) -> anyhow::Result<()> {
     let chunk_storage = db.chunks_storage().await?;
 
-    // Initialize embedder (only when vector is selected)
-    let embedder = ParallelEmbedder::new()?;
-    let embedding = embedder.encode(text, 0)?;
+    // Collect from the appropriate backend
+    let collected = match method {
+        RetrievalMethod::Vector => {
+            // Initialize embedder (only when vector is selected)
+            let embedder = ParallelEmbedder::new()?;
+            let embedding = embedder.encode(text, 0)?;
 
-    // Query LanceDB with label filter
-    let results = chunk_storage
-        .vector_search(&embedding, label_id, limit)
-        .await?;
-
-    if results.is_empty() {
-        println!("No results.");
-        println!();
-        return Ok(());
-    }
-
-    // Display results as blurbs
-    for result in &results {
-        let chunk = &result.chunk;
-
-        // Line 1: file_id:chunk_ordinal  distance  breadcrumb [chunk_kind] (part N/M)
-        let report = format_chunk_report(
-            chunk.breadcrumb.as_deref(),
-            chunk.split_part_ordinal.zip(chunk.split_part_count),
-            &chunk.chunk_kind,
-        );
-
-        println!(
-            "{}:{}  dist={:.3}  {}",
-            chunk.file_id, chunk.chunk_ordinal, result.distance, report
-        );
-
-        // Lines 2-4: first 3 lines of code (quoted with >)
-        for line in chunk.text.lines().take(3) {
-            println!("> {}", line);
-        }
-
-        // Blank line between results
-        println!();
-    }
-
-    Ok(())
-}
-
-/// Run FTS search and display results.
-async fn run_fts_search(
-    db_path: &std::path::Path,
-    db: &Database,
-    text: &str,
-    limit: usize,
-    label_id: &str,
-    fts_complete: bool,
-) -> anyhow::Result<()> {
-    use crate::engine::identifier::LabelId;
-
-    // Parse label_id into LabelId
-    let parts: Vec<&str> = label_id.splitn(2, ':').collect();
-    if parts.len() != 2 {
-        return Err(anyhow!("Invalid label_id format: {}", label_id));
-    }
-    let label_id_struct = LabelId::new(parts[0], parts[1])?;
-
-    // Run FTS search
-    let outcome = fts_search(db_path, &label_id_struct, text, limit).await?;
-
-    match outcome {
-        FtsSearchOutcome::Found(hits) => {
-            if hits.is_empty() {
-                println!("No results.");
-                println!();
-                return Ok(());
-            }
-
-            // Hydrate chunks from LanceDB
-            let chunk_storage = db.chunks_storage().await?;
-            let row_ids: Vec<String> = hits.iter().map(|h| h.row_id.clone()).collect();
-            let chunks = chunk_storage
-                .get_chunks_by_row_ids_for_label(label_id, &row_ids)
+            // Query LanceDB with candidate_limit
+            let results = chunk_storage
+                .vector_search(&embedding, label_id, candidate_limit)
                 .await?;
 
-            // Build lookup map
-            let chunk_map: std::collections::HashMap<String, _> =
-                chunks.into_iter().map(|c| (c.row_id.clone(), c)).collect();
+            collect_vector(results, candidate_limit)
+        }
+        RetrievalMethod::Fts => {
+            // Parse label_id into LabelId
+            let parts: Vec<&str> = label_id.splitn(2, ':').collect();
+            if parts.len() != 2 {
+                return Err(anyhow!("Invalid label_id format: {}", label_id));
+            }
+            let label_id_struct = crate::engine::identifier::LabelId::new(parts[0], parts[1])?;
 
-            // Display results in BM25 order
-            for hit in &hits {
-                match chunk_map.get(&hit.row_id) {
-                    Some(chunk) => {
-                        // Line 1: file_id:chunk_ordinal  score  breadcrumb [chunk_kind] (part N/M)
-                        let report = format_chunk_report(
-                            chunk.breadcrumb.as_deref(),
-                            chunk.split_part_ordinal.zip(chunk.split_part_count),
-                            &chunk.chunk_kind,
-                        );
+            let outcome = collect_fts(db_path, &label_id_struct, text, candidate_limit).await?;
 
-                        println!(
-                            "{}:{}  score={:.3}  {}",
-                            chunk.file_id, chunk.chunk_ordinal, hit.score, report
-                        );
-
-                        // Lines 2-4: first 3 lines of code (quoted with >)
-                        for line in chunk.text.lines().take(3) {
-                            println!("> {}", line);
+            match outcome {
+                FtsCollectOutcome::Collected(collected) => collected,
+                FtsCollectOutcome::NoIndex => {
+                    // Handle NoIndex case
+                    let source_pointer = format_source_pointer(label_metadata);
+                    let warning = if label_metadata.fts_complete {
+                        // FTS was complete but directory is gone
+                        SearchWarning::FtsNoIndexNoFallback {
+                            label: preamble.label.clone(),
+                            source_pointer,
                         }
+                    } else {
+                        // Incomplete - warning already emitted via decision_warnings
+                        // Just render with no results
+                        let model = SearchRenderModel {
+                            preamble,
+                            pre_result_warnings,
+                            results: vec![],
+                            trailing_inline_warnings: vec![],
+                            debug,
+                            end_marker: EndMarker::NoResults,
+                            mode: search::SearchMode::SingleMethod,
+                        };
+                        search::render(writer, &model)?;
+                        return Ok(());
+                    };
 
-                        // Blank line between results
-                        println!();
-                    }
-                    None => {
-                        // Stale FTS state - chunk was deleted but FTS hasn't caught up
-                        eprintln!(
-                            "⚠️  Chunk {} in FTS index but not in LanceDB (stale state), skipping",
-                            hit.row_id
-                        );
-                    }
+                    // Render with warning and no results
+                    let mut warnings = pre_result_warnings;
+                    warnings.push(warning);
+                    let model = SearchRenderModel {
+                        preamble,
+                        pre_result_warnings: warnings,
+                        results: vec![],
+                        trailing_inline_warnings: vec![],
+                        debug,
+                        end_marker: EndMarker::NoResults,
+                        mode: search::SearchMode::SingleMethod,
+                    };
+                    search::render(writer, &model)?;
+                    return Ok(());
+                }
+                FtsCollectOutcome::ParseError(msg) => {
+                    return Err(anyhow!("Couldn't parse FTS query: {}", msg));
                 }
             }
         }
-        FtsSearchOutcome::NoIndex => {
-            if fts_complete {
-                // FTS directory was deleted out from under us
-                eprintln!(
-                    "⚠️  FTS state for label {} is missing on disk; re-crawl with --retrieval fts to rebuild",
-                    label_id
-                );
-            }
-            // If !fts_complete, the preprocessing warning already fired
-            println!("No results.");
-            println!();
-        }
-        FtsSearchOutcome::ParseError(msg) => {
-            return Err(anyhow!("Couldn't parse FTS query: {}", msg));
-        }
-    }
+    };
+
+    // Build fused hits from collected results
+    let fused_hits: Vec<FusedHit> = collected
+        .hits
+        .into_iter()
+        .map(|hit| make_single_method_fused_hit(hit, method))
+        .collect();
+
+    // Hydrate chunks
+    let row_ids: Vec<String> = fused_hits.iter().map(|h| h.row_id.clone()).collect();
+    let chunks = chunk_storage
+        .get_chunks_by_row_ids_for_label(label_id, &row_ids)
+        .await?;
+
+    // Build lookup map
+    let chunk_map: HashMap<String, ChunkRow> =
+        chunks.into_iter().map(|c| (c.row_id.clone(), c)).collect();
+
+    // Hydrate fused hits with chunk data
+    let (results, trailing_warnings) = search::hydrate_ranked_hits(fused_hits, &chunk_map, limit);
+
+    // Decide end marker
+    let saturations = &[collected.saturated];
+    let end_marker = search::decide_end_marker(results.len(), limit, saturations);
+
+    // Build render model
+    let model = SearchRenderModel {
+        preamble,
+        pre_result_warnings,
+        results,
+        trailing_inline_warnings: trailing_warnings,
+        debug,
+        end_marker,
+        mode: search::SearchMode::SingleMethod,
+    };
+
+    // Render
+    search::render(writer, &model)?;
 
     Ok(())
 }
+
+/// Run hybrid search across multiple retrieval methods.
+///
+/// Sequential orchestration: FTS first, then vector.
+/// - FTS ParseError: hard error (fail-fast before embedder construction)
+/// - FTS NoIndex: degrade to vector-only with warning
+/// - Vector failure: hard error
+/// - Empty results from one method: fusion proceeds with other method
+#[allow(clippy::too_many_arguments)]
+async fn run_hybrid_search<W: Write>(
+    writer: &mut W,
+    db: &Database,
+    db_path: &std::path::Path,
+    text: &str,
+    limit: usize,
+    candidate_limit: usize,
+    label_id: &str,
+    label_metadata: &crate::engine::storage::LabelMetadataRow,
+    methods: BTreeSet<RetrievalMethod>,
+    preamble: Preamble,
+    pre_result_warnings: Vec<SearchWarning>,
+    debug: bool,
+) -> anyhow::Result<()> {
+    let chunk_storage = db.chunks_storage().await?;
+
+    // Step 1: Collect FTS results first (fail-fast for ParseError)
+    let mut method_results: Vec<(RetrievalMethod, Vec<MethodHit>)> = Vec::new();
+    let mut search_warnings = pre_result_warnings;
+    let mut saturations: Vec<bool> = Vec::new();
+
+    if methods.contains(&RetrievalMethod::Fts) {
+        // Parse label_id into LabelId
+        let parts: Vec<&str> = label_id.splitn(2, ':').collect();
+        if parts.len() != 2 {
+            return Err(anyhow!("Invalid label_id format: {}", label_id));
+        }
+        let label_id_struct = crate::engine::identifier::LabelId::new(parts[0], parts[1])?;
+
+        let outcome = collect_fts(db_path, &label_id_struct, text, candidate_limit).await?;
+
+        match outcome {
+            FtsCollectOutcome::Collected(collected) => {
+                saturations.push(collected.saturated);
+                method_results.push((RetrievalMethod::Fts, collected.hits));
+            }
+            FtsCollectOutcome::NoIndex => {
+                // Check if this is incomplete or genuinely missing
+                if !label_metadata.fts_complete {
+                    // Incomplete - warning already emitted via decision_warnings
+                    // Don't add to method_results, skip FTS
+                } else {
+                    // Complete but directory is gone - degrade with warning
+                    let source_pointer = format_source_pointer(label_metadata);
+                    search_warnings.push(SearchWarning::FtsNoIndexDegrade {
+                        label: preamble.label.clone(),
+                        source_pointer,
+                    });
+                    // Don't add to method_results, skip FTS
+                }
+            }
+            FtsCollectOutcome::ParseError(msg) => {
+                // Hard error - fail fast before embedder construction
+                return Err(anyhow!("Couldn't parse FTS query: {}", msg));
+            }
+        }
+    }
+
+    // Step 2: Collect vector results (only if FTS didn't hard-error)
+    if methods.contains(&RetrievalMethod::Vector) {
+        // Initialize embedder
+        let embedder = ParallelEmbedder::new()?;
+        let embedding = embedder.encode(text, 0)?;
+
+        // Query LanceDB with candidate_limit
+        let results = chunk_storage
+            .vector_search(&embedding, label_id, candidate_limit)
+            .await?;
+
+        let collected = collect_vector(results, candidate_limit);
+        saturations.push(collected.saturated);
+        method_results.push((RetrievalMethod::Vector, collected.hits));
+    }
+
+    // Step 3: Call fuse() to produce fused hits
+    let fused_hits = fuse(method_results, candidate_limit);
+
+    // Step 4: Hydrate chunks with fill-from-lower-candidates
+    // Single bulk LanceDB fetch over all fused row_ids (up to candidate_limit)
+    let row_ids: Vec<String> = fused_hits.iter().map(|h| h.row_id.clone()).collect();
+    let chunks = chunk_storage
+        .get_chunks_by_row_ids_for_label(label_id, &row_ids)
+        .await?;
+
+    // Build lookup map
+    let chunk_map: HashMap<String, ChunkRow> =
+        chunks.into_iter().map(|c| (c.row_id.clone(), c)).collect();
+
+    // Hydrate fused hits with chunk data
+    let (results, trailing_warnings) = search::hydrate_ranked_hits(fused_hits, &chunk_map, limit);
+
+    // Step 5: Decide end marker
+    // Saturations contains one entry per backend that actually ran and returned results
+    let end_marker = search::decide_end_marker(results.len(), limit, &saturations);
+
+    // Step 6: Build render model
+    let model = SearchRenderModel {
+        preamble,
+        pre_result_warnings: search_warnings,
+        results,
+        trailing_inline_warnings: trailing_warnings,
+        debug,
+        end_marker,
+        mode: search::SearchMode::Hybrid,
+    };
+
+    // Step 7: Render
+    search::render(writer, &model)?;
+
+    Ok(())
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::paths::clear_tool_home_cache;
-    use serial_test::serial;
     use tempfile::TempDir;
 
     use crate::app::commands::test_helpers::{
-        create_test_db_with_chunks, remove_monodex_home, set_monodex_home, test_chunk_row,
-        test_label_metadata_row, write_minimal_config,
+        create_test_db_with_chunks, test_chunk_row, test_label_metadata_row, write_minimal_config,
     };
+    use crate::paths::Paths;
 
     #[test]
-    #[serial(monodex_home)]
     fn test_search_missing_database() {
-        clear_tool_home_cache();
         let temp_dir = TempDir::new().unwrap();
-
-        set_monodex_home(temp_dir.path());
 
         // Create config but no database
         let config_path = temp_dir.path().join("config.json");
         write_minimal_config(&config_path);
 
-        let config = crate::app::config::load_config(&config_path).unwrap();
+        let paths = Paths::for_test(temp_dir.path().into());
+        let config = crate::app::config::load_config(paths).unwrap();
+
+        let mut output = Vec::new();
         let result = run_search(
+            &mut output,
             &config,
             "test query",
             10,
@@ -370,17 +598,11 @@ mod tests {
             "Error should mention init-db: {}",
             err
         );
-
-        remove_monodex_home();
     }
 
     #[test]
-    #[serial(monodex_home)]
     fn test_search_missing_label_context() {
-        clear_tool_home_cache();
         let temp_dir = TempDir::new().unwrap();
-
-        set_monodex_home(temp_dir.path());
 
         // Create config
         let config_path = temp_dir.path().join("config.json");
@@ -403,10 +625,21 @@ mod tests {
             .await;
         });
 
-        let config = crate::app::config::load_config(&config_path).unwrap();
+        let paths = Paths::for_test(temp_dir.path().into());
+        let config = crate::app::config::load_config(paths).unwrap();
 
         // Search without providing catalog or label, and no default context
-        let result = run_search(&config, "test query", 10, None, None, None, false);
+        let mut output = Vec::new();
+        let result = run_search(
+            &mut output,
+            &config,
+            "test query",
+            10,
+            None,
+            None,
+            None,
+            false,
+        );
 
         let err = result.unwrap_err().to_string();
         assert!(
@@ -414,25 +647,141 @@ mod tests {
             "Error should mention missing context: {}",
             err
         );
+    }
 
-        remove_monodex_home();
+    // =========================================================================
+    // format_decision_error tests
+    // =========================================================================
+
+    fn make_test_metadata() -> crate::engine::storage::LabelMetadataRow {
+        crate::engine::storage::LabelMetadataRow {
+            label_id: "test-catalog:main".to_string(),
+            catalog: "test-catalog".to_string(),
+            label: "main".to_string(),
+            source_kind: "git-commit".to_string(),
+            vector_source: Some("abc123".to_string()),
+            vector_complete: true,
+            fts_source: Some("abc123".to_string()),
+            fts_complete: true,
+            updated_at_unix_secs: 0,
+        }
     }
 
     #[test]
-    fn test_format_active_subset() {
-        let mut selection = BTreeSet::new();
-        // Empty case (shouldn't happen in practice but test the helper)
-        assert_eq!(format_active_subset(&selection), "no retrieval methods");
+    fn test_format_decision_error_empty_selection() {
+        let metadata = make_test_metadata();
+        let err = crate::engine::search_decision::DecisionError::EmptySelection;
+        let result = format_decision_error(&err, &metadata, "main", false);
+        assert_eq!(
+            result,
+            "This label has no retrieval methods in its selection. Re-run `monodex crawl` to populate it."
+        );
+    }
 
-        selection.insert(RetrievalMethod::Fts);
-        assert_eq!(format_active_subset(&selection), "fts only");
+    #[test]
+    fn test_format_decision_error_all_in_selection_incomplete_default() {
+        use crate::engine::retrieval::RetrievalMethod;
+        use std::collections::BTreeSet;
 
-        selection.clear();
-        selection.insert(RetrievalMethod::Vector);
-        assert_eq!(format_active_subset(&selection), "vector only");
+        let metadata = make_test_metadata();
+        let mut incomplete_methods: BTreeSet<RetrievalMethod> = BTreeSet::new();
+        incomplete_methods.insert(RetrievalMethod::Fts);
+        incomplete_methods.insert(RetrievalMethod::Vector);
 
-        selection.insert(RetrievalMethod::Fts);
-        // Multi-method case (PR2 will use RRF format)
-        assert_eq!(format_active_subset(&selection), "fts, vector");
+        let err = crate::engine::search_decision::DecisionError::AllInSelectionIncomplete {
+            incomplete_methods,
+        };
+        let result = format_decision_error(&err, &metadata, "main", false);
+
+        // Default form should NOT contain schema details
+        assert!(result.contains(
+            "All retrieval methods in this label's selection (fts, vector) are incomplete."
+        ));
+        assert!(
+            result.contains(
+                "Re-run `monodex crawl --label main --commit abc123` to complete indexing."
+            )
+        );
+        assert!(!result.contains("_complete = false"));
+    }
+
+    #[test]
+    fn test_format_decision_error_all_in_selection_incomplete_debug() {
+        use crate::engine::retrieval::RetrievalMethod;
+        use std::collections::BTreeSet;
+
+        let metadata = make_test_metadata();
+        let mut incomplete_methods: BTreeSet<RetrievalMethod> = BTreeSet::new();
+        incomplete_methods.insert(RetrievalMethod::Fts);
+        incomplete_methods.insert(RetrievalMethod::Vector);
+
+        let err = crate::engine::search_decision::DecisionError::AllInSelectionIncomplete {
+            incomplete_methods,
+        };
+        let result = format_decision_error(&err, &metadata, "main", true);
+
+        // Debug form SHOULD contain schema details
+        assert!(result.contains(
+            "All retrieval methods in this label's selection (fts, vector) are incomplete."
+        ));
+        assert!(
+            result.contains(
+                "Re-run `monodex crawl --label main --commit abc123` to complete indexing."
+            )
+        );
+        assert!(result.contains("(fts_complete = false, vector_complete = false)"));
+    }
+
+    #[test]
+    fn test_format_decision_error_sources_disagree() {
+        let metadata = make_test_metadata();
+        let err = crate::engine::search_decision::DecisionError::SourcesDisagree {
+            vector_source: "commit-a".to_string(),
+            fts_source: "commit-b".to_string(),
+        };
+        let result = format_decision_error(&err, &metadata, "main", false);
+
+        assert!(result.contains("vector indexed against: commit-a"));
+        assert!(result.contains("fts indexed against: commit-b"));
+        assert!(result.contains(
+            "Re-run `monodex crawl --label main --commit abc123` to bring them back in sync."
+        ));
+    }
+
+    #[test]
+    fn test_format_decision_error_method_not_in_selection() {
+        use crate::engine::retrieval::RetrievalMethod;
+
+        let metadata = make_test_metadata();
+        let err = crate::engine::search_decision::DecisionError::MethodNotInSelection {
+            method: RetrievalMethod::Fts,
+        };
+        let result = format_decision_error(&err, &metadata, "main", false);
+
+        assert!(result.contains("Method fts is not in this label's retrieval selection."));
+        assert!(result.contains(
+            "Re-run `monodex crawl --label main --commit abc123 --retrieval fts` to add it."
+        ));
+    }
+
+    #[test]
+    fn test_format_decision_error_methods_not_in_selection() {
+        use crate::engine::retrieval::RetrievalMethod;
+        use std::collections::BTreeSet;
+
+        let metadata = make_test_metadata();
+        let mut methods: BTreeSet<RetrievalMethod> = BTreeSet::new();
+        methods.insert(RetrievalMethod::Fts);
+        methods.insert(RetrievalMethod::Vector);
+
+        let err = crate::engine::search_decision::DecisionError::MethodsNotInSelection { methods };
+        let result = format_decision_error(&err, &metadata, "main", false);
+
+        assert!(
+            result.contains("Methods fts, vector are not in this label's retrieval selection.")
+        );
+        assert!(
+            result.contains("Re-run `monodex crawl --label main --commit abc123` to add them.")
+        );
     }
 }

@@ -36,3 +36,20 @@ pub enum CrawlWarning {
 /// immediately to the appropriate output stream. The closure is constructed
 /// by the crawl orchestrator and passed to phase functions.
 pub type WarningSink<'a> = &'a mut dyn FnMut(CrawlWarning);
+
+// =============================================================================
+// Decision warnings (search-time)
+// =============================================================================
+
+use crate::engine::retrieval::RetrievalMethod;
+
+/// Warning emitted during search decision-rule evaluation.
+///
+/// These are structured warnings returned by the `decide` function.
+/// The orchestrator translates them to `SearchWarning` instances with
+/// pre-formatted source pointers for rendering.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DecisionWarning {
+    /// A method in the persistent selection has not completed indexing.
+    IncompleteMethod { method: RetrievalMethod },
+}
