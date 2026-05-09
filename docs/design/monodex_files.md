@@ -52,11 +52,35 @@ Records the schema version, creation timestamp, the binary version that created 
 
 The `monodex_schema_version` field is the load-bearing one. Every database open reads it and compares it to the `MONODEX_SCHEMA_VERSION` constant in `src/engine/schema.rs`. A mismatch fails the open with a clear error rather than attempting silent migration. Bumping the schema version is a breaking change to existing databases (users have to rebuild), and any change to the schema's column shape requires a bump. This includes adding columns, even though LanceDB itself can store rows with unset columns: an older binary running against a newer database has no contract that says "blank cells in this column are OK," so the safe rule is to treat any shape change as breaking. The compatibility cost of avoiding a bump (writing code to read schemas with unfamiliar columns, deciding what to do with new columns when writing rows) is not worth absorbing without a concrete need.
 
+The current remedy for a schema-mismatch error is `monodex init-db --delete-everything`, which deletes the entire `<database-dir>` and recreates it. The schema-mismatch error message points at this command directly. All catalogs must be re-crawled afterward; this is acceptable because there are no production users yet and recrawls are cheap relative to the migration-code-and-coordination cost of supporting cross-version databases. A `monodex upgrade-db` verb is in the backlog as the eventual replacement for the first reference customer with a multi-month-old database.
+
 ### `<database-dir>/chunks.lance/` and `<database-dir>/label_metadata.lance/`
 
 LanceDB tables. The `.lance/` suffix is LanceDB's directory-based table format: every LanceDB table is a directory with that suffix containing data files, transaction logs, and index files. The suffix is a LanceDB convention, not a Monodex one; that's why the LanceDB tables are sibling directories under `<database-dir>` rather than nested inside a `vectordb/` subdirectory. Schema definitions live in `src/engine/schema.rs`; row types in `src/engine/storage/rows.rs`.
 
-When Tantivy full-text search is added, its index is planned to live at `<database-dir>/fts/`. Tantivy doesn't impose a directory-suffix convention, so the layout can be simpler than the LanceDB equivalent. The naming convention for `<database-dir>` siblings is: any directory ending in `.lance/` is a LanceDB table; everything else is something else.
+The naming convention for `<database-dir>` siblings is: any directory ending in `.lance/` is a LanceDB table; everything else is something else. The Tantivy FTS state lives at `<database-dir>/fts/`, described in its own section below.
+
+### `<database-dir>/fts/`
+
+Per-label Tantivy index directories for full-text search. Tool-managed; not designed to be edited by hand. Layout:
+
+```
+<database-dir>/fts/
+  <catalog>/
+    <label>/
+      meta.json        (Tantivy's; tracks which segments belong to this index)
+      <segment files>  (Tantivy's; immutable per-segment indexes)
+      <.del files>     (Tantivy's; per-segment tombstones)
+      manifest.json    (Monodex's staleness manifest)
+```
+
+Each label gets its own Tantivy index because BM25 statistics are computed per-corpus at index time. Sharing one Tantivy index across labels would mix statistics from chunks that don't belong to the queried label.
+
+`<database-dir>/fts/` is created by `monodex init-db`. Per-catalog and per-label subdirectories are created lazily on first FTS write for that label. The colon-form qualified label_id (`catalog:label`) is for in-memory use; the on-disk form uses nested directories to avoid colons (Windows hostility).
+
+The Monodex-side `manifest.json` is the staleness manifest used by the FTS phase for incremental diff. It records the `row_id`s currently live in this label's Tantivy index, plus the `FTS_SCHEMA_ID` and `FTS_TOKENIZER_ID` constants the index was built with. The manifest is advisory rather than transactional: there is no atomicity available across Tantivy's commit and a sidecar JSON file. The next crawl reconciles by cross-checking the manifest against Tantivy's actual contents (term-dictionary scan); divergence is recovered automatically. See [crawl.md](./crawl.md) for the reconciliation rule and [search.md](./search.md) for tokenizer behavior.
+
+Post-purge invariant: after `monodex purge --all` succeeds, `<database-dir>/fts/` exists and is empty, regardless of whether it existed before. After `monodex purge --catalog <C>`, `<database-dir>/fts/<C>/` is removed entirely; sibling catalogs are untouched.
 
 ### `<database-dir>/warnings-<catalog>.json`
 

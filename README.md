@@ -11,39 +11,44 @@
 [![crates.io](https://img.shields.io/crates/v/monodex.svg)](https://crates.io/crates/monodex)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-**Semantic search indexer for Rush monorepos**
+**Empower your agent to navigate large codebases.**
 
-## Overview
+Monodex is a standalone developer tool that provides smart, up-to-date codesearch for large monorepos. The CLI is directly usable by humans, but crafted to minimize LLM token cost.
 
-Monodex is a CLI tool that indexes Rush monorepo source code and documentation into a local LanceDB database for fast semantic search. It supports **label-based indexing**, allowing you to maintain multiple queryable snapshots (Git branches, commits) within a single catalog.
+## Key features
 
-See [CHANGELOG.md](./CHANGELOG.md) to see what's new.
+- **Simple to install:** Run `cargo install monodex`, then `monodex init-db` to create your `~/.monodex` folder, and you're ready to start crawling.
+- **Designed for scale:** Incremental indexing means changes are picked up without re-crawling the whole repo. Ranked search surfaces the most relevant results, instead of dumping every match into your agent's context.
+- **Optimized for searching code:** AST-guided chunking and a hybrid of full-text and semantic search, battle-tested on large scale frontend monorepos. (TypeScript today; more languages to come.)
+- **Self-contained:** Runs entirely on your own hardware, with no LLM service, no Docker container, and no separate database process. The database can be moved between machines.
+- **Agent-agnostic:** CLI output crafted for agent consumption, designed to plug into a variety of coding agents and workflows.
+- **Open source:** the core developer tooling everyone relies on should be free, open to inspect, and not gated behind someone else's roadmap.
 
-### Features
+See [CHANGELOG.md](./CHANGELOG.md) for what's new.
 
-- **Label-based indexing**: Maintain multiple queryable filesets (Git branches, commits) within a catalog
-- **Commit-based crawling**: Reads directly from Git objects, not working tree (deterministic, reproducible)
-- **AST-based chunking**: Tree-sitter powered intelligent splitting for TypeScript/TSX files
-- **Breadcrumb context**: Full symbol paths like `@rushstack/node-core-library:JsonFile.ts:JsonFile.load`
-- **Local code-aware embeddings**: Uses jina-embeddings-v2-base-code with ONNX Runtime: runs on commodity developer hardware, no external APIs or services required
-- **Incremental sync**: Content-hash based change detection for fast re-indexing
-- **Intelligent deduplication**: Identical content at same path across labels shares chunks
-- **Rush-optimized**: Smart exclusion rules for Rush monorepo patterns
-
-### Vocabulary
+## Vocabulary
 
 Monodex uses a few terms to describe the containment hierarchy:
 
 - A **database** is the on-disk store: by default `~/.monodex/default-db`. Everything lives here.
 - A **catalog** is a named monorepo registered in your config. You might have one catalog per codebase.
 - A **label** is a named fileset within a catalog: typically a branch or commit. Searches are scoped to a label.
-- A **chunk** is a unit of indexed content (function, class, section) with its embedding.
+- A **chunk** is a unit of indexed content (function, class, section).
 
 Hierarchy: **database** › **catalog** › **label** › **chunk**
 
-## Agent Usage Guide
+Monodex supports two **retrieval methods**, normally used together, individually selectable via `--retrieval`:
 
-This tool is designed for AI assistants. The indexed database provides a complete, internally consistent snapshot of the codebase as it existed at crawl time. Independent of any local file changes, branches, or whether the repo is even cloned, this makes it more than a replacement for grep; it can be the primary way an agent learns about a codebase.
+- `fts`: full-text search over the literal text of each chunk. Use when you know an exact name, identifier, or string and want to find every place it appears.
+- `vector`: semantic similarity over learned chunk embeddings ([Jina v2 code model](https://huggingface.co/jinaai/jina-embeddings-v2-base-code)). Use when you can describe what the code does but don't know what it's called. Catches matches `fts` would miss for lack of vocabulary overlap.
+
+The default `monodex search` queries both and fuses the results by reciprocal rank. Each result line is tagged `[f]`, `[v]`, or `[f+v]` to show which method(s) ranked it.
+
+## Usage Guide
+
+The indexed database is a complete, internally consistent snapshot of the codebase as it existed at crawl time. Searches and views work independent of any local file changes, branches, or whether the repo is even cloned, which makes Monodex more than a replacement for grep: it can be the primary way an agent learns about a codebase.
+
+The intended integration today is via the CLI; agents shell out to `monodex search` and `monodex view` and parse the output. An MCP server is on the backlog.
 
 **Typical workflow:**
 
@@ -53,7 +58,7 @@ This tool is designed for AI assistants. The indexed database provides a complet
    monodex use --catalog rushstack --label main
    ```
 
-2. **Start with semantic search** to find relevant code:
+2. **Start with search** to find relevant code:
 
    ```bash
    monodex search --text "how does rush handle pnpm shrinkwrap files"
@@ -72,6 +77,7 @@ This tool is designed for AI assistants. The indexed database provides a complet
    ```
 
 5. **Reconstruct entire files** by viewing all chunks:
+
    ```bash
    monodex view --id 700a4ba232fe9ddc
    ```
@@ -208,6 +214,7 @@ The `--debug` flag enables verbose logging for troubleshooting:
 - Logs storage-layer operations
 - Shows batch sizes during uploads
 - Useful for diagnosing database issues
+- Also enables per-result diagnostic continuations on `monodex search` (RRF score, BM25, vector distance); see "Search the Database" below.
 
 Example:
 
@@ -256,15 +263,25 @@ monodex crawl --catalog rushstack --label feature-x --commit feature-branch
 
 # Index a specific commit SHA
 monodex crawl --catalog rushstack --label v1.0.0 --commit a1b2c3d4e5f6
+
+# Selective crawl: build only the FTS index, narrowing search retrieval to "fts"
+# NOTE: drops vector from the label until a future crawl re-includes it
+monodex crawl --catalog rushstack --label main --commit HEAD --retrieval fts
+
+# Selective crawl: build only the vector index, narrowing search retrieval to "vector"
+# NOTE: drops fts from the label until a future crawl re-includes it
+monodex crawl --catalog rushstack --label main --commit HEAD --retrieval vector
 ```
 
 **Required arguments:** The `crawl` command requires `--label` and either `--working-dir` or `--commit`. This prevents accidental overwrites of important labels.
+
+**Retrieval methods:** Without `--retrieval`, the crawl builds both vector and FTS state for the label. Pass `--retrieval <method>` (repeatable) to limit which methods are built. A subsequent crawl with a different `--retrieval` set narrows or widens the label's retrieval selection. Narrowing is non-destructive on disk (the data stays put until garbage collection) and reversible by re-widening with another crawl.
 
 **Incremental sync:** The crawl is incremental. Unchanged files are skipped. You can safely CTRL+C and resume later.
 
 **Commit-based:** Crawling with `--commit` reads from Git objects, not the working tree. This ensures deterministic, reproducible indexing.
 
-**Working directory mode:** Use `--working-dir` to index uncommitted changes. This reads directly from the filesystem instead of Git objects. The label metadata will show `source_kind = "working-directory"` and `commit_oid = ""`. Working directory labels are mutable. Re-crawling updates the indexed content.
+**Working directory mode:** Use `--working-dir` to index uncommitted changes. This reads directly from the filesystem instead of Git objects. Working-directory labels are mutable: re-crawling a working-directory label updates the indexed content for files that changed.
 
 **Label reassignment:** When you re-crawl a label with a new commit, chunks from the old commit that no longer exist are removed from that label's membership.
 
@@ -273,12 +290,29 @@ monodex crawl --catalog rushstack --label v1.0.0 --commit a1b2c3d4e5f6
 ### Search the Database
 
 ```bash
-# Semantic search (uses default context if set)
+# Hybrid search (default; uses both vector and FTS, fused via reciprocal rank)
 monodex search --text "how to read JSON files"
 
 # With explicit catalog and label
 monodex search --text "API Extractor" --catalog rushstack --label main --limit 10
+
+# Semantic search only
+monodex search --text "how to read JSON files" --retrieval vector
+
+# Lexical full-text search only
+monodex search --text "JsonFile.load" --retrieval fts
+
+# With per-result diagnostic detail (RRF score, BM25, vector distance)
+monodex --debug search --text "how to read JSON files"
 ```
+
+The output preamble names which methods are being queried:
+
+```
+Catalog: rushstack / Label: main / Searching: fts, vector
+```
+
+Each result header carries a `[v]`, `[f]`, or `[f+v]` marker (introduced in Vocabulary above) indicating which method(s) ranked it. Without the `--retrieval` flag, the search uses every method in the label's retrieval selection; passing `--retrieval` filters within the selection. Asking for a method not in the selection is an error.
 
 ### View Full Chunks
 
@@ -332,6 +366,18 @@ monodex audit-chunks --count 20 --dir /path/to/project
 
 **Chunk Quality Score**: 0-100%, higher is better. Scores below 95% may indicate chunking issues. Note: `dump-chunks` and `audit-chunks` use AST-only mode (fallback disabled) to accurately measure partitioner quality.
 
+### Debug FTS Tokenization
+
+```bash
+# Show the tokens the FTS tokenizer produces for a chunk's text
+monodex debug-fts --catalog rushstack --label main --id 30440fb2ecd5fa62:3
+
+# Also explain how a query ranks against that chunk
+monodex debug-fts --catalog rushstack --label main --id 30440fb2ecd5fa62:3 --query "JsonFile.load"
+```
+
+Most "FTS can't find a thing I know is there" cases turn out to be tokenization issues, not ranking issues. The plain `debug-fts` invocation shows what tokens were extracted from the chunk; adding `--query` runs Tantivy's score explanation against the parsed query.
+
 ### Purge Data
 
 ```bash
@@ -342,7 +388,7 @@ monodex purge --catalog rushstack
 monodex purge --all
 ```
 
-**Note:** Purge operates at catalog level. To remove a specific label's chunks, re-crawl that label with a different commit or manually update the `active_label_ids` field.
+**Note:** `purge` operates at catalog or database scope. There is currently no supported per-label purge command; do not edit database rows by hand.
 
 ### Database Management
 
@@ -352,7 +398,12 @@ monodex init-db
 
 # Re-run is safe - idempotent if database already exists
 monodex init-db
+
+# Recover from a schema-mismatch error: deletes the database and recreates it
+monodex init-db --delete-everything
 ```
+
+`--delete-everything` is the remedy when you upgrade Monodex and your existing database was built against an older schema version. The error message points at this command. All catalogs must be re-crawled afterward; the option is destructive by design.
 
 The database is stored at `~/.monodex/default-db/` by default. You can customize this location via the `database.path` field in config.
 

@@ -145,6 +145,14 @@ There is no fixed threshold. The judgment is relative: tag the largest contribut
 - No structural splits in the same change as feature or fix work. Splits are their own change unless explicitly authorized by the maintainer or the planned reorganization being applied.
 - No substantive code in `mod.rs`. A `mod.rs` should contain module declarations, explicit re-exports, the module header comment, and small glue (brief dispatch arms, trivial trait impls). Algorithms, command handlers, storage operations, and types beyond a small central type live in named sibling files. The point is that `mod.rs` is the directory's table of contents, not its content; named files are easier to navigate, search, and refer to.
 
+## Configuration at the edges
+
+The program reads its environment exactly once at startup, in `main`. Past that point, the rest of the code never touches `std::env`. Inputs from the environment are parsed and validated into typed values, and the typed values are passed down as parameters.
+
+The realization of this rule for the tool home directory is the `Paths` struct in `src/paths.rs`. It carries `tool_home` and `config_path` as resolved `PathBuf`s, with method accessors for derived files (`context_file()`, `crawl_config()`). Code below `main` takes `&Paths` rather than reading `MONODEX_HOME` ambient state. The pattern is the same as Rush Stack's `IRushConfiguration`.
+
+The class of bug this rules out: env-var cache poisoning, stale ambient state across test runs, and silent test isolation breakage when one test mutates an env var another test reads. Because the input is a parameter, parameters can't be forgotten and the bug class becomes architecturally impossible to express. New code that needs configuration takes the configuration as a parameter; if a function or module needs `Paths`, it accepts `&Paths` rather than reaching for `std::env`.
+
 ## Small files
 
 A file under 50 lines is acceptable when it is a `mod.rs` / `lib.rs` / `main.rs` of the kinds described above, or when it contains a single type, trait, or small concentrated vocabulary that is the public contract of its module. Other small files should be folded into their parent.
