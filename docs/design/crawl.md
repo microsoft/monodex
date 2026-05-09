@@ -1,6 +1,6 @@
 # Crawl pipeline
 
-This document expands on the crawl pipeline introduced in [architecture.md](./architecture.md). The same six named steps are used as section headings here, with operational detail per step. After the steps, two longer sections cover the package index and working-directory mode in depth, followed by a section on partial-crawl semantics.
+This document expands on the crawl pipeline introduced in [architecture.md](./architecture.md). The same named steps are used as section headings here, with operational detail per step. After the steps, two longer sections cover the package index and working-directory mode in depth, followed by a section on partial-crawl semantics.
 
 The relevant source files are `src/app/commands/crawl.rs` (top-level command handler), `src/app/crawl/phases.rs` (the per-phase functions corresponding to the steps below), `src/app/crawl/pipeline.rs` (parallel embedding and storage writes inside the file-processing step), and `src/engine/git_ops/` (Git tree enumeration, blob reading, working-directory walk).
 
@@ -78,11 +78,45 @@ The result: the label's membership now exactly reflects the current commit's tre
 
 The "only after success" rule matters because the touched set is only complete on success. An interrupted crawl with a half-built touched set would incorrectly reassign chunks for files it hadn't gotten to yet, leaving the label's content corrupted. Skipping reassignment on failure is the safe behavior: stale chunks remain associated with the label until the next successful crawl, which produces a complete touched set and runs the cleanup correctly.
 
-## Step 6: Crawl finalization
+## Step 6: FTS phase
+
+This step runs only if `fts` is in the new retrieval selection. It is a batch reconciliation against the per-label Tantivy index at `<database-dir>/fts/<catalog>/<label>/`, not a per-file fast path. The phase relies on a per-label staleness manifest stored alongside the index, which records the `row_id`s currently indexed and makes incremental diffs cheap.
+
+The phase reads the label's chunks from LanceDB (via `get_chunks_for_label`) and diffs them against the chunks currently indexed in Tantivy (sourced from the staleness manifest, with reconciliation rules described below). The diff is computed as a set difference of `row_id`s: chunks present in LanceDB but not in Tantivy are added; chunks present in Tantivy but no longer in LanceDB are removed via `delete_term`. After all additions and deletions are queued, the phase calls `commit()` once. For commit-mode crawls, the phase then calls `wait_merging_threads()` to consolidate; for working-dir crawls, it skips this and accepts fragmentation as the cost of speed (full re-crawl will clean up).
+
+After `commit()` succeeds, the staleness manifest at `<database-dir>/fts/<catalog>/<label>/manifest.json` is rewritten. The manifest contains the `row_id`s actually live in Tantivy after commit (zero-token chunks, which Tantivy cannot index, are excluded), plus the `FTS_SCHEMA_ID` and `FTS_TOKENIZER_ID` constants the index was built with.
+
+**Manifest reconciliation.** The manifest is advisory, not transactional: there is no atomicity available across Tantivy's commit and a sidecar JSON file, and engineering for it (`.tmp` + rename, lockfiles) buys little. The reconciliation rule on the next crawl handles divergence:
+
+- When the manifest exists, always derive Tantivy's live `row_id` set via a term-dictionary scan of the `row_id` field (using the alive-bitset filter, so tombstoned-but-not-yet-merged docs do not appear) and compare it as a set against the manifest. If the sets are equal, use the manifest's value. If they differ for any reason, use the Tantivy-derived set as the currently-indexed set for the diff and rewrite the manifest at end of indexing.
+- When the manifest is missing, the Tantivy-derived set is the only source of truth and the diff proceeds against it.
+
+There is no count-tolerance fast path. A naive "trust the manifest if its size is close to Tantivy's" check would silently miss the same-cardinality-different-rows case and let already-committed docs get added a second time after a process crash between commit and manifest write. The unconditional set comparison closes that hole.
+
+**Schema and tokenizer ID mismatch.** The schema and tokenizer behavior are versioned by `FTS_SCHEMA_ID` and `FTS_TOKENIZER_ID` constants in `src/engine/util.rs`. Mismatch is detected via the manifest's stored IDs, not by introspecting Tantivy's on-disk schema:
+
+- If the manifest's IDs do not match the current constants: delete the per-label FTS directory and rebuild from scratch. The intent is to recover automatically from version bumps.
+- If Tantivy fails to open with the manifest's IDs matching, or if the manifest is unreadable while Tantivy state exists: error out with a clear message. This is corruption and should reach a human, not be papered over by a silent rebuild.
+
+These IDs do not participate in `row_id`. Chunk identity is a chunk-storage concept; FTS has its own invalidation surface, and a tokenizer tweak does not force re-embedding.
+
+**Per-file vector-presence invariant on FTS-only reprocess.** The per-file invariant (for any file with `file_complete = true`, either all chunks have non-NULL `vector` or none do) is what makes the vector-phase fast-path predicate sufficient (see Step 4). The invariant requires care when an FTS-only crawl reprocesses a file whose previous vector phase was interrupted partway through.
+
+Concretely: vector phase uploads chunks F:1 and F:2 with vectors, then crashes before F:3 is uploaded. Sentinel for F stays `file_complete = false`. A subsequent `crawl --retrieval fts` finds the sentinel incomplete and routes F to the slow path. The chunker re-emits all three chunks; F:1 and F:2 are matched (existing vectors preserved by the storage primitive), F:3 is inserted with `vector = NULL`. Without further action, F would end up with `file_complete = true` and mixed vector presence — a violation of the invariant that future vector-phase crawls would silently fast-path-skip.
+
+The fix happens at the FTS-only slow path: before upserting, the pipeline calls a `null_vectors_for_row_ids` storage primitive that nulls existing vectors for the row_ids about to be upserted. F:1 and F:2's vectors flip to NULL; F:3 lands at NULL; the file ends up all-NULL, restoring the invariant. The blunt rule (always null on FTS-only-path slow path) is correct: a genuinely new file has no rows to null (no-op); a partially-uploaded file gets the fix; a fully-uploaded clean file is fast-path-skipped and never reaches this code.
+
+The storage primitive batches internally (matching the `UPSERT_BATCH_SIZE` discipline used elsewhere) so an FTS-only reprocess of a large fraction of the corpus does not produce an unbounded `IN(...)` predicate.
+
+**Tokenizer.** The tokenizer used during the FTS phase is the same one used at query time. Behavior spec is in [search.md](./search.md).
+
+## Step 7: Crawl finalization
 
 For each in-selection method whose phase completed successfully, mark its completion flag true. Update the label metadata row's timestamp.
 
 This is the closing handshake. Once finalized, search and view operations against the label see a consistent view of its content.
+
+A failed FTS phase still finalizes vector's completion flag if vector phase and label reassignment both succeeded. The error is propagated after finalize, so resume re-runs only the FTS phase rather than redoing vector work unnecessarily.
 
 ## Working-directory mode
 
@@ -126,3 +160,5 @@ What does _not_ happen:
 A subsequent successful crawl recovers the label cleanly: files already indexed are picked up by the sentinel fast path, files that hadn't been touched yet get processed, and step 5 then runs with a complete touched set, removing the stale chunks. The user never has to do anything special. Re-running the same crawl command is the recovery procedure.
 
 A consequence of this design: orphaned chunks are possible. If a file was uploaded but its `active_label_ids` didn't get the label added before the crawl was interrupted, the chunk is in the database but tagged with no label. It's invisible to label-scoped search and view, but it occupies space. This is the case the planned offline GC command (see [backlog.md](../backlog.md)) is intended to address. Inline cleanup during crawl is not sufficient because there's no way to safely identify orphans without scanning the whole `chunks` table.
+
+**Interrupted FTS phase.** Tantivy's durability boundary is `commit()`. Anything between commits (documents added but not yet committed) lives in process memory and is lost on crash; there is no on-disk partial-segment state. The FTS phase commits exactly once at its end, so an interrupted FTS phase reverts the on-disk Tantivy state to whatever it was before the phase started. The label metadata row, however, was already updated at upsert time: `fts_source` is set to the new commit OID and `fts_complete = false`. The next crawl sees this incomplete state, computes the diff against current chunks, redoes whatever FTS work didn't get committed, commits, and sets `fts_complete = true`. Resume re-does only FTS work, not vector work.

@@ -2,7 +2,7 @@
 
 This document covers the algorithms that split files into the units Monodex embeds and indexes. Three strategies exist: TypeScript AST partitioning (the bulk of the engineering investment), markdown heading-based partitioning, and generic line-based splitting. The dispatcher in `src/engine/chunker.rs` picks one per file by extension, using the loaded crawl config (see `src/engine/crawl_config.rs`).
 
-The choice of chunking is fundamental, not just an implementation detail. The same chunks are the unit of vector retrieval today and will be the unit of full-text search when Tantivy lands. Chunk-size targets, AST boundary detection, and quality scoring all flow from this central choice. Future tuning is expected.
+The choice of chunking is fundamental, not just an implementation detail. The same chunks are the unit of both vector and full-text retrieval. Chunk-size targets, AST boundary detection, and quality scoring all flow from this central choice. Future tuning is expected.
 
 ## Embedding runtime and the chunk-size budget
 
