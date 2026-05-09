@@ -23,21 +23,30 @@ PUBLISHING PROCEDURE:
 
 ## Unreleased
 
-### Fixed
-
-- **Empty search result sets now print a `No results.` line.** Previously, `monodex search` would print only the catalog/label header and then nothing if no chunks matched, which looked like a hang.
-
 ### Added
 
-- **Concurrent monodex invocations now coordinate via file locks.** Two crawls against the same catalog wait for each other; two against different catalogs run in parallel. See `docs/design/concurrency.md` for details.
+- **Full-text search.** Monodex now indexes chunk text into a Tantivy-backed full-text index alongside the existing vector index. The two are exposed as the `fts` and `vector` retrieval methods. `monodex search` queries both by default and fuses the results using reciprocal rank fusion (RRF). Each result line carries a `[f]`, `[v]`, or `[f+v]` marker indicating which method(s) ranked it.
+
+- **`--retrieval` flag on `search` and `crawl`.** Repeatable. On `search`, restricts the query to the named methods (e.g. `--retrieval fts` for lexical-only). On `crawl`, restricts which methods are built for the label; subsequent crawls can narrow or widen the per-label retrieval selection. Without the flag, both commands act on every method available for the label.
+
+- **`debug-fts` command.** Dumps the tokens the FTS tokenizer produces for a given chunk, and (with `--query`) explains how a query parses and scores against that chunk. Most "FTS can't find a thing I know is there" cases turn out to be tokenization rather than ranking.
+
+- **`init-db --delete-everything`.** Deletes and recreates the database in one step. Intended for recovering from a schema-mismatch error after upgrading Monodex. Destructive by design; all catalogs must be re-crawled afterward.
+
+- **Concurrent monodex invocations now coordinate via file locks.** Two writes against the same catalog wait for each other; writes against different catalogs run in parallel. See `docs/design/concurrency.md`.
 
 ### Changed
 
-- **Breaking: schema version bumped from 2 to 3.** Catalog name is now part of chunk identity, so the same content at the same path in two different catalogs no longer produces colliding rows. Existing v2 databases are rejected with a schema-mismatch error; the remedy is to delete the database and re-crawl.
+- **Breaking: existing databases are not readable.** The on-disk schema has changed and the chunk identity now incorporates the catalog name, so the same content at the same path in two different catalogs no longer produces colliding rows. Older databases are rejected with a schema-mismatch error on first use. The remedy is `monodex init-db --delete-everything` followed by re-crawling each catalog.
 
-- Revised documentation to improve writing mechanics and clarity
+- **`monodex search` output format.** The preamble now names the methods being queried (`Searching: fts, vector`). Each result header gains a `[f]`/`[v]`/`[f+v]` marker, shown unconditionally including under single-method search. Empty result sets now print `No results.` rather than nothing.
 
-- Various refactorings to improve code organization and prepare for the upcoming full-text search (FTS) feature.
+- **`monodex search` warnings now print on stdout** alongside results, rather than stderr. This keeps warnings ordered relative to the results they describe and makes piped output deterministic.
+
+### Fixed
+
+- A handful of crawl-pipeline error-handling and cleanup-gate bugs that could leave a label in an inconsistent state if a phase failed partway through.
+- Stale-hydration warnings in search results now appear in the right place relative to the result that triggered them.
 
 ## 0.5.1 (2026-04-30)
 
