@@ -41,10 +41,10 @@ impl IdentifierError {
 // Validation Constants
 // ============================================================================
 
-/// Maximum length for catalog names (per spec §9.2).
+/// Maximum length for catalog names.
 const MAX_CATALOG_LENGTH: usize = 64;
 
-/// Maximum length for label names (per spec §9.3).
+/// Maximum length for label names.
 const MAX_LABEL_LENGTH: usize = 128;
 
 // ============================================================================
@@ -151,7 +151,7 @@ pub fn validate_catalog(name: &str) -> Result<(), IdentifierError> {
 /// Examples: `main`, `feature/x`, `release/v1.2.3`, `branch=main`, `repo/sub/feature`
 ///
 /// Note: `=` is a permitted separator character but is not interpreted as a typed-form
-/// delimiter today. A label containing `=` is an opaque identifier (per spec §5).
+/// delimiter today. A label containing `=` is an opaque identifier.
 pub fn validate_label(name: &str) -> Result<(), IdentifierError> {
     if name.is_empty() {
         return Err(IdentifierError::Label {
@@ -172,11 +172,11 @@ pub fn validate_label(name: &str) -> Result<(), IdentifierError> {
         });
     }
 
-    // Validate as label payload (single-pass validation per spec §9.3)
+    // Validate as label payload (single-pass)
     validate_label_payload(name)
 }
 
-/// Validates a label payload (the label itself, or the part after `=` in future typed forms).
+/// Validates a label payload.
 ///
 /// Rule: `^[a-z0-9]+(?:[./=-][a-z0-9]+)*$`
 fn validate_label_payload(payload: &str) -> Result<(), IdentifierError> {

@@ -122,7 +122,7 @@ impl Paths {
 }
 
 /// Called once from main() early in startup. Prints a one-line warning to stderr
-/// if any files exist at the old pre-PR locations and no files exist at the
+/// if any files exist at the old locations and no files exist at the
 /// new locations.
 pub fn warn_old_tool_home_if_present(paths: &Paths) {
     let new_home = &paths.tool_home;

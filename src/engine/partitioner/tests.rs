@@ -574,8 +574,6 @@ fn test_experiments_configuration() {
     //
     // This tests effective_size_with_comments() for interface property signatures.
     //
-    // Before the fix: oversized interface chunk
-    // After the fix: properly split at property boundaries
     let source = include_str!("../../../test_artifacts/ExperimentsConfiguration.ts");
     let config = PartitionConfig {
         file_name: "ExperimentsConfiguration.ts".to_string(),
@@ -616,8 +614,6 @@ fn test_documented_interface() {
     //
     // This tests effective_size_with_comments() for interface property signatures.
     //
-    // Before the fix: oversized interface chunks
-    // After the fix: properly split at property boundaries
     let source = include_str!("../../../test_artifacts/IYamlApiFile.ts");
     let config = PartitionConfig {
         file_name: "IYamlApiFile.ts".to_string(),
@@ -659,8 +655,6 @@ fn test_module_minifier_plugin() {
     // The issue: Some expression_statements are <500 bytes but contain nested functions
     // (callback registrations). These should be meaningful split points.
     //
-    // Before the fix: fallback splits in large method body
-    // After the fix: properly split at callback registration boundaries
     let source = include_str!("../../../test_artifacts/ModuleMinifierPlugin.ts");
     let config = PartitionConfig {
         file_name: "ModuleMinifierPlugin.ts".to_string(),
@@ -696,8 +690,8 @@ fn test_parameter_form_tsx_large() {
     // (useCallback, useEffect) and a large JSX return. The expression_statements
     // containing arrow functions should be meaningful split points.
     //
-    // Before the fix: fallback splits in large component function
-    // After the fix: properly split at hook/expression boundaries
+    // Test hook/expression boundaries in React component.
+    //
     let source = include_str!("../../../test_artifacts/ParameterForm.tsx");
     let config = PartitionConfig {
         file_name: "ParameterForm.tsx".to_string(),
@@ -734,8 +728,6 @@ fn test_generate_patched_file() {
     // function body is large. The algorithm needs to find split points between
     // logical sections.
     //
-    // Before the fix: fallback splits in large function body
-    // After the fix: properly split at logical boundaries
     let source = include_str!("../../../test_artifacts/generate-patched-file.ts");
     let config = PartitionConfig {
         file_name: "generate-patched-file.ts".to_string(),
@@ -765,7 +757,7 @@ fn test_generate_patched_file() {
 #[test]
 fn test_breadcrumb_percent_encoding_round_trip() {
     // Test that file names with reserved characters are percent-encoded in breadcrumbs.
-    // Per spec §8.3, `:` must be encoded as `%3A` in locators/breadcrumbs.
+    // : must be encoded as %3A in locators and breadcrumbs (see docs/design/label_ids.md).
     // This test uses a file named `weird:file.ts` and verifies the emitted breadcrumb
     // contains `weird%3Afile.ts` (not `weird:file.ts` which would be ambiguous).
     let source = r#"

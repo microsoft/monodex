@@ -120,9 +120,8 @@ pub fn filter_files(files: Vec<FileEntry>, crawl_config: &CompiledCrawlConfig) -
     filtered
 }
 
-// ============================================================================
-// Phase 1: Classify files
-// ============================================================================
+// Classify files
+// ---------------------------------------------------------------------------
 
 /// Output from classifying files against existing chunks.
 pub struct ClassifyOutput {
@@ -150,7 +149,7 @@ pub async fn classify_files(
     vector_in_selection: bool,
     warnings: WarningSink<'_>,
 ) -> Result<ClassifyOutput> {
-    println!("🔶 Phase 1: Checking existing chunks and collecting new files...");
+    println!("🔶 Checking existing chunks...");
 
     let mut new_files: Vec<FileEntry> = Vec::new();
     let mut existing_file_ids: HashSet<String> = HashSet::new();
@@ -242,9 +241,8 @@ pub async fn classify_files(
     })
 }
 
-// ============================================================================
-// Phase 2: Add label to existing files
-// ============================================================================
+// Add label to existing files
+// ---------------------------------------------------------------------------
 
 /// Output from adding labels to existing files.
 pub struct LabelAddOutput {
@@ -323,9 +321,8 @@ pub async fn add_label_to_existing_files(
     })
 }
 
-// ============================================================================
-// Phase 3: Chunk new files
-// ============================================================================
+// Chunk new files
+// ---------------------------------------------------------------------------
 
 /// Output from the chunking phase.
 pub struct ChunkingOutput {
@@ -365,7 +362,7 @@ pub fn chunk_new_files(
     }
 
     println!(
-        "🔶 Phase 2: Chunking {} new files...",
+        "🔶 Chunking {} new files...",
         format_count(new_count as u64)
     );
 
@@ -461,7 +458,7 @@ pub async fn run_label_cleanup(
     label_id: &str,
     all_touched_file_ids: &HashSet<String>,
 ) -> Result<u64> {
-    println!("🔶 Phase 4: Label reassignment cleanup...");
+    println!("🔶 Label reassignment cleanup...");
     let processed = chunk_storage
         .remove_label_from_chunks(label_id, all_touched_file_ids)
         .await?;
@@ -493,7 +490,7 @@ pub async fn run_fts_phase(
     use crate::app::util::{format_count, format_duration};
     use std::time::Instant;
 
-    println!("🔶 Phase 5: FTS indexing...");
+    println!("🔶 FTS indexing...");
     let start = Instant::now();
 
     let stats =
@@ -916,7 +913,7 @@ mod tests {
 
     /// Test that update_final_metadata correctly maps PhaseResults to per-method completion flags.
     ///
-    /// This verifies decision #17: when FTS phase fails but vector phase succeeds,
+    /// This verifies that when FTS phase fails but vector phase succeeds,
     /// the finalizer must set vector_complete=true and fts_complete=false.
     #[tokio::test]
     async fn test_finalize_metadata_phase_results_mapping() {

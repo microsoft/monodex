@@ -133,7 +133,7 @@ pub fn run_view(
                 file_id, chunk_ordinal, chunk_ordinal, chunk_count, report
             );
 
-            // Source line (non-grammar format per spec §8.6)
+            // Source line (non-grammar format)
             println!(
                 "Source: ({}) {}",
                 sanitize_for_terminal(&result.catalog),

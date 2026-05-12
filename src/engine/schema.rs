@@ -6,9 +6,8 @@
 //!
 //! ## Schema version
 //!
-//! The `MONODEX_SCHEMA_VERSION` constant tracks breaking schema changes. When columns
-//! are added, removed, or have their types changed, this version must be incremented
-//! and a future `monodex upgrade-db` command will handle migrations.
+//! The `MONODEX_SCHEMA_VERSION` constant tracks breaking schema changes. See
+//! docs/design/monodex_files.md for the rationale and the migration procedure.
 //!
 //! ## Vector dimension
 //!
