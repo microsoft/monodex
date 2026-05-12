@@ -42,7 +42,7 @@ pub fn load_default_context(paths: &Paths) -> Option<DefaultContext> {
                 }
             };
 
-            // Validate identifiers at boundary per ISSUE_25_WORK_PLAN.md §6
+            // Validate identifiers at the trust boundary
             if let Err(e) = validate_catalog(&ctx.catalog) {
                 eprintln!(
                     "Warning: Invalid catalog '{}' in default context: {}. \

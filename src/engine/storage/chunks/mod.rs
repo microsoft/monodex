@@ -32,7 +32,7 @@ const UPSERT_BATCH_SIZE: usize = 1000;
 /// Progress event emitted during storage operations.
 ///
 /// Used by the crawl pipeline to report progress to the user during
-/// long-running FTS-only Phase 3 operations.
+/// long-running FTS-only upsert operations.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StorageProgressEvent {
     /// Phase label suitable for direct display, e.g. "Clearing vectors", "Upserting chunks", "Marking file sentinels".
@@ -717,7 +717,7 @@ impl ChunkStorage {
 
     /// Upsert chunks without vectors with progress reporting.
     ///
-    /// This is the combined FTS-only Phase 3 operation that:
+    /// This is the combined FTS-only upsert operation that:
     /// 1. Clears any existing vectors on these rows (handles interrupted vector crawls)
     /// 2. Upserts the chunks without vectors
     /// 3. Marks file sentinels as complete

@@ -63,7 +63,7 @@ pub async fn run_embed_upload_pipeline(
     })?;
 
     println!(
-        "🔶 Phase 3: Embedding {} chunks with {} parallel sessions...",
+        "🔶 Embedding {} chunks with {} parallel sessions...",
         format_count(total_chunks as u64),
         embedder.num_workers()
     );
@@ -320,7 +320,7 @@ pub async fn run_upsert_without_vectors(
     let total_chunks = all_chunks.len();
 
     println!(
-        "🔶 Phase 3: Storing {} chunks (FTS-only, no embedding)...",
+        "🔶 Storing {} chunks (FTS-only, no embedding)...",
         format_count(total_chunks as u64)
     );
     let start = std::time::Instant::now();

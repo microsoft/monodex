@@ -21,8 +21,7 @@ pub use self::working_dir::{
 
 /// A file entry with its relative path and Git blob ID.
 ///
-/// This unified struct is used by both commit-based and working-directory
-/// enumeration, replacing the former separate `FileEntry` and `WorkingDirEntry`.
+/// This struct is used by both commit-based and working-directory enumeration.
 #[derive(Debug, Clone)]
 pub struct FileEntry {
     pub relative_path: String,

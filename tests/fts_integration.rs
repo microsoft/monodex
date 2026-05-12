@@ -1,4 +1,4 @@
-//! Purpose: Integration tests for FTS end-to-end behavior — full pipeline tests for Stage 9.
+//! Purpose: Integration tests for FTS end-to-end behavior.
 //! Edit here when: Adding or modifying end-to-end FTS integration tests.
 //! Do not edit here for: Production crawl/search code (see `app/commands/`); per-module unit tests.
 //!
@@ -287,7 +287,6 @@ fn test_selection_narrowing__quick_excluded() {
 
         // Second crawl: --retrieval fts (selection narrows to {fts})
         // We need to capture stdout to check for the narrowing announcement
-        // For now, we'll run the crawl and verify the state changes
         monodex::app::commands::crawl::run_crawl_label(
             &config,
             "test-catalog",
@@ -725,7 +724,7 @@ fn test_schema_mismatch_error__quick_excluded() {
 // Test 7: FTS query parse error
 // =============================================================================
 
-/// Test FTS query parse error (decision #19):
+/// Test FTS query parse error:
 /// - Index a label with FTS state
 /// - Run search with a syntactically-invalid query for Tantivy's parser
 /// - Confirm output is "Couldn't parse FTS query: <message>" and NOT "No results."

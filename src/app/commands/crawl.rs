@@ -333,7 +333,7 @@ async fn run_crawl_async(
     let mut label_reassignment_error: Option<anyhow::Error> = None;
     let mut fts_phase_error: Option<anyhow::Error> = None;
 
-    // Phase 3: Embed-and-upsert (vector) OR upsert-without-vectors (FTS-only)
+    // Embed-and-upsert (vector) OR upsert-without-vectors (FTS-only)
     let (pipeline_file_ids, pipeline_failures) = if vector_in_selection {
         // Vector path: embed and upload (handles both vector-only and {vector, fts} selections)
         match run_embed_upload_pipeline(
@@ -383,16 +383,14 @@ async fn run_crawl_async(
     let has_existing_file_failures = !label_add_output.failures.is_empty();
     let had_embed_failures = pipeline_failures.has_failures();
 
-    // Phase 4: Label reassignment cleanup (conditional)
+    // Label reassignment cleanup (conditional)
     // Skip cleanup if: per-chunk failures, embed failures, OR structural phase errors.
-    // Structural errors (from run_embed_upload_pipeline or run_upsert_without_vectors)
-    // are captured in vector_phase_error but weren't gating cleanup - this is the bug fix.
     if should_skip_label_cleanup(
         has_existing_file_failures,
         had_embed_failures,
         vector_phase_error.is_some(),
     ) {
-        println!("🔶 Phase 4: SKIPPING label reassignment cleanup (crawl had failures)");
+        println!("🔶 SKIPPING label reassignment cleanup (crawl had failures)");
         println!("  This is intentional - cleanup should only run after successful crawls.");
         println!("  Run the crawl again to complete indexing and trigger cleanup.");
         phase_results.label_reassignment_succeeded = false;
@@ -410,7 +408,7 @@ async fn run_crawl_async(
     }
     println!();
 
-    // Phase 5: FTS indexing (conditional on selection and prior success)
+    // FTS indexing (conditional on selection and prior success)
     if fts_in_selection && phase_results.label_reassignment_succeeded {
         match run_fts_phase(db_path, label_id, &chunk_storage, is_commit_mode, debug).await {
             Ok(()) => {
@@ -523,7 +521,7 @@ async fn run_crawl_async(
 
 /// Determines whether label cleanup should be skipped due to failures.
 ///
-/// Label cleanup (Phase 4) should only run after fully successful crawls.
+/// Label cleanup should only run after fully successful crawls.
 /// This predicate gates cleanup on:
 /// - Per-chunk label-add failures (existing files that couldn't be updated)
 /// - Per-chunk embed failures (individual chunks that failed to embed)
@@ -532,7 +530,7 @@ async fn run_crawl_async(
 /// # Arguments
 /// * `has_existing_file_failures` - True if any existing-file label-add failed
 /// * `had_embed_failures` - True if any per-chunk embedding failed
-/// * `vector_phase_error_present` - True if a structural error occurred in Phase 3
+/// * `vector_phase_error_present` - True if a structural error occurred during embed-and-upsert
 ///
 /// # Returns
 /// `true` if cleanup should be skipped, `false` if it should proceed.
@@ -569,7 +567,6 @@ mod tests {
     #[test]
     fn test_should_skip_label_cleanup_structural_error() {
         // Structural vector_phase_error present: skip cleanup
-        // This is the new case this jobsheet is fixing
         assert!(should_skip_label_cleanup(false, false, true));
     }
 

@@ -95,7 +95,7 @@ fn chunk_to_row(chunk: &Chunk) -> ChunkRow {
 
 /// Test that upsert_with_vectors merges active_label_ids instead of replacing.
 ///
-/// This verifies the active_label_ids preservation invariant (decision #15):
+/// This verifies the active_label_ids preservation invariant:
 /// when upserting a row that already exists, the incoming active_label_ids
 /// should be unioned with the existing labels, not replace them.
 ///

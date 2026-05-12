@@ -21,7 +21,7 @@ use anyhow::anyhow;
 use std::collections::{BTreeSet, HashMap};
 
 // =============================================================================
-// Collection types (Stage 2)
+// Collection types
 // =============================================================================
 
 /// The result of collecting hits from a single retrieval method.
@@ -47,8 +47,7 @@ pub enum FtsCollectOutcome {
 ///
 /// Discards the `ChunkRow` payload from `ScoredChunkRow` (keeping only `row_id`
 /// and distance for `MethodHit`). The orchestration layer's bulk hydration step
-/// re-fetches chunk data later. This is intentional: it keeps the engine API
-/// unchanged and provides uniform handling between FTS and vector paths.
+/// re-fetches chunk data later. This is intentional: it keeps engine-API handling uniform between FTS and vector paths.
 pub fn collect_vector(results: Vec<ScoredChunkRow>, limit: usize) -> CollectedMethod {
     let saturated = results.len() >= limit;
     let hits: Vec<MethodHit> = results

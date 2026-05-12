@@ -41,7 +41,6 @@ pub struct Chunk {
     /// Breadcrumb path (e.g., "@rushstack/node-core-library:JsonFile.ts:JsonFile.load")
     pub breadcrumb: String,
 
-    // --- Phase 2: Label-aware indexing fields ---
     /// All labels this chunk belongs to (authoritative)
     pub active_label_ids: Vec<String>,
 
@@ -84,7 +83,7 @@ impl Chunk {
     }
 }
 
-/// Context needed for chunking with Phase 2 schema
+/// Context needed for chunking.
 pub struct ChunkContext {
     /// Catalog name
     pub catalog: String,
@@ -101,8 +100,6 @@ pub struct ChunkContext {
 }
 
 /// Chunks file content based on its type
-///
-/// This is the new content-based chunking API for Phase 2.
 ///
 /// # Arguments
 ///
@@ -195,7 +192,7 @@ where
 }
 
 impl Chunk {
-    /// Create a chunk from a PartitionedChunk with Phase 2 fields
+    /// Create a chunk from a PartitionedChunk
     fn from_partitioned(
         p: PartitionedChunk,
         file_id: &str,
@@ -214,7 +211,6 @@ impl Chunk {
             chunk_type: p.chunk_type,
             chunk_kind: p.chunk_kind,
             breadcrumb: p.breadcrumb,
-            // Phase 2 fields
             active_label_ids: vec![ctx.label_id.clone()],
             embedder_id: EMBEDDER_ID.to_string(),
             chunker_id: CHUNKER_ID.to_string(),
@@ -283,7 +279,6 @@ fn chunk_by_lines(
                 chunk_type: chunk_type.to_string(),
                 chunk_kind: "content".to_string(),
                 breadcrumb: encoded_file_name.clone(),
-                // Phase 2 fields
                 active_label_ids: vec![ctx.label_id.clone()],
                 embedder_id: EMBEDDER_ID.to_string(),
                 chunker_id: CHUNKER_ID.to_string(),
