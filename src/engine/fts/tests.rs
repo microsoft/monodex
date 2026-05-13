@@ -12,6 +12,7 @@ use anyhow::Result;
 use tempfile::TempDir;
 
 use crate::engine::fts::index::FtsIndex;
+use crate::engine::fts::index::FtsOpenExistingOutcome;
 use crate::engine::fts::indexing::index_chunks_for_fts;
 use crate::engine::fts::manifest::{FtsManifest, ManifestRead, read_manifest, write_manifest};
 use crate::engine::fts::search::{FtsSearchOutcome, fts_search};
@@ -194,6 +195,9 @@ async fn test_fts_index_with_chunks_ranked_results() -> Result<()> {
         }
         FtsSearchOutcome::NoIndex => panic!("Expected Found, got NoIndex"),
         FtsSearchOutcome::ParseError(msg) => panic!("Expected Found, got ParseError: {}", msg),
+        FtsSearchOutcome::Stale { reason } => {
+            panic!("Expected Found, got Stale: {:?}", reason)
+        }
     }
 
     Ok(())
@@ -391,8 +395,14 @@ async fn test_zero_token_chunk_excluded_from_manifest() -> Result<()> {
     );
 
     // Verify the manifest contains only the normal chunk's row_id
-    let fts_index = FtsIndex::open_existing(db_path, &label_id)?
-        .expect("FTS index should exist after indexing");
+    use crate::engine::fts::index::FtsOpenExistingOutcome;
+    let fts_index = match FtsIndex::open_existing(db_path, &label_id)? {
+        FtsOpenExistingOutcome::Open(index) => index,
+        FtsOpenExistingOutcome::NoIndex => panic!("FTS index should exist after indexing"),
+        FtsOpenExistingOutcome::Stale { reason } => {
+            panic!("FTS index should not be stale, got: {:?}", reason)
+        }
+    };
     match fts_index.read_manifest() {
         ManifestRead::Present(m) => {
             assert_eq!(m.row_ids.len(), 1, "Manifest should have exactly 1 row_id");
@@ -450,6 +460,9 @@ async fn test_fts_search_parse_error() -> Result<()> {
             panic!("Expected ParseError for invalid query, got Found with results");
         }
         FtsSearchOutcome::NoIndex => panic!("Expected ParseError, got NoIndex"),
+        FtsSearchOutcome::Stale { reason } => {
+            panic!("Expected ParseError, got Stale: {:?}", reason)
+        }
     }
 
     Ok(())
@@ -467,9 +480,13 @@ fn test_open_existing_returns_none_for_missing() -> Result<()> {
 
     // Don't create any FTS directory
 
+    use crate::engine::fts::index::FtsOpenExistingOutcome;
     let result = FtsIndex::open_existing(db_path, &label_id)?;
 
-    assert!(result.is_none(), "Expected None for missing index");
+    assert!(
+        matches!(result, FtsOpenExistingOutcome::NoIndex),
+        "Expected NoIndex for missing index"
+    );
 
     Ok(())
 }
@@ -535,7 +552,11 @@ async fn test_manifest_reconciles_when_set_differs() -> Result<()> {
         fts_tokenizer_id: FTS_TOKENIZER_ID.to_string(),
         row_ids: bogus_row_ids.into_iter().collect(),
     };
-    let fts_index = FtsIndex::open_existing(db_path, &label_id)?.expect("index exists");
+    use crate::engine::fts::index::FtsOpenExistingOutcome;
+    let fts_index = match FtsIndex::open_existing(db_path, &label_id)? {
+        FtsOpenExistingOutcome::Open(index) => index,
+        _ => panic!("index should exist"),
+    };
     fts_index.write_manifest(&bogus_manifest)?;
 
     // Verify the bogus manifest was written
@@ -641,7 +662,10 @@ async fn test_manifest_reconciles_same_cardinality_different_rows() -> Result<()
         fts_tokenizer_id: FTS_TOKENIZER_ID.to_string(),
         row_ids: bogus_row_ids.into_iter().collect(),
     };
-    let fts_index = FtsIndex::open_existing(db_path, &label_id)?.expect("index exists");
+    let fts_index = match FtsIndex::open_existing(db_path, &label_id)? {
+        FtsOpenExistingOutcome::Open(index) => index,
+        _ => panic!("index should exist"),
+    };
     fts_index.write_manifest(&bogus_manifest)?;
 
     // Verify the bogus manifest was written with 10 row_ids

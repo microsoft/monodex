@@ -53,6 +53,22 @@ pub enum SearchWarning {
         label: String,
         source_pointer: String,
     },
+    /// FTS index is stale (manifest mismatch) after upgrade, no fallback available (FTS-only path).
+    FtsStaleNoFallback {
+        catalog: String,
+        label: String,
+        source_pointer: String,
+    },
+    /// FTS index is stale (manifest mismatch) after upgrade, falling back to vector-only (hybrid path).
+    FtsStaleDegrade {
+        catalog: String,
+        label: String,
+        source_pointer: String,
+    },
+    /// FTS index manifest is unreadable (corrupted), no fallback available (FTS-only path).
+    FtsManifestUnreadableNoFallback { catalog: String, label: String },
+    /// FTS index manifest is unreadable (corrupted), falling back to vector-only (hybrid path).
+    FtsManifestUnreadableDegrade { catalog: String, label: String },
     /// A chunk in the FTS index was not found in LanceDB (stale state).
     StaleHydration { row_id: String },
 }
@@ -336,6 +352,60 @@ fn render_warning<W: Write>(writer: &mut W, warning: &SearchWarning) -> io::Resu
                 writer,
                 "⚠️  Chunk {} in FTS index but not in LanceDB (stale state), skipping",
                 row_id
+            )?;
+        }
+        SearchWarning::FtsStaleNoFallback {
+            catalog,
+            label,
+            source_pointer,
+        } => {
+            writeln!(
+                writer,
+                "⚠️  FTS index for {}:{} was built against an older Monodex version and cannot be queried safely.",
+                catalog, label
+            )?;
+            writeln!(
+                writer,
+                "   Re-crawl with: monodex crawl --catalog {} --label {} {}",
+                catalog, label, source_pointer
+            )?;
+        }
+        SearchWarning::FtsStaleDegrade {
+            catalog,
+            label,
+            source_pointer,
+        } => {
+            writeln!(
+                writer,
+                "⚠️  FTS index for {}:{} was built against an older Monodex version and cannot be queried safely; falling back to vector-only.",
+                catalog, label
+            )?;
+            writeln!(
+                writer,
+                "   Re-crawl with: monodex crawl --catalog {} --label {} {}",
+                catalog, label, source_pointer
+            )?;
+        }
+        SearchWarning::FtsManifestUnreadableNoFallback { catalog, label } => {
+            writeln!(
+                writer,
+                "⚠️  FTS index for {}:{} is in an inconsistent state (manifest unreadable).",
+                catalog, label
+            )?;
+            writeln!(
+                writer,
+                "   Re-crawling may resolve this; if it does not, run `monodex init-db --delete-everything` and re-crawl."
+            )?;
+        }
+        SearchWarning::FtsManifestUnreadableDegrade { catalog, label } => {
+            writeln!(
+                writer,
+                "⚠️  FTS index for {}:{} is in an inconsistent state (manifest unreadable); falling back to vector-only.",
+                catalog, label
+            )?;
+            writeln!(
+                writer,
+                "   Re-crawling may resolve this; if it does not, run `monodex init-db --delete-everything` and re-crawl."
             )?;
         }
     }

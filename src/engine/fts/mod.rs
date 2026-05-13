@@ -19,7 +19,7 @@ pub mod tokenizer;
 #[cfg(test)]
 mod tests;
 
-pub use index::{FTS_HEAP_BUDGET_BYTES, FtsIndex};
+pub use index::{FTS_HEAP_BUDGET_BYTES, FtsIndex, FtsOpenExistingOutcome, FtsStaleReason};
 pub use indexing::{FtsIndexingStats, index_chunks_for_fts};
 pub use manifest::{FtsManifest, ManifestRead};
 pub use schema::{FtsSchemaFields, fts_schema, get_fts_fields};

@@ -40,6 +40,9 @@ pub struct CollectedMethod {
 pub enum FtsCollectOutcome {
     Collected(CollectedMethod),
     NoIndex,
+    Stale {
+        reason: crate::engine::fts::FtsStaleReason,
+    },
     ParseError(String),
 }
 
@@ -92,6 +95,7 @@ pub async fn collect_fts(
             }))
         }
         FtsSearchOutcome::NoIndex => Ok(FtsCollectOutcome::NoIndex),
+        FtsSearchOutcome::Stale { reason } => Ok(FtsCollectOutcome::Stale { reason }),
         FtsSearchOutcome::ParseError(msg) => Ok(FtsCollectOutcome::ParseError(msg)),
     }
 }
@@ -387,6 +391,41 @@ async fn run_single_method_search<W: Write>(
                     search::render(writer, &model)?;
                     return Ok(());
                 }
+                FtsCollectOutcome::Stale { reason } => {
+                    // Handle stale FTS index - emit warning and no results
+                    use crate::engine::fts::FtsStaleReason;
+                    let source_pointer = format_source_pointer(label_metadata);
+                    let warning = match reason {
+                        FtsStaleReason::IdMismatch | FtsStaleReason::MissingManifestWithState => {
+                            SearchWarning::FtsStaleNoFallback {
+                                catalog: preamble.catalog.clone(),
+                                label: preamble.label.clone(),
+                                source_pointer,
+                            }
+                        }
+                        FtsStaleReason::UnreadableManifestWithState => {
+                            SearchWarning::FtsManifestUnreadableNoFallback {
+                                catalog: preamble.catalog.clone(),
+                                label: preamble.label.clone(),
+                            }
+                        }
+                    };
+
+                    // Render with warning and no results
+                    let mut warnings = pre_result_warnings;
+                    warnings.push(warning);
+                    let model = SearchRenderModel {
+                        preamble,
+                        pre_result_warnings: warnings,
+                        results: vec![],
+                        trailing_inline_warnings: vec![],
+                        debug,
+                        end_marker: EndMarker::NoResults,
+                        mode: search::SearchMode::SingleMethod,
+                    };
+                    search::render(writer, &model)?;
+                    return Ok(());
+                }
                 FtsCollectOutcome::ParseError(msg) => {
                     return Err(anyhow!("Couldn't parse FTS query: {}", msg));
                 }
@@ -493,6 +532,28 @@ async fn run_hybrid_search<W: Write>(
                     });
                     // Don't add to method_results, skip FTS
                 }
+            }
+            FtsCollectOutcome::Stale { reason } => {
+                // Stale FTS index - degrade to vector with warning
+                use crate::engine::fts::FtsStaleReason;
+                let source_pointer = format_source_pointer(label_metadata);
+                let warning = match reason {
+                    FtsStaleReason::IdMismatch | FtsStaleReason::MissingManifestWithState => {
+                        SearchWarning::FtsStaleDegrade {
+                            catalog: preamble.catalog.clone(),
+                            label: preamble.label.clone(),
+                            source_pointer,
+                        }
+                    }
+                    FtsStaleReason::UnreadableManifestWithState => {
+                        SearchWarning::FtsManifestUnreadableDegrade {
+                            catalog: preamble.catalog.clone(),
+                            label: preamble.label.clone(),
+                        }
+                    }
+                };
+                search_warnings.push(warning);
+                // Don't add to method_results, skip FTS
             }
             FtsCollectOutcome::ParseError(msg) => {
                 // Hard error - fail fast before embedder construction
