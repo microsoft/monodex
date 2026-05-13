@@ -75,7 +75,7 @@ export function add(a: number, b: number): number {
         allow_fallback: false,
         ..Default::default()
     };
-    let chunks = partition_typescript(source, &config, "test.ts", "test");
+    let chunks = partition_typescript(source, &config, "test.ts", "test").unwrap();
 
     let visualization = format_chunks_visualization(source, &chunks);
     assert_snapshot!("simple_function_visualization", visualization);
@@ -119,7 +119,7 @@ export class Calculator {
         allow_fallback: false,
         ..Default::default()
     };
-    let chunks = partition_typescript(source, &config, "Calculator.ts", "math");
+    let chunks = partition_typescript(source, &config, "Calculator.ts", "math").unwrap();
 
     let visualization = format_chunks_visualization(source, &chunks);
     assert_snapshot!("class_with_methods_visualization", visualization);
@@ -137,7 +137,7 @@ fn test_jsonfile_partition() {
         allow_fallback: false,
         ..Default::default()
     };
-    let chunks = partition_typescript(source, &config, "JsonFile.ts", "node-core-library");
+    let chunks = partition_typescript(source, &config, "JsonFile.ts", "node-core-library").unwrap();
 
     let visualization = format_chunks_visualization(source, &chunks);
     assert_snapshot!("jsonfile_visualization", visualization);
@@ -161,7 +161,7 @@ export function tiny(): number {
         allow_fallback: false,
         ..Default::default()
     };
-    let chunks = partition_typescript(source, &config, "tiny.ts", "test");
+    let chunks = partition_typescript(source, &config, "tiny.ts", "test").unwrap();
 
     let visualization = format_chunks_visualization(source, &chunks);
     assert_snapshot!("small_file_visualization", visualization);
@@ -181,7 +181,8 @@ fn test_small_file_should_not_split() {
         allow_fallback: false,
         ..Default::default()
     };
-    let chunks = partition_typescript(source, &config, "rollup.d.ts", "api-extractor-scenarios");
+    let chunks =
+        partition_typescript(source, &config, "rollup.d.ts", "api-extractor-scenarios").unwrap();
 
     let visualization = format_chunks_visualization(source, &chunks);
     assert_snapshot!("rollup_visualization", visualization);
@@ -206,7 +207,8 @@ fn test_tunneled_browser_connection() {
         &config,
         "TunneledBrowserConnection.ts",
         "playwright-browser-tunnel",
-    );
+    )
+    .unwrap();
 
     let visualization = format_chunks_visualization(source, &chunks);
     assert_snapshot!("tunneled_visualization", visualization);
@@ -237,7 +239,7 @@ fn test_long_template_string_fallback() {
         allow_fallback: true, // This test explicitly tests fallback behavior
         ..Default::default()
     };
-    let chunks = partition_typescript(&source, &config, "long_string.ts", "test");
+    let chunks = partition_typescript(&source, &config, "long_string.ts", "test").unwrap();
 
     let visualization = format_chunks_visualization(&source, &chunks);
     assert_snapshot!("long_string_visualization", visualization);
@@ -274,7 +276,7 @@ fn test_colorize_class_with_enum() {
         allow_fallback: false,
         ..Default::default()
     };
-    let chunks = partition_typescript(source, &config, "Colorize.ts", "terminal");
+    let chunks = partition_typescript(source, &config, "Colorize.ts", "terminal").unwrap();
 
     let visualization = format_chunks_visualization(source, &chunks);
     assert_snapshot!("colorize_visualization", visualization);
@@ -304,7 +306,8 @@ fn test_ipackagejson_interface_file() {
         allow_fallback: false,
         ..Default::default()
     };
-    let chunks = partition_typescript(source, &config, "IPackageJson.ts", "node-core-library");
+    let chunks =
+        partition_typescript(source, &config, "IPackageJson.ts", "node-core-library").unwrap();
 
     let visualization = format_chunks_visualization(source, &chunks);
     assert_snapshot!("ipackagejson_visualization", visualization);
@@ -339,7 +342,8 @@ fn test_environment_configuration() {
         allow_fallback: false,
         ..Default::default()
     };
-    let chunks = partition_typescript(source, &config, "EnvironmentConfiguration.ts", "rush-lib");
+    let chunks =
+        partition_typescript(source, &config, "EnvironmentConfiguration.ts", "rush-lib").unwrap();
 
     let visualization = format_chunks_visualization(source, &chunks);
     assert_snapshot!("environment_config_visualization", visualization);
@@ -373,7 +377,7 @@ fn test_nested_functions_in_generator() {
         allow_fallback: false,
         ..Default::default()
     };
-    let chunks = partition_typescript(source, &config, "NestedFunctions.ts", "test");
+    let chunks = partition_typescript(source, &config, "NestedFunctions.ts", "test").unwrap();
 
     let visualization = format_chunks_visualization(source, &chunks);
     assert_snapshot!("nested_functions_visualization", visualization);
@@ -407,7 +411,7 @@ fn test_git_status_parser() {
         allow_fallback: false,
         ..Default::default()
     };
-    let chunks = partition_typescript(source, &config, "GitStatusParser.ts", "rush-lib");
+    let chunks = partition_typescript(source, &config, "GitStatusParser.ts", "rush-lib").unwrap();
 
     let visualization = format_chunks_visualization(source, &chunks);
     assert_snapshot!("git_status_parser_visualization", visualization);
@@ -517,7 +521,7 @@ fn test_project_watcher() {
         allow_fallback: false,
         ..Default::default()
     };
-    let chunks = partition_typescript(source, &config, "ProjectWatcher.ts", "rush-lib");
+    let chunks = partition_typescript(source, &config, "ProjectWatcher.ts", "rush-lib").unwrap();
 
     let visualization = format_chunks_visualization(source, &chunks);
     assert_snapshot!("project_watcher_visualization", visualization);
@@ -552,7 +556,8 @@ fn test_parameter_form_tsx() {
         &config,
         "ParameterForm.tsx",
         "@rushstack/rush-vscode-command-webview",
-    );
+    )
+    .unwrap();
 
     let visualization = format_chunks_visualization(source, &chunks);
     assert_snapshot!("parameter_form_visualization", visualization);
@@ -587,7 +592,8 @@ fn test_experiments_configuration() {
         &config,
         "ExperimentsConfiguration.ts",
         "@microsoft/rush-lib",
-    );
+    )
+    .unwrap();
 
     let visualization = format_chunks_visualization(source, &chunks);
     assert_snapshot!("experiments_configuration_visualization", visualization);
@@ -627,7 +633,8 @@ fn test_documented_interface() {
         &config,
         "IYamlApiFile.ts",
         "@microsoft/api-documenter",
-    );
+    )
+    .unwrap();
 
     let visualization = format_chunks_visualization(source, &chunks);
     assert_snapshot!("iyaml_api_file_visualization", visualization);
@@ -668,7 +675,8 @@ fn test_module_minifier_plugin() {
         &config,
         "ModuleMinifierPlugin.ts",
         "@rushstack/webpack5-module-minifier-plugin",
-    );
+    )
+    .unwrap();
 
     let visualization = format_chunks_visualization(source, &chunks);
     assert_snapshot!("module_minifier_plugin_visualization", visualization);
@@ -705,7 +713,8 @@ fn test_parameter_form_tsx_large() {
         &config,
         "ParameterForm.tsx",
         "@rushstack/rush-vscode-command-webview",
-    );
+    )
+    .unwrap();
 
     let visualization = format_chunks_visualization(source, &chunks);
     assert_snapshot!("parameter_form_large_visualization", visualization);
@@ -741,7 +750,8 @@ fn test_generate_patched_file() {
         &config,
         "generate-patched-file.ts",
         "@rushstack/eslint-patch",
-    );
+    )
+    .unwrap();
 
     let visualization = format_chunks_visualization(source, &chunks);
     assert_snapshot!("generate_patched_file_visualization", visualization);
@@ -772,7 +782,7 @@ export function hello(): string {
         allow_fallback: false,
         ..Default::default()
     };
-    let chunks = partition_typescript(source, &config, "weird:file.ts", "test-catalog");
+    let chunks = partition_typescript(source, &config, "weird:file.ts", "test-catalog").unwrap();
 
     // There should be exactly one chunk (the function)
     assert!(!chunks.is_empty(), "Expected at least one chunk");

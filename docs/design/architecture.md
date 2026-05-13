@@ -46,7 +46,7 @@ The `embedder_id` and `chunker_id` constants live in `src/engine/util.rs`. Bumpi
 
 Chunk 1 of each file is the sentinel: the row with `chunk_ordinal = 1` is also the only row with `file_complete = true` once the file finishes indexing. The crawl checks for the sentinel row by `row_id` lookup; if the file qualifies for the fast path, the file is skipped, and only `active_label_ids` is updated to add the current label. This is what makes re-crawling cheap.
 
-This file-enumeration fast path serves the vector phase. Under nullable-vector chunks, the qualification predicate is "sentinel exists, `file_complete = true`, and the sentinel row's `vector` column is non-NULL"; the last clause is necessary because an FTS-only crawl can produce complete sentinels with NULL vectors, which a later vector crawl must not skip. The writer maintains the invariant that all chunks of a file are in the same vector-presence state when the sentinel flips complete, so checking the sentinel row's `vector` is sufficient proof for the whole file.
+This file-enumeration fast path serves the vector phase. Under nullable-vector chunks, the qualification predicate is "sentinel exists, `file_complete = true`, and the sentinel row's `vector` column is non-NULL"; the last clause is necessary because an FTS-only crawl can produce complete sentinels with NULL vectors, which a later vector crawl must not skip. The per-file invariant that all chunks of a file have the same vector-presence state when the sentinel flips complete is a known transient gap until BL103 lands; see [crawl.md](./crawl.md) for details.
 
 The FTS phase does not enumerate files. It is a batch reconciliation, run once after the file-processing pass: read the label's chunks from LanceDB, diff against the per-label staleness manifest, apply additions and removals to the Tantivy index, commit. The manifest makes the diff cheap; it is not a per-file skip predicate.
 
@@ -55,14 +55,14 @@ The FTS phase does not enumerate files. It is a batch reconciliation, run once a
 A crawl run, end to end:
 
 1. **Label upsert**: Resolve `--commit` to a full SHA (or note that this is a `--working-dir` run); update the label's retrieval selection from `--retrieval` (set per-method `source` columns to the resolved commit, NULL out methods being dropped) and mark each in-selection method's `complete` flag false.
-2. **Tree visitor**: Enumerate files from the commit tree or walk the working directory.
-3. **Package indexing**: Build the package index, a map from directory paths to package names, by reading every `package.json` in the tree.
+2. **Tree visitor**: Enumerate files from the commit tree or from the working-directory blob map (`git ls-files` + `git status`).
+3. **Package indexing**: Build the package index, a map from directory paths to package names, by reading every Git-tracked `package.json` in the source.
 4. **File processing**: For each file: compute `file_id`, check the sentinel, and either skip-with-label-add or read-chunk-embed-upsert.
 5. **Label reassignment**: After all files succeed, scan chunks tagged with this label, drop the label from any whose `file_id` wasn't touched, and delete chunks whose `active_label_ids` becomes empty.
 6. **FTS phase**: If `fts` is in the new retrieval selection, batch-reconcile the per-label Tantivy index against the label's current chunks. Diff via the staleness manifest, apply additions and removals, commit once. Schema/tokenizer ID mismatch on existing FTS state triggers a per-label rebuild.
 7. **Crawl finalization**: For each method whose phase completed successfully, mark its `complete` flag true.
 
-Step 5 only runs after a fully successful crawl. An interrupted crawl leaves stale chunks in the label, which the next successful crawl cleans up. Step 6 only runs if step 5 succeeded; step 7 finalizes whatever subset of methods reached completion. See [crawl.md](./crawl.md) for the working-directory identity model, the package-index implementation, the manifest reconciliation rule, and per-file vector-presence invariant enforcement during FTS-only reprocess. The named steps above are the same vocabulary `crawl.md` uses for its detail sections.
+Step 5 only runs after a fully successful crawl. An interrupted crawl leaves stale chunks in the label, which the next successful crawl cleans up. Step 6 only runs if step 5 succeeded; step 7 finalizes whatever subset of methods reached completion. See [crawl.md](./crawl.md) for the working-directory identity model, the package-index implementation, the manifest reconciliation rule, and the FTS-only crawl path's vector-preservation rule. The named steps above are the same vocabulary `crawl.md` uses for its detail sections.
 
 Concurrent operations against the database (multiple writers, readers running during a crawl) are coordinated by a writer-lock layer; the lock taxonomy and reader semantics are in [concurrency.md](./concurrency.md).
 
@@ -112,14 +112,14 @@ Application-layer code, CLI-specific. Not reusable as a library.
 - `config.rs`: Load and validate `config.json` (catalogs, database path, embedding-model knobs). Contains the `Config` and `DatabaseConfig` structs and the resolver that picks the database path.
 - `context.rs`: Persist and resolve the default catalog/label set by `monodex use`. Owns the `DefaultContext` struct and read/write to `<tool-home>/context.json`.
 - `search.rs`: Search-output renderer. Takes a `&mut dyn Write` and emits preamble, warnings, results, debug continuations, and end-of-results sentinels in a fixed order. The single-writer routing is what makes search-time output testable from byte buffers; see [search.md](../design/search.md) for the output-ordering rule.
-- `util.rs`: Formatting and display helpers: timestamps, durations, byte sizes, terminal sanitization for search output, warning-state persistence, chunk-selector parsing, and `format_source_pointer` for warning remediation strings.
+- `util.rs`: Formatting and display helpers: timestamps, durations, byte sizes, terminal sanitization for search output, chunk-selector parsing, and `format_source_pointer` for warning remediation strings.
 
 ### src/app/commands/
 
 One file per CLI subcommand handler. Most are thin: parse args, call into the engine, format output.
 
 - `audit_chunks.rs`: `audit-chunks`: sample TypeScript files from a directory and report aggregate chunk-quality scores. AST-only mode.
-- `crawl.rs`: `crawl`: enumerate files (commit tree or working dir), drive the embed/upload pipeline, run label reassignment after success, persist warnings.
+- `crawl.rs`: `crawl`: enumerate files (commit tree or working dir), drive the embed/upload pipeline, run label reassignment after success.
 - `debug_fts.rs`: `debug-fts`: print tokens for a chunk and optionally explain query ranking. Diagnostic for FTS tokenization issues.
 - `dump_chunks.rs`: `dump-chunks`: visualize partitioner output for a single file. Supports debug, visualize, and with-fallback modes.
 - `init_db/`: `init-db`: create or validate a database directory, write the LanceDB tables, create the empty `fts/` directory, write `monodex-meta.json`, and handle `--delete-everything`.
@@ -154,7 +154,7 @@ Reusable indexing engine. Does not depend on `src/app/`.
 - `search_decision.rs`: Pure function `decide(metadata, requested) -> Decision`. Computes the active subset, applies the decision table, returns a structured `Decision` outcome (`SingleMethod`, `Hybrid`, `Error`) with structured `DecisionWarning`s. No I/O, no backend dispatch; unit-testable in isolation. The orchestrator translates `DecisionWarning`s into pre-formatted `SearchWarning`s before passing them to the renderer.
 - `system_info.rs`: Detect total RAM, cgroup limits, CPU cores. Implements the `"auto"` heuristic for embedding-model `modelInstances` and `threadsPerInstance`. Cgroup-aware so containerized installs warn correctly.
 - `util.rs`: Hash utilities: `compute_file_id` (xxhash of embedder/chunker/catalog/blob/path), `compute_row_id`, `compute_hash`. Holds the four versioning constants: `EMBEDDER_ID` and `CHUNKER_ID` (participate in `file_id`; bumping forces re-vectorization), `FTS_SCHEMA_ID` and `FTS_TOKENIZER_ID` (do not participate in `file_id`; bumping invalidates only FTS state).
-- `warning.rs`: `CrawlWarning` enum for in-flight crawl events and `DecisionWarning` enum for search-decision events translated to `SearchWarning` by the app layer. Distinct from the on-disk `<database-dir>/warnings-<catalog>.json` file, which tracks chunker-fallback paths.
+- `warning.rs`: `CrawlWarning` enum for in-flight crawl events and `DecisionWarning` enum for search-decision events translated to `SearchWarning` by the app layer.
 - `working_dir_sentinel.rs`: Generate per-crawl-unique sentinel strings for working-directory crawls.
 
 ### src/engine/fts/
@@ -204,7 +204,7 @@ LanceDB storage layer. Typed operations on the two tables.
 
 Sub-module for chunk-table operations, separated from the rest of `storage/` because it's larger than the others and has its own tests file.
 
-- `mod.rs`: Upsert-with-vectors, upsert-without-vectors, vector search, label-membership add/remove, per-file chunk lookup, sentinel checks, row-id hydration, deletion, truncation, and `null_vectors_for_row_ids` for the FTS-only slow path; see [crawl.md](./crawl.md) for the vector-presence invariant.
+- `mod.rs`: Upsert-with-vectors, upsert-without-vectors, vector search, label-membership add/remove, per-file chunk lookup, sentinel checks, row-id hydration, deletion, truncation; see [crawl.md](./crawl.md) for the vector-presence invariant.
 
 ## All markdown files in this repo
 

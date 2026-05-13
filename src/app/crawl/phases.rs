@@ -143,8 +143,6 @@ pub struct ClassifyOutput {
 pub async fn classify_files(
     files: &[FileEntry],
     chunk_storage: &ChunkStorage,
-    prior_warning_files: &HashSet<String>,
-    incremental_warnings: bool,
     catalog_name: &str,
     vector_in_selection: bool,
     warnings: WarningSink<'_>,
@@ -157,10 +155,6 @@ pub async fn classify_files(
     let mut existing_count = 0;
 
     for file_entry in files {
-        // When incremental_warnings is false and file had prior warning, force reprocessing
-        let force_reprocess =
-            !incremental_warnings && prior_warning_files.contains(&file_entry.relative_path);
-
         let file_id = crate::engine::util::compute_file_id(
             crate::engine::util::EMBEDDER_ID,
             crate::engine::util::CHUNKER_ID,
@@ -168,13 +162,6 @@ pub async fn classify_files(
             &file_entry.blob_id,
             &file_entry.relative_path,
         );
-
-        if force_reprocess {
-            // Treat as new file to re-chunk and re-index
-            new_files.push(file_entry.clone());
-            new_count += 1;
-            continue;
-        }
 
         // Check sentinel status (includes vector presence check)
         let sentinel_row_id = format!("{}:1", file_id);
@@ -389,7 +376,13 @@ pub fn chunk_new_files(
 
         let content_str = match String::from_utf8(content) {
             Ok(s) => s,
-            Err(_) => continue,
+            Err(_) => {
+                warnings(CrawlWarning::FileReadFailed {
+                    relative_path: file_entry.relative_path.clone(),
+                    error: "non-UTF-8 file contents".to_string(),
+                });
+                continue;
+            }
         };
 
         let package_name = package_index
@@ -791,25 +784,6 @@ pub fn print_narrowing_announcement(
     }
 }
 
-/// Saves warning state to disk.
-pub fn save_warning_state(
-    db_path: &std::path::Path,
-    catalog_name: &str,
-    crawl_warning_files: &HashSet<String>,
-    prior_warning_files: &HashSet<String>,
-    incremental_warnings: bool,
-) -> Result<Vec<String>> {
-    let mut next_warning_files: HashSet<String> = HashSet::new();
-    next_warning_files.extend(crawl_warning_files.iter().cloned());
-    if incremental_warnings {
-        next_warning_files.extend(prior_warning_files.iter().cloned());
-    }
-    let mut sorted_warning_files: Vec<String> = next_warning_files.iter().cloned().collect();
-    sorted_warning_files.sort();
-    crate::app::save_warning_state(db_path, catalog_name, &sorted_warning_files)?;
-    Ok(sorted_warning_files)
-}
-
 /// Prints the warning summary.
 pub fn print_warning_summary(crawl_warning_files: &HashSet<String>) {
     if crawl_warning_files.is_empty() {
@@ -1053,6 +1027,99 @@ mod tests {
             output_str.contains("failed"),
             "Summary should mention failure, got: {}",
             output_str
+        );
+    }
+
+    /// Test that chunk_new_files emits a warning for non-UTF-8 file contents.
+    ///
+    /// This verifies the fix for BL17: files whose bytes are not valid UTF-8
+    /// emit a CrawlWarning::FileReadFailed with error "non-UTF-8 file contents".
+    #[test]
+    fn test_chunk_new_files_emits_warning_for_non_utf8() {
+        use crate::engine::crawl_config::get_default_crawl_config;
+        use crate::engine::git_ops::{BlobSource, FileEntry, PackageIndex};
+        use crate::engine::identifier::LabelId;
+        use std::cell::Cell;
+        use std::path::Path;
+
+        // A mock BlobSource that returns non-UTF-8 bytes for any file
+        struct MockBlobSource;
+
+        impl BlobSource for MockBlobSource {
+            fn enumerate(&self) -> anyhow::Result<Vec<FileEntry>> {
+                Ok(vec![])
+            }
+
+            fn read_content(&self, _file: &FileEntry) -> anyhow::Result<Vec<u8>> {
+                // Return bytes that are NOT valid UTF-8
+                Ok(vec![0xFF, 0xFE, 0x00, 0x01])
+            }
+
+            fn build_package_index(&self) -> anyhow::Result<PackageIndex> {
+                Ok(PackageIndex::new())
+            }
+        }
+
+        // Create a file entry for the non-UTF-8 file
+        let file_entry = FileEntry {
+            relative_path: "bad-file.bin".to_string(),
+            blob_id: "abc123".to_string(),
+        };
+
+        let blob_source = MockBlobSource;
+        let package_index = PackageIndex::new();
+        let crawl_config = get_default_crawl_config()
+            .compile()
+            .expect("Default config should compile");
+        let label_id = LabelId::new("test-catalog", "test-label").unwrap();
+        let repo_path = Path::new("/tmp/test-repo");
+        let warning_counter = Cell::new(0);
+
+        // Collect warnings
+        let mut warnings: Vec<CrawlWarning> = Vec::new();
+        let result = chunk_new_files(
+            &[file_entry],
+            &blob_source,
+            &package_index,
+            &crawl_config,
+            "test-catalog",
+            &label_id,
+            repo_path,
+            1,
+            false, // vector_in_selection
+            &warning_counter,
+            &mut |w| warnings.push(w),
+        );
+
+        // The function should succeed (no panic/crash)
+        assert!(result.is_ok(), "chunk_new_files should succeed");
+
+        // Exactly one warning should be emitted
+        assert_eq!(warnings.len(), 1, "Expected exactly one warning");
+
+        // The warning should be FileReadFailed with the correct path and error
+        match &warnings[0] {
+            CrawlWarning::FileReadFailed {
+                relative_path,
+                error,
+            } => {
+                assert_eq!(
+                    relative_path, "bad-file.bin",
+                    "Warning should reference the correct file path"
+                );
+                assert_eq!(
+                    error, "non-UTF-8 file contents",
+                    "Error message should indicate non-UTF-8 contents"
+                );
+            }
+            other => panic!("Expected FileReadFailed warning, got: {:?}", other),
+        }
+
+        // No chunks should be produced for the non-UTF-8 file
+        let output = result.unwrap();
+        assert!(
+            output.chunks.is_empty(),
+            "No chunks should be produced for non-UTF-8 file"
         );
     }
 }

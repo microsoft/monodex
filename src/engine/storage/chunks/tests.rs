@@ -865,11 +865,7 @@ async fn test_upsert_without_vectors_with_progress_phases() {
 
     let events = events.lock().unwrap();
 
-    // Verify we have events from all three phases
-    let clearing_events: Vec<_> = events
-        .iter()
-        .filter(|e| e.phase == "Clearing vectors")
-        .collect();
+    // Verify we have events from both phases
     let upserting_events: Vec<_> = events
         .iter()
         .filter(|e| e.phase == "Upserting chunks")
@@ -879,28 +875,14 @@ async fn test_upsert_without_vectors_with_progress_phases() {
         .filter(|e| e.phase == "Marking file sentinels")
         .collect();
 
-    assert!(!clearing_events.is_empty(), "Should have clearing events");
     assert!(!upserting_events.is_empty(), "Should have upserting events");
     assert!(!marking_events.is_empty(), "Should have marking events");
 
-    // Verify phase order: all clearing, then all upserting, then all marking
-    let first_upsert_idx = events
-        .iter()
-        .position(|e| e.phase == "Upserting chunks")
-        .unwrap();
+    // Verify phase order: all upserting, then all marking
     let first_marking_idx = events
         .iter()
         .position(|e| e.phase == "Marking file sentinels")
         .unwrap();
-    let last_clearing_idx = events
-        .iter()
-        .rposition(|e| e.phase == "Clearing vectors")
-        .unwrap();
-
-    assert!(
-        last_clearing_idx < first_upsert_idx,
-        "Clearing should complete before upserting"
-    );
     let last_upsert_idx = events
         .iter()
         .rposition(|e| e.phase == "Upserting chunks")
@@ -924,16 +906,10 @@ async fn test_upsert_without_vectors_with_progress_phases() {
         }
     }
 
-    check_monotonic(&clearing_events);
     check_monotonic(&upserting_events);
     check_monotonic(&marking_events);
 
     // Verify final `completed == total` per phase
-    assert_eq!(
-        clearing_events.last().unwrap().completed,
-        clearing_events.last().unwrap().total,
-        "Clearing should complete all items"
-    );
     assert_eq!(
         upserting_events.last().unwrap().completed,
         upserting_events.last().unwrap().total,
@@ -946,9 +922,6 @@ async fn test_upsert_without_vectors_with_progress_phases() {
     );
 
     // Verify unit field matches documented values
-    for event in &clearing_events {
-        assert_eq!(event.unit, "chunks");
-    }
     for event in &upserting_events {
         assert_eq!(event.unit, "chunks");
     }
@@ -984,34 +957,33 @@ async fn test_upsert_without_vectors_with_progress_multi_batch() {
 
     let events = events.lock().unwrap();
 
-    // Should have 3 batches per phase = 9 events total
-    // Phase A (clearing): 1000, 2000, 2500
-    // Phase B (upserting): 1000, 2000, 2500
-    // Phase C (marking): 1000, 2000, 2500
+    // Should have 3 batches per phase = 6 events total (2 phases)
+    // Phase A (upserting): 1000, 2000, 2500
+    // Phase B (marking): 1000, 2000, 2500
     assert_eq!(
         events.len(),
-        9,
-        "Should have 9 events (3 phases x 3 batches)"
+        6,
+        "Should have 6 events (2 phases x 3 batches)"
     );
 
     // Verify the batch sizes are correct
-    let clearing_events: Vec<_> = events
+    let upserting_events: Vec<_> = events
         .iter()
-        .filter(|e| e.phase == "Clearing vectors")
+        .filter(|e| e.phase == "Upserting chunks")
         .collect();
-    assert_eq!(clearing_events.len(), 3, "Should have 3 clearing batches");
-    assert_eq!(clearing_events[0].completed, 1000);
-    assert_eq!(clearing_events[1].completed, 2000);
-    assert_eq!(clearing_events[2].completed, 2500);
-    assert_eq!(clearing_events[2].total, 2500);
+    assert_eq!(upserting_events.len(), 3, "Should have 3 upserting batches");
+    assert_eq!(upserting_events[0].completed, 1000);
+    assert_eq!(upserting_events[1].completed, 2000);
+    assert_eq!(upserting_events[2].completed, 2500);
+    assert_eq!(upserting_events[2].total, 2500);
 }
 
 /// Correctness test for `upsert_without_vectors_with_progress`.
 ///
 /// Verifies that:
-/// 1. Vectors are cleared for rows that had them (Phase A)
-/// 2. Rows are upserted correctly with the right text/active_label_ids (Phase B)
-/// 3. Only complete files have their sentinel marked file_complete=true (Phase C)
+/// 1. Vectors are preserved (Phase A now upserts, does not clear)
+/// 2. Rows are upserted correctly with the right text/active_label_ids
+/// 3. Only complete files have their sentinel marked file_complete=true
 /// 4. Partial files do NOT have their sentinel marked complete
 #[tokio::test]
 async fn test_upsert_without_vectors_with_progress_correctness() {
@@ -1050,7 +1022,7 @@ async fn test_upsert_without_vectors_with_progress_correctness() {
         }
     }
 
-    // Pre-populate storage with file A's rows having vectors (to exercise Phase A)
+    // Pre-populate storage with file A's rows having vectors
     let file_a_rows: Vec<ChunkRow> = (1..=3).map(|i| make_row("fileA", i, 3)).collect();
     let vectors: Vec<Vec<f32>> = file_a_rows
         .iter()
@@ -1103,7 +1075,7 @@ async fn test_upsert_without_vectors_with_progress_correctness() {
 
     // === Verify correctness ===
 
-    // 1. File A's rows should have vectors cleared (Phase A worked)
+    // 1. File A's rows should still have vectors (preserved, not cleared)
     for row in &file_a_rows {
         let status = storage
             .get_sentinel_status(&row.row_id)
@@ -1111,8 +1083,8 @@ async fn test_upsert_without_vectors_with_progress_correctness() {
             .unwrap()
             .unwrap();
         assert!(
-            !status.has_vector,
-            "File A row {} should have NULL vector after upsert_without_vectors",
+            status.has_vector,
+            "File A row {} should still have vector after upsert_without_vectors (vectors are preserved)",
             row.row_id
         );
     }
@@ -1156,19 +1128,130 @@ async fn test_upsert_without_vectors_with_progress_correctness() {
         "File B sentinel should NOT be marked complete (partial file)"
     );
 
-    // 5. Verify we got progress events from all phases
+    // 5. Verify we got progress events from both phases
     let events = events.lock().unwrap();
     let phases: std::collections::HashSet<_> = events.iter().map(|e| e.phase).collect();
     assert!(
-        phases.contains("Clearing vectors"),
+        phases.contains("Upserting chunks"),
         "Should have Phase A events"
     );
     assert!(
-        phases.contains("Upserting chunks"),
+        phases.contains("Marking file sentinels"),
         "Should have Phase B events"
     );
+}
+
+/// Test that upsert_without_vectors_with_progress preserves vectors from peer labels.
+///
+/// Regression test for BL10: Two labels share a row_id (same blob). Label A has
+/// vectors with vector_complete=true. An FTS-only crawl via label B re-touches
+/// the row. Label A's vectors must still be present after the crawl.
+#[tokio::test]
+async fn test_upsert_without_vectors_preserves_peer_label_vectors() {
+    let (_tmp_dir, storage) = create_test_storage().await;
+
+    // Helper to create a chunk row with specific label
+    fn make_row_with_label(row_id: &str, file_id: &str, label_id: &str) -> ChunkRow {
+        ChunkRow {
+            row_id: row_id.to_string(),
+            text: format!("Content for {}", row_id),
+            catalog: "test-catalog".to_string(),
+            active_label_ids: vec![label_id.to_string()],
+            embedder_id: "test-embedder:v1".to_string(),
+            chunker_id: "test-chunker:v1".to_string(),
+            blob_id: "shared-blob".to_string(), // Same blob for both labels
+            content_hash: "hash-shared".to_string(),
+            file_id: file_id.to_string(),
+            relative_path: "src/shared.ts".to_string(),
+            package_name: "test-package".to_string(),
+            source_uri: "/path/to/shared.ts".to_string(),
+            chunk_ordinal: 1,
+            chunk_count: 1,
+            start_line: 1,
+            end_line: 50,
+            symbol_name: Some("sharedFunc".to_string()),
+            chunk_type: "function".to_string(),
+            chunk_kind: "content".to_string(),
+            breadcrumb: Some("test-package:shared.ts:sharedFunc".to_string()),
+            split_part_ordinal: None,
+            split_part_count: None,
+            file_complete: true, // Sentinel complete for label A
+        }
+    }
+
+    // Label A: insert with vectors (vector_complete=true)
+    let label_a = "test-catalog:label-a";
+    let row_a = make_row_with_label("shared-file:1", "shared-file", label_a);
+    let mut vec = vec![0.0f32; VECTOR_DIMENSION];
+    vec[0] = 1.0; // Non-zero vector
+    storage
+        .upsert_with_vectors(std::slice::from_ref(&row_a), &[vec.clone()])
+        .await
+        .unwrap();
+
+    // Verify label A has vectors
+    let status_a = storage
+        .get_sentinel_status("shared-file:1")
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(status_a.has_vector, "Label A should have vector initially");
     assert!(
-        phases.contains("Marking file sentinels"),
-        "Should have Phase C events"
+        status_a.row.file_complete,
+        "Label A should be complete initially"
+    );
+
+    // Label B: FTS-only crawl touches the same row_id (same blob)
+    let label_b = "test-catalog:label-b";
+    let row_b = ChunkRow {
+        active_label_ids: vec![label_b.to_string()],
+        file_complete: true,
+        ..row_a.clone()
+    };
+
+    // Run FTS-only upsert (simulating FTS-only crawl via label B)
+    let sentinel_row_ids = vec!["shared-file:1".to_string()];
+    let callback = |_event: StorageProgressEvent| {};
+    storage
+        .upsert_without_vectors_with_progress(&[row_b], &sentinel_row_ids, callback)
+        .await
+        .unwrap();
+
+    // Verify label A's vectors are still present (not clobbered)
+    let status_after = storage
+        .get_sentinel_status("shared-file:1")
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        status_after.has_vector,
+        "Vectors should be preserved after FTS-only crawl via label B (BL10 regression)"
+    );
+    assert!(
+        status_after.row.file_complete,
+        "Sentinel should be marked complete"
+    );
+
+    // Verify the row now has both labels
+    let row = storage
+        .get_by_row_id("shared-file:1")
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        row.active_label_ids.contains(&label_a.to_string()),
+        "Should still have label A"
+    );
+    assert!(
+        row.active_label_ids.contains(&label_b.to_string()),
+        "Should have label B"
+    );
+
+    // Verify vector search still works (vectors weren't corrupted)
+    let results = storage.vector_search(&vec, label_a, 10).await.unwrap();
+    assert_eq!(
+        results.len(),
+        1,
+        "Vector search should still find the chunk via label A"
     );
 }

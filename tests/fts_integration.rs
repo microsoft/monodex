@@ -174,7 +174,6 @@ fn test_crawl_then_search__quick_excluded() {
             "test-catalog",
             "main",
             &commit_oid,
-            false,  // incremental_warnings
             vec![], // retrieval: empty = all methods
             false,  // debug
         )
@@ -279,7 +278,6 @@ fn test_selection_narrowing__quick_excluded() {
             "test-catalog",
             "main",
             &commit_oid,
-            false,  // incremental_warnings
             vec![], // retrieval: empty = all methods
             false,  // debug
         )
@@ -292,7 +290,6 @@ fn test_selection_narrowing__quick_excluded() {
             "test-catalog",
             "main",
             &commit_oid,
-            false,                      // incremental_warnings
             vec![RetrievalMethod::Fts], // retrieval: fts only
             false,                      // debug
         )
@@ -382,7 +379,6 @@ fn test_selection_widening__quick_excluded() {
             "test-catalog",
             "main",
             &commit_oid,
-            false,  // incremental_warnings
             vec![], // retrieval: empty = all methods
             false,  // debug
         )
@@ -394,7 +390,6 @@ fn test_selection_widening__quick_excluded() {
             "test-catalog",
             "main",
             &commit_oid,
-            false,                      // incremental_warnings
             vec![RetrievalMethod::Fts], // retrieval: fts only
             false,                      // debug
         )
@@ -406,7 +401,6 @@ fn test_selection_widening__quick_excluded() {
             "test-catalog",
             "main",
             &commit_oid,
-            false,  // incremental_warnings
             vec![], // retrieval: empty = all methods
             false,  // debug
         )
@@ -508,7 +502,6 @@ fn test_first_time_crawl_fts_only__quick_excluded() {
             "test-catalog",
             "main",
             &commit_oid,
-            false,                      // incremental_warnings
             vec![RetrievalMethod::Fts], // retrieval: fts only
             false,                      // debug
         )
@@ -595,7 +588,6 @@ fn test_purge_cleanup__quick_excluded() {
             "test-catalog",
             "main",
             &commit_oid,
-            false,  // incremental_warnings
             vec![], // retrieval: empty = all methods
             false,  // debug
         )
@@ -627,7 +619,6 @@ fn test_purge_cleanup__quick_excluded() {
             "test-catalog",
             "main",
             &commit_oid,
-            false,
             vec![],
             false,
         )
@@ -751,7 +742,6 @@ fn test_fts_query_parse_error__quick_excluded() {
             "test-catalog",
             "main",
             &commit_oid,
-            false,                      // incremental_warnings
             vec![RetrievalMethod::Fts], // retrieval: fts only
             false,                      // debug
         )
@@ -827,7 +817,6 @@ fn test_multi_method_explicit_search__quick_excluded() {
             "test-catalog",
             "main",
             &commit_oid,
-            false,  // incremental_warnings
             vec![], // no --retrieval = all methods
             false,  // debug
         )
@@ -889,7 +878,6 @@ fn test_multi_method_search_shows_preamble__quick_excluded() {
             "test-catalog",
             "main",
             &commit_oid,
-            false,  // incremental_warnings
             vec![], // no --retrieval = all methods
             false,  // debug
         )
@@ -987,7 +975,6 @@ fn test_cross_label_active_labels_preserved__quick_excluded() {
             "test-catalog",
             "label-a",
             &commit_oid,
-            false,                      // incremental_warnings
             vec![RetrievalMethod::Fts], // FTS-only
             false,                      // debug
         )
@@ -999,7 +986,6 @@ fn test_cross_label_active_labels_preserved__quick_excluded() {
             "test-catalog",
             "label-b",
             &commit_oid,
-            false,  // incremental_warnings
             vec![], // empty = all methods
             false,  // debug
         )
@@ -1086,7 +1072,6 @@ fn test_working_dir_remediation_message__quick_excluded() {
             &config,
             "test-catalog",
             "working-label",
-            false,                      // incremental_warnings
             vec![RetrievalMethod::Fts], // FTS-only
             false,                      // debug
         )
@@ -1142,72 +1127,6 @@ fn test_working_dir_remediation_message__quick_excluded() {
 }
 
 // =============================================================================
-// Test: Post-finalize error propagation
-// =============================================================================
-
-/// Test that post-finalize errors propagate when no phase error was captured.
-///
-/// This test injects a failure into save_warning_state by pre-creating a
-/// directory at the path where the warning state file would be written.
-/// The OS then rejects the write with "is a directory" error.
-///
-/// The crawl should fail with an error referencing the warning state.
-#[test]
-#[allow(non_snake_case)]
-fn test_post_finalize_error_propagates_when_no_phase_error__quick_excluded() {
-    let (_monodex_home, _repo_dir) = {
-        // Set up temp directories
-        let monodex_home = unique_temp_dir();
-        let repo_dir = unique_temp_dir();
-
-        // Create test git repo
-        let commit_oid = create_test_git_repo(repo_dir.path());
-
-        // Create config pointing to the repo
-        let config = create_test_config(monodex_home.path(), "test-catalog", repo_dir.path());
-
-        // Run init-db
-        run_init_db(&config, false).expect("init-db failed");
-
-        // Resolve the database path
-        let db_path = monodex::app::resolve_database_path(&config).unwrap();
-
-        // Create a directory at the path where save_warning_state would write its file.
-        // This causes the write to fail with "is a directory" error.
-        let warning_state_path = db_path.join("warnings-test-catalog.json");
-        std::fs::create_dir_all(&warning_state_path).expect("Failed to create blocking directory");
-
-        // Run a crawl - it should succeed through all phases but fail at warning-state save
-        let crawl_result = monodex::app::commands::crawl::run_crawl_label(
-            &config,
-            "test-catalog",
-            "test-label",
-            &commit_oid,
-            false,  // incremental_warnings
-            vec![], // empty = all methods
-            false,  // debug
-        );
-
-        // The crawl should have failed due to warning-state persistence error
-        assert!(
-            crawl_result.is_err(),
-            "Crawl should fail due to warning-state error"
-        );
-
-        // Verify the error chain references warning state
-        let err = crawl_result.expect_err("Expected error");
-        let err_msg = err.to_string();
-        assert!(
-            err_msg.contains("warning state"),
-            "Error should reference warning state, got: {}",
-            err_msg
-        );
-
-        (monodex_home, repo_dir)
-    };
-}
-
-// =============================================================================
 // Test: FTS ParseError under hybrid search (fail-fast)
 // =============================================================================
 
@@ -1239,7 +1158,6 @@ fn test_fts_parse_error_under_hybrid__quick_excluded() {
             "test-catalog",
             "main",
             &commit_oid,
-            false,  // incremental_warnings
             vec![], // empty = all methods
             false,  // debug
         )
@@ -1308,7 +1226,6 @@ fn test_fts_noindex_degradation_under_hybrid__quick_excluded() {
             "test-catalog",
             "main",
             &commit_oid,
-            false,  // incremental_warnings
             vec![], // empty = all methods
             false,  // debug
         )
@@ -1434,7 +1351,6 @@ fn test_empty_corpus__quick_excluded() {
             "test-catalog",
             "main",
             &commit_oid,
-            false,  // incremental_warnings
             vec![], // empty = all methods
             false,  // debug
         )
@@ -1504,7 +1420,6 @@ fn test_end_of_results_sentinel__quick_excluded() {
             "test-catalog",
             "main",
             &commit_oid,
-            false,  // incremental_warnings
             vec![], // empty = all methods
             false,  // debug
         )
@@ -1580,7 +1495,6 @@ fn test_crawl_then_vector_search__quick_excluded() {
             "test-catalog",
             "main",
             &commit_oid,
-            false,  // incremental_warnings
             vec![], // retrieval: empty = all methods
             false,  // debug
         )
@@ -1651,7 +1565,6 @@ fn test_first_time_crawl_vector_only__quick_excluded() {
             "test-catalog",
             "main",
             &commit_oid,
-            false,                         // incremental_warnings
             vec![RetrievalMethod::Vector], // vector only
             false,                         // debug
         )
@@ -1684,6 +1597,141 @@ fn test_first_time_crawl_vector_only__quick_excluded() {
             search_result.is_ok(),
             "Vector search after vector-only crawl should succeed, got error: {:?}",
             search_result.err()
+        );
+
+        (monodex_home, repo_dir)
+    };
+}
+
+/// Test that non-UTF-8 files emit a warning and are skipped during crawl.
+///
+/// BL17: Files whose bytes are not valid UTF-8 should emit a FileReadFailed warning
+/// with error string "non-UTF-8 file contents" and be skipped, not crash the crawl.
+#[test]
+#[allow(non_snake_case)]
+fn test_non_utf8_file_emits_warning__quick_excluded() {
+    use std::io::Write;
+
+    let (_monodex_home, _repo_dir) = {
+        // Set up temp directories
+        let monodex_home = unique_temp_dir();
+        let repo_dir = unique_temp_dir();
+
+        // Initialize git repo
+        let git_init = Command::new("git")
+            .args(["init"])
+            .current_dir(repo_dir.path())
+            .output()
+            .expect("Failed to run git init");
+        assert!(git_init.status.success(), "git init failed");
+
+        // Configure local user
+        Command::new("git")
+            .args(["config", "user.name", "Test User"])
+            .current_dir(repo_dir.path())
+            .output()
+            .expect("Failed to set user.name");
+        Command::new("git")
+            .args(["config", "user.email", "test@example.com"])
+            .current_dir(repo_dir.path())
+            .output()
+            .expect("Failed to set user.email");
+
+        // Create a valid TypeScript file
+        let ts_file = repo_dir.path().join("src").join("example.ts");
+        fs::create_dir_all(ts_file.parent().unwrap()).unwrap();
+        fs::write(&ts_file, "export function test() { return 42; }")
+            .expect("Failed to write test file");
+
+        // Create a non-UTF-8 TypeScript file (invalid UTF-8 bytes in a .ts file)
+        // This file should be skipped with a warning during chunking
+        let bad_file = repo_dir.path().join("src").join("binary.ts");
+        fs::create_dir_all(bad_file.parent().unwrap()).unwrap();
+        let mut file = std::fs::File::create(&bad_file).expect("Failed to create binary file");
+        // Write bytes that are NOT valid UTF-8: 0xFF 0xFE is a BOM-like sequence
+        // that is invalid UTF-8
+        file.write_all(&[0xFF, 0xFE, 0x00, 0x01])
+            .expect("Failed to write binary content");
+        drop(file);
+
+        // Git add and commit
+        Command::new("git")
+            .args(["add", "."])
+            .current_dir(repo_dir.path())
+            .output()
+            .expect("Failed to run git add");
+
+        let git_commit = Command::new("git")
+            .args(["commit", "-m", "Initial commit"])
+            .current_dir(repo_dir.path())
+            .output()
+            .expect("Failed to run git commit");
+        assert!(git_commit.status.success(), "git commit failed");
+
+        // Get the commit OID
+        let git_rev_parse = Command::new("git")
+            .args(["rev-parse", "HEAD"])
+            .current_dir(repo_dir.path())
+            .output()
+            .expect("Failed to run git rev-parse");
+        assert!(git_rev_parse.status.success(), "git rev-parse failed");
+        let commit_oid = String::from_utf8_lossy(&git_rev_parse.stdout)
+            .trim()
+            .to_string();
+
+        // Create config pointing to the repo
+        let config = create_test_config(monodex_home.path(), "test-catalog", repo_dir.path());
+
+        // Run init-db
+        run_init_db(&config, false).expect("init-db failed");
+
+        // Run crawl - it should succeed despite the non-UTF-8 file
+        // (the file will be skipped with a warning)
+        let crawl_result = monodex::app::commands::crawl::run_crawl_label(
+            &config,
+            "test-catalog",
+            "main",
+            &commit_oid,
+            vec![], // retrieval: empty = all methods
+            false,  // debug
+        );
+
+        assert!(
+            crawl_result.is_ok(),
+            "Crawl should succeed even with non-UTF-8 file, got error: {:?}",
+            crawl_result.err()
+        );
+
+        // Note: The warning is emitted to stderr during crawl.
+        // We can't easily capture it here without refactoring the crawl command,
+        // but the important invariants are:
+        // 1. Crawl succeeds (verified above)
+        // 2. The valid TypeScript file is indexed (verified by search below)
+
+        // Verify the valid file was indexed by searching for it
+        let mut output = Vec::new();
+        let search_result = run_search(
+            &mut output,
+            &config,
+            "test",
+            10,
+            Some("main"),
+            Some("test-catalog"),
+            None, // all methods
+            false,
+        );
+
+        assert!(
+            search_result.is_ok(),
+            "Search should succeed, got error: {:?}",
+            search_result.err()
+        );
+
+        let output_str = String::from_utf8_lossy(&output);
+        assert!(
+            output_str.contains("example.ts"),
+            "Search should find the valid TypeScript file, got:\n{}",
+            output_str
         );
 
         (monodex_home, repo_dir)

@@ -849,4 +849,34 @@ mod tests {
         let config = load_config(paths).unwrap();
         assert_eq!(config.catalogs.get("sparo").unwrap().r#type, "monorepo");
     }
+
+    #[test]
+    fn test_example_config_validates_against_schema() {
+        use jsonschema::Validator;
+
+        // Load the schema
+        let schema_path = "schemas/config.schema.json";
+        let schema_str = std::fs::read_to_string(schema_path)
+            .expect("Failed to read config.schema.json - run from project root");
+        let schema: serde_json::Value =
+            serde_json::from_str(&schema_str).expect("Failed to parse config.schema.json as JSON");
+
+        // Compile the schema
+        let validator = Validator::new(&schema).expect("Failed to compile JSON schema");
+
+        // Load the example config (JSONC - has comments)
+        let example_path = "examples/config.json";
+        let example_str = std::fs::read_to_string(example_path)
+            .expect("Failed to read examples/config.json - run from project root");
+
+        // Strip comments and parse (same approach as load_config)
+        let stripped = json_comments::StripComments::new(example_str.as_bytes());
+        let example: serde_json::Value = serde_json::from_reader(stripped)
+            .expect("Failed to parse examples/config.json as JSON");
+
+        assert!(
+            validator.is_valid(&example),
+            "examples/config.json does not validate against schema"
+        );
+    }
 }

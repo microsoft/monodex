@@ -10,7 +10,7 @@ use crate::app::{
 };
 use crate::engine::storage::ChunkRow;
 use crate::engine::{
-    ParallelEmbedder, RetrievalMethod,
+    ParallelConfig, ParallelEmbedder, RetrievalMethod,
     fts::{FtsSearchOutcome, fts_search},
     fusion::{FusedHit, MethodHit, RankedContribution, fuse},
     retrieval::format_selection,
@@ -318,7 +318,14 @@ async fn run_single_method_search<W: Write>(
     let collected = match method {
         RetrievalMethod::Vector => {
             // Initialize embedder (only when vector is selected)
-            let embedder = ParallelEmbedder::new()?;
+            // Use single worker for search; let it use all available cores for intra-op parallelism
+            let intra_threads = std::thread::available_parallelism()
+                .map(|n| n.get())
+                .unwrap_or(1);
+            let embedder = ParallelEmbedder::with_config(ParallelConfig {
+                num_workers: 1,
+                intra_threads,
+            })?;
             let embedding = embedder.encode(text, 0)?;
 
             // Query LanceDB with candidate_limit
@@ -497,7 +504,14 @@ async fn run_hybrid_search<W: Write>(
     // Step 2: Collect vector results (only if FTS didn't hard-error)
     if methods.contains(&RetrievalMethod::Vector) {
         // Initialize embedder
-        let embedder = ParallelEmbedder::new()?;
+        // Use single worker for search; let it use all available cores for intra-op parallelism
+        let intra_threads = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(1);
+        let embedder = ParallelEmbedder::with_config(ParallelConfig {
+            num_workers: 1,
+            intra_threads,
+        })?;
         let embedding = embedder.encode(text, 0)?;
 
         // Query LanceDB with candidate_limit

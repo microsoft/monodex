@@ -8,7 +8,7 @@
 
 use anyhow::anyhow;
 
-use crate::app::util::chrono_timestamp;
+use crate::app::util::utc_rfc3339_timestamp;
 use crate::engine::identifier::{LabelId, validate_catalog, validate_label};
 use crate::paths::Paths;
 
@@ -78,7 +78,7 @@ pub fn save_default_context(paths: &Paths, catalog: &str, label: &str) -> anyhow
     let context = DefaultContext {
         catalog: catalog.to_string(),
         label: label.to_string(),
-        set_at: chrono_timestamp(),
+        set_at: utc_rfc3339_timestamp(),
     };
 
     let content = serde_json::to_string_pretty(&context)?;
@@ -162,5 +162,62 @@ pub fn resolve_label_context(
         (None, None, None) => Err(anyhow!(
             "No context set. Use --catalog and --label, or set defaults with:\n  monodex use --catalog <name> --label <name>"
         )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn test_example_context_validates_against_schema() {
+        use jsonschema::Validator;
+
+        // Load the schema
+        let schema_path = "schemas/context.schema.json";
+        let schema_str = std::fs::read_to_string(schema_path)
+            .expect("Failed to read context.schema.json - run from project root");
+        let schema: serde_json::Value =
+            serde_json::from_str(&schema_str).expect("Failed to parse context.schema.json as JSON");
+
+        // Compile the schema
+        let validator = Validator::new(&schema).expect("Failed to compile JSON schema");
+
+        // Load and validate the example context
+        let example_path = "examples/context.json";
+        let example_str = std::fs::read_to_string(example_path)
+            .expect("Failed to read examples/context.json - run from project root");
+        let example: serde_json::Value = serde_json::from_str(&example_str)
+            .expect("Failed to parse examples/context.json as JSON");
+
+        assert!(
+            validator.is_valid(&example),
+            "examples/context.json does not validate against schema"
+        );
+    }
+
+    #[test]
+    fn test_context_schema_rejects_invalid_timestamp() {
+        use jsonschema::Validator;
+
+        // Load the schema
+        let schema_path = "schemas/context.schema.json";
+        let schema_str = std::fs::read_to_string(schema_path)
+            .expect("Failed to read context.schema.json - run from project root");
+        let schema: serde_json::Value =
+            serde_json::from_str(&schema_str).expect("Failed to parse context.schema.json as JSON");
+
+        // Compile the schema
+        let validator = Validator::new(&schema).expect("Failed to compile JSON schema");
+
+        // Test that an HH:MM:SS timestamp (like the old BL14 bug) is rejected
+        let bad_context = serde_json::json!({
+            "catalog": "my-repo",
+            "label": "main",
+            "set_at": "14:30:00"  // Wrong format - should be RFC 3339
+        });
+
+        assert!(
+            !validator.is_valid(&bad_context),
+            "Schema should reject HH:MM:SS timestamp format"
+        );
     }
 }

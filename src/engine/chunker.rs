@@ -127,20 +127,12 @@ pub fn chunk_content(
     );
 
     match strategy {
-        ChunkingStrategy::TypeScript => Ok(chunk_with_partitioner(
-            content,
-            ctx,
-            &file_id,
-            target_size,
-            partition_typescript,
-        )),
-        ChunkingStrategy::Markdown => Ok(chunk_with_partitioner(
-            content,
-            ctx,
-            &file_id,
-            target_size,
-            partition_markdown,
-        )),
+        ChunkingStrategy::TypeScript => {
+            chunk_with_partitioner(content, ctx, &file_id, target_size, partition_typescript)
+        }
+        ChunkingStrategy::Markdown => {
+            chunk_with_partitioner(content, ctx, &file_id, target_size, partition_markdown)
+        }
         ChunkingStrategy::LineBased => chunk_by_lines(content, &file_id, ctx, target_size, "text"),
         ChunkingStrategy::Skip => Ok(Vec::new()),
     }
@@ -157,9 +149,14 @@ fn chunk_with_partitioner<F>(
     file_id: &str,
     target_size: usize,
     partition: F,
-) -> Vec<Chunk>
+) -> Result<Vec<Chunk>, anyhow::Error>
 where
-    F: FnOnce(&str, &PartitionConfig, &str, &str) -> Vec<PartitionedChunk>,
+    F: FnOnce(
+        &str,
+        &PartitionConfig,
+        &str,
+        &str,
+    ) -> Result<Vec<PartitionedChunk>, crate::engine::partitioner::PartitionError>,
 {
     let file_name = std::path::Path::new(&ctx.relative_path)
         .file_name()
@@ -173,7 +170,8 @@ where
         ..Default::default()
     };
 
-    let partitioned = partition(content, &config, &ctx.source_uri, &ctx.catalog);
+    let partitioned = partition(content, &config, &ctx.source_uri, &ctx.catalog)
+        .map_err(|e| anyhow::anyhow!("{}", e))?;
     let mut chunks: Vec<Chunk> = partitioned
         .into_iter()
         .enumerate()
@@ -188,7 +186,7 @@ where
         chunk.chunk_count = chunk_count;
     }
 
-    chunks
+    Ok(chunks)
 }
 
 impl Chunk {

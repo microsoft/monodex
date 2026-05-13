@@ -8,7 +8,9 @@ use tree_sitter::{Language, Parser};
 
 use super::node_analysis::{extract_imports_end_line, get_chunk_metadata, get_lines_text};
 use super::split_search::find_best_split;
-use super::types::{ChunkRange, MIN_CHUNK_RATIO, PartitionConfig, PartitionedChunk, SplitResult};
+use super::types::{
+    ChunkRange, MIN_CHUNK_RATIO, PartitionConfig, PartitionError, PartitionedChunk, SplitResult,
+};
 
 /// Partition a TypeScript/TSX file into chunks
 pub fn partition_typescript(
@@ -16,7 +18,7 @@ pub fn partition_typescript(
     config: &PartitionConfig,
     file_path: &str,
     catalog: &str,
-) -> Vec<PartitionedChunk> {
+) -> Result<Vec<PartitionedChunk>, PartitionError> {
     let content_hash = compute_hash(source);
 
     let mut parser = Parser::new();
@@ -33,9 +35,9 @@ pub fn partition_typescript(
             .expect("Failed to set TypeScript language");
     }
 
-    let tree = parser
-        .parse(source, None)
-        .expect("Failed to parse TypeScript");
+    let tree = parser.parse(source, None).ok_or_else(|| PartitionError {
+        message: "tree-sitter failed to parse the file".to_string(),
+    })?;
 
     let root = tree.root_node();
     let lines: Vec<&str> = source.lines().collect();
@@ -202,5 +204,5 @@ pub fn partition_typescript(
         });
     }
 
-    result
+    Ok(result)
 }

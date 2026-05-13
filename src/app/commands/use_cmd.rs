@@ -64,7 +64,9 @@ pub fn run_use(
         (Some(_), None) | (None, Some(_)) => {
             // Partial specification - error
             return Err(anyhow::anyhow!(
-                "Both --catalog and --label are required to set context.\n\n                Usage:\n  monodex use --catalog <name> --label <name>\n\n                Or run 'monodex use' without arguments to see current context."
+                "Both --catalog and --label are required to set context.\n\n\
+                Usage:\n  monodex use --catalog <name> --label <name>\n\n\
+                Or run 'monodex use' without arguments to see current context."
             ));
         }
     }

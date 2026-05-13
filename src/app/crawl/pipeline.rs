@@ -15,8 +15,8 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use crate::app::{
-    CrawlFailures, EmbeddingModelConfig, chrono_timestamp, format_count, format_duration,
-    format_eta, print_memory_warning, resolve_embedding_config,
+    CrawlFailures, EmbeddingModelConfig, format_count, format_duration, format_eta, log_timestamp,
+    print_memory_warning, resolve_embedding_config,
 };
 use crate::engine::storage::{ChunkRow, ChunkStorage, StorageProgressEvent};
 use crate::engine::{Chunk, ParallelEmbedder};
@@ -96,7 +96,7 @@ pub async fn run_embed_upload_pipeline(
                 let eta = format_eta(remaining);
                 eprintln!(
                     "[{}] Embedded {}/{} ({:.0}%) - {:.1} chunks/sec - ETA: {}",
-                    chrono_timestamp(),
+                    log_timestamp(),
                     format_count(current as u64),
                     format_count(total_chunks as u64),
                     (current as f64 / total_chunks as f64) * 100.0,
@@ -197,7 +197,7 @@ pub async fn run_embed_upload_pipeline(
                 Err(e) => {
                     eprintln!(
                         "\n[{}] ❌ Embedding failed for {}:{} - {}",
-                        chrono_timestamp(),
+                        log_timestamp(),
                         chunk.relative_path,
                         chunk.chunk_ordinal,
                         e
@@ -291,12 +291,8 @@ impl Drop for ProgressGuard {
     }
 }
 
-/// Chunks are written with NULL vectors. Before upserting, any existing vectors
-/// on matched rows are cleared to maintain the per-file vector-presence invariant
-/// (all chunks of a file must have the same vector presence when file_complete=true).
-///
-/// The storage primitive `upsert_without_vectors` preserves vectors at the row level;
-/// this function clears vectors separately before calling it.
+/// Chunks are written with NULL vectors. Existing vectors on matched rows are
+/// preserved (not cleared). The `active_label_ids` set is merged on matched rows.
 ///
 /// Returns (touched_file_ids, failures) for the crawl.
 pub async fn run_upsert_without_vectors(
@@ -535,7 +531,7 @@ fn print_progress_event(event: &StorageProgressEvent) {
     };
     eprintln!(
         "[{}] {}: {}/{} {} ({}%)",
-        chrono_timestamp(),
+        log_timestamp(),
         event.phase,
         format_count(event.completed as u64),
         format_count(event.total as u64),
@@ -558,7 +554,7 @@ async fn upload_and_mark_complete(
     let count = accumulated.len();
     println!(
         "[{}] {} ({} chunks)...",
-        chrono_timestamp(),
+        log_timestamp(),
         log_message,
         format_count(count as u64)
     );

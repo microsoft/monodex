@@ -50,7 +50,8 @@ pub fn run_dump_chunks(
     };
 
     // Partition
-    let chunks = partition_typescript(&source, &config, &file_path, &package_name);
+    let chunks = partition_typescript(&source, &config, &file_path, &package_name)
+        .map_err(|e| anyhow::anyhow!("Partitioning failed: {}", e))?;
 
     // Quality score
     let file_chars = source.len();

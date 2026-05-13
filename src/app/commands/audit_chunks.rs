@@ -28,7 +28,7 @@ pub fn run_audit_chunks(count: usize, dir: String) -> Result<()> {
                 .extension()
                 .map(|s| s.to_string_lossy())
                 .unwrap_or_default();
-            ext == "ts" && !path.to_string_lossy().contains("node_modules")
+            (ext == "ts" || ext == "tsx") && !path.to_string_lossy().contains("node_modules")
         })
         .map(|e| e.path().to_owned())
         .collect();
@@ -60,7 +60,8 @@ pub fn run_audit_chunks(count: usize, dir: String) -> Result<()> {
                 allow_fallback: false, // AST-only mode for accurate quality measurement
                 ..Default::default()
             };
-            let chunks = partition_typescript(&source, &config, path.to_str().unwrap(), "n/a");
+            let chunks =
+                partition_typescript(&source, &config, path.to_str().unwrap(), "n/a").ok()?;
             let file_chars = source.len();
             let report = ChunkQualityReport::from_chunks(&chunks, file_chars);
             Some((path, report, chunks))

@@ -14,7 +14,7 @@
       "type": "monorepo",
       "path": "/absolute/path/to/another-monorepo"
     }
-  },
+  }
 
   // Embedding model configuration (optional, defaults shown)
   // "embeddingModel": {

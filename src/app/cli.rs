@@ -69,10 +69,6 @@ pub enum Commands {
         #[command(flatten)]
         source: CrawlSourceArgs,
 
-        /// Allow files with chunking warnings to participate in incremental skipping
-        #[arg(long, default_value_t = false)]
-        incremental_warnings: bool,
-
         /// Set retrieval methods to build for this label.
         /// Repeatable; default is all methods. Values: vector, fts.
         #[arg(long, value_parser = clap::value_parser!(RetrievalMethod))]
@@ -81,13 +77,8 @@ pub enum Commands {
 
     /// Purge all chunks from a catalog, or the entire database
     Purge {
-        /// Catalog name to purge. Use --all to purge the entire database.
-        #[arg(long)]
-        catalog: Option<String>,
-
-        /// Purge the entire database (all catalogs)
-        #[arg(long)]
-        all: bool,
+        #[command(flatten)]
+        args: PurgeArgs,
     },
 
     /// Dump chunks for a TypeScript file (for debugging chunking algorithm).
@@ -219,4 +210,18 @@ pub struct CrawlSourceArgs {
     /// Indexes uncommitted changes.
     #[arg(long)]
     pub working_dir: bool,
+}
+
+/// Arguments for purge command.
+/// One of --catalog or --all is required.
+#[derive(Args, Clone, Debug)]
+#[group(required = true, multiple = false)]
+pub struct PurgeArgs {
+    /// Catalog name to purge.
+    #[arg(long)]
+    pub catalog: Option<String>,
+
+    /// Purge the entire database (all catalogs)
+    #[arg(long)]
+    pub all: bool,
 }

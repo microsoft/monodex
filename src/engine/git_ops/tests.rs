@@ -251,3 +251,192 @@ fn test_working_dir_blob_id_matches_commit() {
         "test_artifacts/Colorize.ts blob_id should match between commit and working-dir modes"
     );
 }
+
+/// Regression test for BL16: Git-tracked files under hidden directories must be indexed.
+/// Previously, working-directory crawls skipped files under .github/, .vscode/, etc.
+/// even when Git tracked them.
+#[test]
+fn test_hidden_directory_files_are_indexed() {
+    let repo_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+
+    let entries =
+        enumerate_working_directory(&repo_path).expect("Failed to enumerate working directory");
+
+    // This repo has .github/workflows/ci.yaml which Git tracks.
+    // It must appear in the working directory enumeration.
+    let hidden_file = entries
+        .iter()
+        .find(|e| e.relative_path == ".github/workflows/ci.yaml");
+    assert!(
+        hidden_file.is_some(),
+        ".github/workflows/ci.yaml should be found in working directory enumeration"
+    );
+
+    // Also verify it has a valid blob_id
+    if let Some(entry) = hidden_file {
+        assert_eq!(
+            entry.blob_id.len(),
+            40,
+            "blob_id should be 40 chars: {}",
+            entry.blob_id
+        );
+    }
+}
+
+/// Regression test for BL16: repo whose basename starts with '.' must produce non-empty output.
+/// Previously, the root-handling logic diverged between enumerate_working_directory
+/// and build_package_index_for_working_dir, causing the latter to return nothing
+/// for repos like /tmp/.my-repo/.
+#[test]
+fn test_repo_with_dot_basename_produces_output() {
+    use std::fs;
+    use tempfile::TempDir;
+
+    // Create a temporary directory with a dot-prefixed name
+    let temp_base = TempDir::new().expect("Failed to create temp dir");
+    let dot_repo_path = temp_base.path().join(".my-repo");
+    fs::create_dir_all(&dot_repo_path).expect("Failed to create .my-repo dir");
+
+    // Initialize a minimal Git repo
+    let git_init = Command::new("git")
+        .args(["init"])
+        .current_dir(&dot_repo_path)
+        .output()
+        .expect("Failed to run git init");
+    assert!(git_init.status.success(), "git init failed");
+
+    // Configure local user for this repo
+    Command::new("git")
+        .args(["config", "user.name", "Test User"])
+        .current_dir(&dot_repo_path)
+        .output()
+        .expect("Failed to set user.name");
+    Command::new("git")
+        .args(["config", "user.email", "test@example.com"])
+        .current_dir(&dot_repo_path)
+        .output()
+        .expect("Failed to set user.email");
+
+    // Create and commit a test file
+    let test_file = dot_repo_path.join("test.txt");
+    fs::write(&test_file, "Hello, World!\n").expect("Failed to write test file");
+
+    Command::new("git")
+        .args(["add", "test.txt"])
+        .current_dir(&dot_repo_path)
+        .output()
+        .expect("Failed to run git add");
+
+    let git_commit = Command::new("git")
+        .args(["commit", "-m", "Initial commit"])
+        .current_dir(&dot_repo_path)
+        .output()
+        .expect("Failed to run git commit");
+    assert!(git_commit.status.success(), "git commit failed");
+
+    // enumerate_working_directory must produce non-empty output
+    let entries =
+        enumerate_working_directory(&dot_repo_path).expect("Failed to enumerate working directory");
+    assert!(
+        !entries.is_empty(),
+        "enumerate_working_directory should find files in a repo whose basename starts with '.'"
+    );
+    assert!(
+        entries.iter().any(|e| e.relative_path == "test.txt"),
+        "test.txt should be found in the enumeration"
+    );
+
+    // build_package_index_for_working_dir must also work (even without package.json,
+    // it should return an empty index, not error)
+    let package_index =
+        build_package_index_for_working_dir(&dot_repo_path).expect("Failed to build package index");
+    // The index is empty since there's no package.json, but it shouldn't error
+    assert!(
+        package_index.package_name_by_dir.is_empty(),
+        "Package index should be empty (no package.json in test repo)"
+    );
+}
+
+/// Test that files named like "something-package.json" are not treated as package.json files.
+/// This verifies exact filename matching, not substring matching.
+#[test]
+fn test_package_json_exact_filename_matching() {
+    use std::fs;
+    use tempfile::TempDir;
+
+    // Create a temporary Git repo
+    let temp_repo = TempDir::new().expect("Failed to create temp dir");
+    let repo_path = temp_repo.path();
+
+    // Initialize Git repo
+    Command::new("git")
+        .args(["init"])
+        .current_dir(repo_path)
+        .output()
+        .expect("Failed to run git init");
+    Command::new("git")
+        .args(["config", "user.name", "Test User"])
+        .current_dir(repo_path)
+        .output()
+        .expect("Failed to set user.name");
+    Command::new("git")
+        .args(["config", "user.email", "test@example.com"])
+        .current_dir(repo_path)
+        .output()
+        .expect("Failed to set user.email");
+
+    // Create a valid package.json at the root
+    let real_package_json = repo_path.join("package.json");
+    fs::write(&real_package_json, r#"{"name": "real-package"}"#)
+        .expect("Failed to write package.json");
+
+    // Create a file named "something-package.json" at the root with valid JSON
+    let fake_package_json = repo_path.join("my-package.json");
+    fs::write(&fake_package_json, r#"{"name": "fake-package"}"#)
+        .expect("Failed to write my-package.json");
+
+    // Create another fake package.json in a subdirectory
+    fs::create_dir_all(repo_path.join("subdir")).expect("Failed to create subdir");
+    let subdir_fake = repo_path.join("subdir/another-package.json");
+    fs::write(&subdir_fake, r#"{"name": "another-fake"}"#)
+        .expect("Failed to write another-package.json");
+
+    // Create a real package.json in a subdirectory
+    let subdir_real = repo_path.join("subdir/package.json");
+    fs::write(&subdir_real, r#"{"name": "subdir-real"}"#)
+        .expect("Failed to write subdir/package.json");
+
+    // Stage and commit all files
+    Command::new("git")
+        .args(["add", "."])
+        .current_dir(repo_path)
+        .output()
+        .expect("Failed to run git add");
+    let git_commit = Command::new("git")
+        .args(["commit", "-m", "Initial commit"])
+        .current_dir(repo_path)
+        .output()
+        .expect("Failed to run git commit");
+    assert!(git_commit.status.success(), "git commit failed");
+
+    // Build the package index
+    let package_index =
+        build_package_index_for_working_dir(repo_path).expect("Failed to build package index");
+
+    // Verify: only real package.json files are in the index
+    assert_eq!(
+        package_index.package_name_by_dir.get(""),
+        Some(&"real-package".to_string()),
+        "Root package.json should be indexed"
+    );
+    assert_eq!(
+        package_index.package_name_by_dir.get("subdir"),
+        Some(&"subdir-real".to_string()),
+        "subdir/package.json should be indexed"
+    );
+    assert_eq!(
+        package_index.package_name_by_dir.len(),
+        2,
+        "Only 2 package.json files should be indexed, not the *-package.json files"
+    );
+}
