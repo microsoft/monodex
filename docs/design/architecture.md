@@ -55,14 +55,14 @@ The FTS phase does not enumerate files. It is a batch reconciliation, run once a
 A crawl run, end to end:
 
 1. **Label upsert**: Resolve `--commit` to a full SHA (or note that this is a `--working-dir` run); update the label's retrieval selection from `--retrieval` (set per-method `source` columns to the resolved commit, NULL out methods being dropped) and mark each in-selection method's `complete` flag false.
-2. **Tree visitor**: Enumerate files from the commit tree or walk the working directory.
-3. **Package indexing**: Build the package index, a map from directory paths to package names, by reading every `package.json` in the tree.
+2. **Tree visitor**: Enumerate files from the commit tree or from the working-directory blob map (`git ls-files` + `git status`).
+3. **Package indexing**: Build the package index, a map from directory paths to package names, by reading every Git-tracked `package.json` in the source.
 4. **File processing**: For each file: compute `file_id`, check the sentinel, and either skip-with-label-add or read-chunk-embed-upsert.
 5. **Label reassignment**: After all files succeed, scan chunks tagged with this label, drop the label from any whose `file_id` wasn't touched, and delete chunks whose `active_label_ids` becomes empty.
 6. **FTS phase**: If `fts` is in the new retrieval selection, batch-reconcile the per-label Tantivy index against the label's current chunks. Diff via the staleness manifest, apply additions and removals, commit once. Schema/tokenizer ID mismatch on existing FTS state triggers a per-label rebuild.
 7. **Crawl finalization**: For each method whose phase completed successfully, mark its `complete` flag true.
 
-Step 5 only runs after a fully successful crawl. An interrupted crawl leaves stale chunks in the label, which the next successful crawl cleans up. Step 6 only runs if step 5 succeeded; step 7 finalizes whatever subset of methods reached completion. See [crawl.md](./crawl.md) for the working-directory identity model, the package-index implementation, the manifest reconciliation rule, and per-file vector-presence invariant enforcement during FTS-only reprocess. The named steps above are the same vocabulary `crawl.md` uses for its detail sections.
+Step 5 only runs after a fully successful crawl. An interrupted crawl leaves stale chunks in the label, which the next successful crawl cleans up. Step 6 only runs if step 5 succeeded; step 7 finalizes whatever subset of methods reached completion. See [crawl.md](./crawl.md) for the working-directory identity model, the package-index implementation, the manifest reconciliation rule, and the FTS-only crawl path's vector-preservation rule. The named steps above are the same vocabulary `crawl.md` uses for its detail sections.
 
 Concurrent operations against the database (multiple writers, readers running during a crawl) are coordinated by a writer-lock layer; the lock taxonomy and reader semantics are in [concurrency.md](./concurrency.md).
 
