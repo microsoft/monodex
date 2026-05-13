@@ -170,6 +170,11 @@ fn get_currently_indexed_row_ids(fts_index: &FtsIndex) -> Result<BTreeSet<String
     let searcher = reader.searcher();
 
     // Always derive Tantivy's live row_id set
+    // Performance guardrail:
+    // FTS term-dictionary scans are O(live_docs) per crawl. If profiling on a
+    // real-scale catalog shows this scan dominating crawl time, prefer adding
+    // periodic FTS commits during the crawl. Do not weaken manifest reconciliation
+    // to avoid the scan; reconciliation is the crawl correctness boundary.
     let tantivy_row_ids = reconcile_from_index(&searcher, fts_index.fields.row_id)?;
 
     match fts_index.read_manifest() {

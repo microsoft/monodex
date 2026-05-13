@@ -51,6 +51,8 @@ PUBLISHING PROCEDURE:
 
 - **Git-tracked files under hidden directories are no longer dropped.** Working-directory crawls previously skipped files under `.github/`, `.vscode/`, `.config/`, and similar paths even when Git tracked them. Those files are now indexed.
 
+- **Silent UTF-8 drop during chunking.** Files whose bytes were not valid UTF-8 used to be skipped with no warning emitted. They now emit a warning alongside the existing read-failure and chunking-failure paths.
+
 - A handful of crawl-pipeline error-handling and cleanup-gate bugs that could leave a label in an inconsistent state if a phase failed partway through.
 - Stale-hydration warnings in search results now appear in the right place relative to the result that triggered them.
 

@@ -12,6 +12,13 @@
 //! - No stemming or stopwords.
 //! - For runs of CJK characters, use Jieba word-segmentation.
 //! - Token positions are globally monotonic across the full field stream.
+//!
+//! ## Why this position model is intentional
+//!
+//! Emit the combined identifier followed by its split parts as a linear
+//! token stream. This intentionally favors subtoken recall and phrase-like
+//! matches such as `"user profile"` matching `getUserProfile`. It is a
+//! Monodex ranking policy, not an attempt to model a Tantivy synonym graph.
 
 use tantivy::tokenizer::{Token, TokenStream, Tokenizer};
 
@@ -66,7 +73,10 @@ impl TokenStream for MonodexFtsTokenStream {
         if self.token_index < self.tokens.len() {
             let token_text = &self.tokens[self.token_index];
             self.current_token = Token {
-                offset_from: 0, // We don't track exact byte offsets
+                // Offsets are currently not used by Monodex search rendering. They should
+                // be made real before adding Tantivy-backed snippets, highlighting, or
+                // exact hit spans.
+                offset_from: 0,
                 offset_to: 0,
                 position: self.token_index,
                 text: token_text.clone(),

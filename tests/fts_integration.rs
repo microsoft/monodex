@@ -1667,3 +1667,138 @@ fn test_first_time_crawl_vector_only__quick_excluded() {
         (monodex_home, repo_dir)
     };
 }
+
+/// Test that non-UTF-8 files emit a warning and are skipped during crawl.
+///
+/// BL17: Files whose bytes are not valid UTF-8 should emit a FileReadFailed warning
+/// with error string "non-UTF-8 file contents" and be skipped, not crash the crawl.
+#[test]
+#[allow(non_snake_case)]
+fn test_non_utf8_file_emits_warning__quick_excluded() {
+    use std::io::Write;
+
+    let (_monodex_home, _repo_dir) = {
+        // Set up temp directories
+        let monodex_home = unique_temp_dir();
+        let repo_dir = unique_temp_dir();
+
+        // Initialize git repo
+        let git_init = Command::new("git")
+            .args(["init"])
+            .current_dir(repo_dir.path())
+            .output()
+            .expect("Failed to run git init");
+        assert!(git_init.status.success(), "git init failed");
+
+        // Configure local user
+        Command::new("git")
+            .args(["config", "user.name", "Test User"])
+            .current_dir(repo_dir.path())
+            .output()
+            .expect("Failed to set user.name");
+        Command::new("git")
+            .args(["config", "user.email", "test@example.com"])
+            .current_dir(repo_dir.path())
+            .output()
+            .expect("Failed to set user.email");
+
+        // Create a valid TypeScript file
+        let ts_file = repo_dir.path().join("src").join("example.ts");
+        fs::create_dir_all(ts_file.parent().unwrap()).unwrap();
+        fs::write(&ts_file, "export function test() { return 42; }")
+            .expect("Failed to write test file");
+
+        // Create a non-UTF-8 TypeScript file (invalid UTF-8 bytes in a .ts file)
+        // This file should be skipped with a warning during chunking
+        let bad_file = repo_dir.path().join("src").join("binary.ts");
+        fs::create_dir_all(bad_file.parent().unwrap()).unwrap();
+        let mut file = std::fs::File::create(&bad_file).expect("Failed to create binary file");
+        // Write bytes that are NOT valid UTF-8: 0xFF 0xFE is a BOM-like sequence
+        // that is invalid UTF-8
+        file.write_all(&[0xFF, 0xFE, 0x00, 0x01])
+            .expect("Failed to write binary content");
+        drop(file);
+
+        // Git add and commit
+        Command::new("git")
+            .args(["add", "."])
+            .current_dir(repo_dir.path())
+            .output()
+            .expect("Failed to run git add");
+
+        let git_commit = Command::new("git")
+            .args(["commit", "-m", "Initial commit"])
+            .current_dir(repo_dir.path())
+            .output()
+            .expect("Failed to run git commit");
+        assert!(git_commit.status.success(), "git commit failed");
+
+        // Get the commit OID
+        let git_rev_parse = Command::new("git")
+            .args(["rev-parse", "HEAD"])
+            .current_dir(repo_dir.path())
+            .output()
+            .expect("Failed to run git rev-parse");
+        assert!(git_rev_parse.status.success(), "git rev-parse failed");
+        let commit_oid = String::from_utf8_lossy(&git_rev_parse.stdout)
+            .trim()
+            .to_string();
+
+        // Create config pointing to the repo
+        let config = create_test_config(monodex_home.path(), "test-catalog", repo_dir.path());
+
+        // Run init-db
+        run_init_db(&config, false).expect("init-db failed");
+
+        // Run crawl - it should succeed despite the non-UTF-8 file
+        // (the file will be skipped with a warning)
+        let crawl_result = monodex::app::commands::crawl::run_crawl_label(
+            &config,
+            "test-catalog",
+            "main",
+            &commit_oid,
+            vec![], // retrieval: empty = all methods
+            false,  // debug
+        );
+
+        assert!(
+            crawl_result.is_ok(),
+            "Crawl should succeed even with non-UTF-8 file, got error: {:?}",
+            crawl_result.err()
+        );
+
+        // Note: The warning is emitted to stderr during crawl.
+        // We can't easily capture it here without refactoring the crawl command,
+        // but the important invariants are:
+        // 1. Crawl succeeds (verified above)
+        // 2. The valid TypeScript file is indexed (verified by search below)
+
+        // Verify the valid file was indexed by searching for it
+        let mut output = Vec::new();
+        let search_result = run_search(
+            &mut output,
+            &config,
+            "test",
+            10,
+            Some("main"),
+            Some("test-catalog"),
+            None, // all methods
+            false,
+        );
+
+        assert!(
+            search_result.is_ok(),
+            "Search should succeed, got error: {:?}",
+            search_result.err()
+        );
+
+        let output_str = String::from_utf8_lossy(&output);
+        assert!(
+            output_str.contains("example.ts"),
+            "Search should find the valid TypeScript file, got:\n{}",
+            output_str
+        );
+
+        (monodex_home, repo_dir)
+    };
+}

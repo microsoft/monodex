@@ -376,7 +376,13 @@ pub fn chunk_new_files(
 
         let content_str = match String::from_utf8(content) {
             Ok(s) => s,
-            Err(_) => continue,
+            Err(_) => {
+                warnings(CrawlWarning::FileReadFailed {
+                    relative_path: file_entry.relative_path.clone(),
+                    error: "non-UTF-8 file contents".to_string(),
+                });
+                continue;
+            }
         };
 
         let package_name = package_index
