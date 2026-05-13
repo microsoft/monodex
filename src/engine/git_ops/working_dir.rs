@@ -343,21 +343,22 @@ pub fn build_package_index_for_working_dir(repo_path: &Path) -> Result<PackageIn
 
     // Find all package.json files Git tracks
     for relative_path in blob_map.blobs_by_path.keys() {
-        if !relative_path.ends_with("package.json") {
+        // Exact filename match: split on last '/' and compare the trailing segment
+        let filename = relative_path
+            .rsplit_once('/')
+            .map(|(_, trailing)| trailing)
+            .unwrap_or(relative_path);
+
+        if filename != "package.json" {
             continue;
         }
 
-        // The relative_path might be "package.json" (root) or "some/dir/package.json"
-        // Extract the directory path
+        // Extract the directory path: strip "/package.json" or "package.json" (repo root)
         let dir_path = relative_path
-            .rsplit_once('/')
-            .map(|(_, _)| {
-                relative_path
-                    .strip_suffix("/package.json")
-                    .unwrap_or("")
-                    .to_string()
-            })
-            .unwrap_or_default();
+            .strip_suffix("/package.json")
+            .or_else(|| relative_path.strip_suffix("package.json"))
+            .unwrap_or("")
+            .to_string();
 
         // Read the file content and extract package name
         if let Ok(content) = read_working_file_content(repo_path, relative_path)

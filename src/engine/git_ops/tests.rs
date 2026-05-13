@@ -356,3 +356,87 @@ fn test_repo_with_dot_basename_produces_output() {
         "Package index should be empty (no package.json in test repo)"
     );
 }
+
+/// Test that files named like "something-package.json" are not treated as package.json files.
+/// This verifies exact filename matching, not substring matching.
+#[test]
+fn test_package_json_exact_filename_matching() {
+    use std::fs;
+    use tempfile::TempDir;
+
+    // Create a temporary Git repo
+    let temp_repo = TempDir::new().expect("Failed to create temp dir");
+    let repo_path = temp_repo.path();
+
+    // Initialize Git repo
+    Command::new("git")
+        .args(["init"])
+        .current_dir(repo_path)
+        .output()
+        .expect("Failed to run git init");
+    Command::new("git")
+        .args(["config", "user.name", "Test User"])
+        .current_dir(repo_path)
+        .output()
+        .expect("Failed to set user.name");
+    Command::new("git")
+        .args(["config", "user.email", "test@example.com"])
+        .current_dir(repo_path)
+        .output()
+        .expect("Failed to set user.email");
+
+    // Create a valid package.json at the root
+    let real_package_json = repo_path.join("package.json");
+    fs::write(&real_package_json, r#"{"name": "real-package"}"#)
+        .expect("Failed to write package.json");
+
+    // Create a file named "something-package.json" at the root with valid JSON
+    let fake_package_json = repo_path.join("my-package.json");
+    fs::write(&fake_package_json, r#"{"name": "fake-package"}"#)
+        .expect("Failed to write my-package.json");
+
+    // Create another fake package.json in a subdirectory
+    fs::create_dir_all(repo_path.join("subdir")).expect("Failed to create subdir");
+    let subdir_fake = repo_path.join("subdir/another-package.json");
+    fs::write(&subdir_fake, r#"{"name": "another-fake"}"#)
+        .expect("Failed to write another-package.json");
+
+    // Create a real package.json in a subdirectory
+    let subdir_real = repo_path.join("subdir/package.json");
+    fs::write(&subdir_real, r#"{"name": "subdir-real"}"#)
+        .expect("Failed to write subdir/package.json");
+
+    // Stage and commit all files
+    Command::new("git")
+        .args(["add", "."])
+        .current_dir(repo_path)
+        .output()
+        .expect("Failed to run git add");
+    let git_commit = Command::new("git")
+        .args(["commit", "-m", "Initial commit"])
+        .current_dir(repo_path)
+        .output()
+        .expect("Failed to run git commit");
+    assert!(git_commit.status.success(), "git commit failed");
+
+    // Build the package index
+    let package_index =
+        build_package_index_for_working_dir(repo_path).expect("Failed to build package index");
+
+    // Verify: only real package.json files are in the index
+    assert_eq!(
+        package_index.package_name_by_dir.get(""),
+        Some(&"real-package".to_string()),
+        "Root package.json should be indexed"
+    );
+    assert_eq!(
+        package_index.package_name_by_dir.get("subdir"),
+        Some(&"subdir-real".to_string()),
+        "subdir/package.json should be indexed"
+    );
+    assert_eq!(
+        package_index.package_name_by_dir.len(),
+        2,
+        "Only 2 package.json files should be indexed, not the *-package.json files"
+    );
+}
