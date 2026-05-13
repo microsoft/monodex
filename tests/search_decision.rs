@@ -19,7 +19,7 @@ use monodex::engine::{
 };
 
 fn write_minimal_config(monodex_home: &Path) {
-    let config_path = monodex_home.join("config.json");
+    let config_path = monodex_home.join("monodex-config.json");
     std::fs::create_dir_all(monodex_home).ok();
     std::fs::write(&config_path, r#"{"catalogs": {}}"#).unwrap();
 }

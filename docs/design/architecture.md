@@ -109,8 +109,8 @@ Module-organization rules — file size targets, where new code goes, banned pat
 Application-layer code, CLI-specific. Not reusable as a library.
 
 - `cli.rs`: Clap argument definitions; `Cli`, `Commands`, `CrawlSourceArgs`. Edit here for new flags or subcommand wiring.
-- `config.rs`: Load and validate `config.json` (catalogs, database path, embedding-model knobs). Contains the `Config` and `DatabaseConfig` structs and the resolver that picks the database path.
-- `context.rs`: Persist and resolve the default catalog/label set by `monodex use`. Owns the `DefaultContext` struct and read/write to `<tool-home>/context.json`.
+- `config.rs`: Load and validate `monodex-config.json` (catalogs, database path, embedding-model knobs). Contains the `Config` and `DatabaseConfig` structs and the resolver that picks the database path.
+- `context.rs`: Persist and resolve the default catalog/label set by `monodex use`. Owns the `DefaultContext` struct and read/write to `<config-folder>/monodex-state.json`.
 - `search.rs`: Search-output renderer. Takes a `&mut dyn Write` and emits preamble, warnings, results, debug continuations, and end-of-results sentinels in a fixed order. The single-writer routing is what makes search-time output testable from byte buffers; see [search.md](../design/search.md) for the output-ordering rule.
 - `util.rs`: Formatting and display helpers: timestamps, durations, byte sizes, terminal sanitization for search output, chunk-selector parsing, and `format_source_pointer` for warning remediation strings.
 

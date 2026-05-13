@@ -18,7 +18,7 @@ git clone https://github.com/tiktok/sparo.git /path/to/sparo
 
 ### Configure Sparo as a catalog
 
-Edit `~/.monodex/config.json` to register Sparo as a catalog:
+Edit `~/.monodex/monodex-config.json` to register Sparo as a catalog:
 
 ```
 {
@@ -31,7 +31,7 @@ Edit `~/.monodex/config.json` to register Sparo as a catalog:
 }
 ```
 
-If `~/.monodex/config.json` does not exist, create it. Use the absolute path where Sparo was cloned.
+If `~/.monodex/monodex-config.json` does not exist, create it. Use the absolute path where Sparo was cloned.
 
 ### Initialize the database
 
@@ -127,13 +127,13 @@ After this, subsequent `search` and `view` commands can omit `--catalog` and `--
 
 The procedure above runs against `~/.monodex/`, which is shared with the user's normal Monodex installation. For most verification work this is fine: the purge in step 1 ensures the test starts fresh, and re-using the same catalog and database between runs saves time.
 
-A clean-slate variant runs the same test against a completely fresh tool home, with no shared state. Set `MONODEX_HOME` to a temporary directory before any of the steps:
+A clean-slate variant runs the same test against a completely fresh config folder, with no shared state. Set `MONODEX_CONFIG_FOLDER` to a temporary directory before any of the steps:
 
 ```
-export MONODEX_HOME=/tmp/monodex-smoke-test
+export MONODEX_CONFIG_FOLDER=/tmp/monodex-smoke-test
 ```
 
-Then run the **One-time setup** section against this fresh location (configure `$MONODEX_HOME/config.json`, run `init-db`), followed by the **Test procedure**. Everything Monodex reads or writes will be under `/tmp/monodex-smoke-test/` instead of `~/.monodex/`.
+Then run the **One-time setup** section against this fresh location (configure `$MONODEX_CONFIG_FOLDER/monodex-config.json`, run `init-db`), followed by the **Test procedure**. Everything Monodex reads or writes will be under `/tmp/monodex-smoke-test/` instead of `~/.monodex/`.
 
 The clean-slate variant is slower than the normal procedure because it has to download the embedding model on first crawl, and it leaves a populated database in `/tmp/` after the test. Use the clean-slate variant only when verifying first-run behavior or reproducing a setup-time issue; otherwise, prefer the normal procedure.
 

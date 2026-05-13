@@ -122,7 +122,7 @@ cargo build --release
 
 ## Configuration
 
-Create `~/.monodex/config.json`:
+Create `~/.monodex/monodex-config.json`:
 
 ```js
 {
@@ -193,8 +193,8 @@ This creates a local LanceDB database at `~/.monodex/default-db/`. No external s
 ### Global Options
 
 ```bash
-# Use a custom config file location
-monodex --config /path/to/config.json search --text "query"
+# Use a custom config folder location
+monodex --config-folder /path/to/config-folder search --text "query"
 
 # Enable verbose debug logging for storage operations
 monodex --debug crawl --catalog myrepo --label main --commit HEAD
@@ -247,7 +247,7 @@ monodex use --catalog sparo --label main
 monodex search --text "how to read JSON files"
 ```
 
-Default context is stored in `~/.monodex/context.json`. Explicit flags always override defaults.
+Default context is stored in `~/.monodex/monodex-state.json`. Explicit flags always override defaults.
 
 ### Index a Repository
 
@@ -465,7 +465,7 @@ For the full inventory of files Monodex reads or writes (tool-home state, the da
 Configs are loaded in this precedence order:
 
 1. `<repo-root>/monodex-crawl.json` (repo-local)
-2. `~/.monodex/crawl.json` (user-global)
+2. `~/.monodex/monodex-crawl-config.json` (user-global)
 3. Embedded default (compiled into binary)
 
 No merging occurs. Exactly one config is used.
@@ -474,11 +474,11 @@ No merging occurs. Exactly one config is used.
 
 JSON schemas are available in the `schemas/` directory for IDE autocomplete and validation. Reference the appropriate schema in your config file via the `$schema` field:
 
-| Config File          | Schema File                   |
-| -------------------- | ----------------------------- |
-| `config.json`        | `schemas/config.schema.json`  |
-| `monodex-crawl.json` | `schemas/crawl.schema.json`   |
-| `context.json`       | `schemas/context.schema.json` |
+| Config File               | Schema File                   |
+| ------------------------- | ----------------------------- |
+| `monodex-config.json`     | `schemas/config.schema.json`  |
+| `monodex-crawl.json`      | `schemas/crawl.schema.json`   |
+| `monodex-state.json`      | `schemas/context.schema.json` |
 
 Create a `monodex-crawl.json` file:
 

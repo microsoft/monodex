@@ -37,6 +37,8 @@ PUBLISHING PROCEDURE:
 
 ### Changed
 
+- **Breaking: config-file surface simplified.** The `--config` CLI flag and the `MONODEX_CONFIG` environment variable have been removed. The `MONODEX_HOME` environment variable has been renamed to `MONODEX_CONFIG_FOLDER`, with a new `--config-folder` flag that overrides it per-invocation. The three tool-home JSON files have been renamed to self-describing names: `config.json` → `monodex-config.json`, `context.json` → `monodex-state.json`, `crawl.json` → `monodex-crawl-config.json`. Rename your files; update any CI scripts, dotfiles, or shell rc that reference the old names or the removed env var.
+
 - **Breaking: existing databases are not readable.** The on-disk schema has changed and the chunk identity now incorporates the catalog name, so the same content at the same path in two different catalogs no longer produces colliding rows. Older databases are rejected with a schema-mismatch error on first use. The remedy is `monodex init-db --delete-everything` followed by re-crawling each catalog.
 
 - **Breaking: `--incremental-warnings` removed.** The crawl-time `--incremental-warnings` flag and the `<database>/warnings-<catalog>.json` state file it controlled have been removed. Each crawl now emits whatever chunker-fallback warnings it produces this run, with no cross-run persistence. Pre-existing `warnings-<catalog>.json` files are inert on disk and can be removed by `monodex init-db --delete-everything`.

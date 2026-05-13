@@ -118,7 +118,7 @@ This is a test project for Monodex FTS integration testing.
 
 /// Create a test config with a catalog pointing to the given repo path.
 fn create_test_config(monodex_home: &Path, catalog_name: &str, repo_path: &Path) -> Config {
-    let config_path = monodex_home.join("config.json");
+    let config_path = monodex_home.join("monodex-config.json");
     fs::create_dir_all(monodex_home).unwrap();
 
     let config_content = format!(
@@ -905,8 +905,8 @@ fn test_multi_method_search_shows_preamble__quick_excluded() {
                 "--retrieval",
                 "vector",
             ])
-            .env("MONODEX_HOME", monodex_home.path())
-            .env_remove("MONODEX_CONFIG")
+            .env("MONODEX_CONFIG_FOLDER", monodex_home.path())
+            .env_remove("MONODEX_CONFIG_FOLDER")
             .output()
             .expect("failed to execute monodex search");
 

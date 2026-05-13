@@ -43,7 +43,7 @@ The three primitives compose. A typical writer holds shared(database) + exclusiv
 
 Acquisition order is always database -> catalog -> commit mutex. Release is the reverse order, governed by Rust's drop order. No operation reaches past a level it doesn't need to acquire.
 
-`use` writes `~/.monodex/context.json` in the user's tool home, not the database directory, so it does not interact with the lock taxonomy at all.
+`use` writes `~/.monodex/monodex-state.json` in the user's config folder, not the database directory, so it does not interact with the lock taxonomy at all.
 
 ## Contention behavior
 
@@ -131,7 +131,7 @@ The lockfile contents are empty. Nothing is written into them. They exist only a
 
 `rm -rf <db>/locks/` is safe when no Monodex process is running. After a reboot, every lock from the prior boot has already been released by the kernel, and the files on disk are pure detritus. Running monodex again creates whatever lockfiles it needs. Running `rm -rf locks/` while a Monodex writer is active is unsupported behavior in the same category as `rm -rf chunks.lance/` mid-crawl.
 
-A future maintenance command can clean up orphaned per-catalog lockfiles for catalogs that have been removed from `config.json`. None is implemented today; the accumulated detritus is bounded and tiny.
+A future maintenance command can clean up orphaned per-catalog lockfiles for catalogs that have been removed from `monodex-config.json`. None is implemented today; the accumulated detritus is bounded and tiny.
 
 ## Crash recovery
 
@@ -155,7 +155,7 @@ Network filesystems (NFS, SMB, etc.) are out of scope: the README explicitly dis
 - It does not coordinate across Monodex versions. A database written by `monodex 0.5` and accessed by `monodex 0.6` proceeds under the schema-version check, not under any lock-version compatibility scheme.
 - It does not provide fairness guarantees beyond what the kernel provides. POSIX `flock` and Windows `LockFileEx` are typically fair on uncontended-then-contended sequences, but neither documents FIFO ordering. POSIX `flock` is specifically not writer-preferring, so in theory a steady stream of shared-lock acquisitions can starve a pending exclusive request; in practice Monodex's workload (15-30 minute crawls, infrequent operations) does not produce the high-frequency contention pattern that would manifest as starvation.
 - It does not aim to maximize parallelism. Two crawls against the same catalog serialize on the catalog lock; two crawls against different catalogs run mostly in parallel but serialize briefly at LanceDB commit points. Workloads that need finer-grained parallelism than this provides are out of scope; the right answer there would be a different storage layout, not finer locks.
-- It does not coordinate `monodex use` invocations against `~/.monodex/context.json`. That file is tool-home state, not database state, and is out of scope for this design. Concurrent `use` invocations could in principle race on the file; if that ever matters, the fix is a separate context-file lock, not a database lock.
+- It does not coordinate `monodex use` invocations against `~/.monodex/monodex-state.json`. That file is config-folder state, not database state, and is out of scope for this design. Concurrent `use` invocations could in principle race on the file; if that ever matters, the fix is a separate context-file lock, not a database lock.
 - It does not prevent `purge --all` from waiting indefinitely behind in-flight catalog writers. This is intentional: killing a crawl mid-write would leave LanceDB and FTS in an inconsistent state. A `purge --all` invocation effectively means "drain in-flight writes, then destroy everything."
 
 ## Future directions
@@ -165,5 +165,5 @@ The lock taxonomy is intended to support several future extensions without redes
 - **Watch mode** holds a long-lived `IndexWriter` per actively-watched label. Under this design, watch mode would hold the per-catalog lock for the duration of the watch session. Per-command acquisition is what's implemented today; long-held acquisition is a lifetime change, not a model change.
 - **Long-lived host process** (such as an MCP server). Acquires locks per-request rather than per-process: each request that writes acquires the relevant locks, runs, releases. The lock taxonomy is unchanged. Two implementation surfaces matter: blocking lock acquisitions move to `spawn_blocking` to avoid stalling tokio runtime workers, and the progress callback installs a route through the host's protocol surface rather than printing. Both points are noted in the storage-layer integration section. Reader-side, a long-lived host holding open `Database` handles must be robust to a concurrent purge invalidating its read state, the same way `monodex search` is.
 - **Schema upgrade** (`monodex upgrade-db`, planned for the first reference customer with a multi-month-old database). The shape of the upgrade operation is undecided: it could be in-place rewrite of the existing database directory, or a friendlier "delete and recrawl" that automates what users do manually today under the current schema-bump policy. The lock implications are different. In-place rewrite acquires the database-exclusive lock against the existing database, blocks readers from opening it during the rewrite (the lock-free reader contract here assumes no destructive in-place rewrites are happening behind readers' backs, which has to be revisited if the upgrade goes this way), and faces the same Windows-mmap-during-write platform difference noted for purge above. Recrawl-into-fresh-directory doesn't really need the lock; it operates on a path that no reader has open. Picking between these is upgrade-design work, not lock-design work; the lock taxonomy supports either, but the shape of upgrade affects what the reader contract has to promise.
-- **Orphaned-lockfile cleanup** (a future maintenance command) scans `locks/per-catalog/`, cross-references against `config.json`, and deletes lockfiles for catalogs no longer in config. Acquires each lockfile briefly with `try_lock` before deleting, to avoid removing actively-held files.
+- **Orphaned-lockfile cleanup** (a future maintenance command) scans `locks/per-catalog/`, cross-references against `monodex-config.json`, and deletes lockfiles for catalogs no longer in config. Acquires each lockfile briefly with `try_lock` before deleting, to avoid removing actively-held files.
 - **Future FTS storage changes.** The catalog-level writer contract is the stable interface; future internal restructuring of FTS state should preserve it.

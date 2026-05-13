@@ -4,8 +4,8 @@ This document inventories every file involved in Monodex's runtime contract: too
 
 Two placeholders are used throughout:
 
-- `<tool-home>`: the Monodex tool home directory. Defaults to `~/.monodex/`, overridable via the `MONODEX_HOME` environment variable. Resolution logic in `src/paths.rs`. A relative `MONODEX_HOME` is resolved against the current working directory at process start; empty or whitespace-only values are treated as unset.
-- `<database-dir>`: the database directory. Defaults to `<tool-home>/default-db/`, relocatable via the `database.path` field in `config.json`. Must be an absolute path on a local filesystem.
+- `<config-folder>`: the Monodex config folder. Defaults to `~/.monodex/`, overridable via the `MONODEX_CONFIG_FOLDER` environment variable or `--config-folder` CLI flag. Resolution logic in `src/paths.rs`. A relative path is resolved against the current working directory at process start; empty or whitespace-only values are treated as unset.
+- `<database-dir>`: the database directory. Defaults to `<config-folder>/default-db/`, relocatable via the `database.path` field in `monodex-config.json`. Must be an absolute path on a local filesystem.
 
 ## A note on validation
 
@@ -16,29 +16,25 @@ The user-editable JSON files have two layers of validation that look like one bu
 
 The two layers describe the same shapes but are independently maintained. Adding or renaming a field requires updating both: the JSON Schema (for editor experience) and the Rust struct (for runtime correctness). This is duplication, and it is deliberate. The alternative would be code-generating one side from the other, which has its own maintenance burden and tooling cost. Treat this as a known coupling: a config-shape change is not done until both sides agree.
 
-One distinction worth knowing: `config.json` and `crawl.json` reject unknown fields at load time, but `context.json` does not. This is intentional, not an oversight. The user-edited files want strict failure (an unknown field is almost always a typo that would otherwise silently do nothing). The tool-managed `context.json` wants lenient parsing so that an older binary can still read a state file written by a newer binary. The alternative is that downgrading Monodex breaks until the user manually edits or deletes their context.
+One distinction worth knowing: `monodex-config.json` and `monodex-crawl-config.json` reject unknown fields at load time, but `monodex-state.json` does not. This is intentional, not an oversight. The user-edited files want strict failure (an unknown field is almost always a typo that would otherwise silently do nothing). The tool-managed `monodex-state.json` wants lenient parsing so that an older binary can still read a state file written by a newer binary. The alternative is that downgrading Monodex breaks until the user manually edits or deletes their context.
 
-## Tool home
+## Config folder
 
-The tool home contains three user-facing JSON files plus the default database directory.
+The config folder contains three user-facing JSON files plus the default database directory.
 
-### `<tool-home>/config.json`
+### `<config-folder>/monodex-config.json`
 
 User-editable. Defines catalogs (data sources Monodex indexes), an optional `database.path` override, and embedding-model knobs. Editor schema in `schemas/config.schema.json`; runtime validation in `src/app/config.rs`. Edit by hand or via your editor's JSON-Schema integration; Monodex itself does not write to this file.
 
-### `<tool-home>/context.json`
+### `<config-folder>/monodex-state.json`
 
 Tool-managed. Records the default catalog and label set by `monodex use`, so subsequent commands don't need `--catalog` and `--label` on every invocation. Written by the `use` subcommand; read by every other subcommand. Editor schema in `schemas/context.schema.json`; runtime loader in `src/app/context.rs`. Users can edit it by hand if desired, but the supported workflow is `monodex use <catalog>:<label>`.
 
-### `<tool-home>/crawl.json`
+### `<config-folder>/monodex-crawl-config.json`
 
-User-editable, optional. The user-global crawl config: file-type-to-strategy mappings and exclude/keep glob patterns. If absent, an embedded default (compiled into the binary, source in `src/engine/crawl_config.rs`) is used. Discovery precedence is repo-local `monodex-crawl.json` → user-global `<tool-home>/crawl.json` → embedded default; first found wins, no merging. Editor schema in `schemas/crawl.schema.json`; runtime loader in `src/engine/crawl_config.rs`.
+User-editable, optional. The user-global crawl config: file-type-to-strategy mappings and exclude/keep glob patterns. If absent, an embedded default (compiled into the binary, source in `src/engine/crawl_config.rs`) is used. Discovery precedence is repo-local `monodex-crawl.json` → user-global `<config-folder>/monodex-crawl-config.json` → embedded default; first found wins, no merging. Editor schema in `schemas/crawl.schema.json`; runtime loader in `src/engine/crawl_config.rs`.
 
-This file is not auto-created by current Monodex. Auto-creation on first run, with a starter template seeded from `examples/monodex-crawl.json`, is part of the planned `monodex init` flow.
-
-### Migration warning
-
-Earlier prerelease versions placed these files at platform-dependent locations (`~/.config/monodex/` for `config.json` and `context.json`; OS-default config dir for `crawl.json`). On startup, `src/paths.rs` checks for files at those old paths and prints a non-suppressible one-line warning to stderr instructing the user to move them. The check exists to handle leftover files from prerelease use, not because there is a documented user base to support; the function is intended to be deleted once enough time has passed.
+This file is not auto-created by current Monodex. Auto-creation on first run, with a starter template seeded from `examples/monodex-crawl-config.json`, is part of the planned `monodex init` flow.
 
 ## Database directory
 
@@ -92,7 +88,7 @@ Monodex reads two kinds of files from the repository being indexed.
 
 ### `<repo-root>/monodex-crawl.json`
 
-User-editable, optional. If present at the root of the indexed repo, this overrides the user-global `<tool-home>/crawl.json` for crawls of that repo. Same shape as the user-global file (editor schema in `schemas/crawl.schema.json`, runtime loader in `src/engine/crawl_config.rs`). Repo-local config is the right place for repo-specific exclusions and any file-type strategies that should ship with the repo; user-global config is the right place for personal preferences that span all the user's repos. Monodex does not write to this file.
+User-editable, optional. If present at the root of the indexed repo, this overrides the user-global `<config-folder>/monodex-crawl-config.json` for crawls of that repo. Same shape as the user-global file (editor schema in `schemas/crawl.schema.json`, runtime loader in `src/engine/crawl_config.rs`). Repo-local config is the right place for repo-specific exclusions and any file-type strategies that should ship with the repo; user-global config is the right place for personal preferences that span all the user's repos. Monodex does not write to this file.
 
 ### `package.json` files anywhere in the repo
 
@@ -114,7 +110,13 @@ These are not used at runtime; runtime validation comes from the typed Rust stru
 
 ### `examples/*.json`
 
-Templates for the user-editable JSON files, in JSON-with-comments format. Three files corresponding to the three schemas: `config.json`, `context.json`, `monodex-crawl.json`. Each is a fully-commented example of the corresponding format with sensible defaults.
+Templates for the user-editable JSON files, in JSON-with-comments format. Four files:
+- `monodex-config.json` — user-global config template
+- `monodex-state.json` — user-global state template
+- `monodex-crawl-config.json` — user-global crawl config template
+- `monodex-crawl.json` — repo-local crawl config template
+
+Each is a fully-commented example of the corresponding format with sensible defaults.
 
 JSON-with-comments is the format Rush Stack uses for user-editable JSON. Comments serve two purposes: as ambient documentation that survives editing (the user keeps the comments when they tweak a value, so the next time they open the file they remember what each field does), and as an upgrade vector. When the comment guidance changes, Monodex can offer to upgrade the comments in a user's existing file while preserving their values, analogous to how Debian package upgrades present new versions of `/etc` config files for diff-and-merge. This is not a settled industry convention; calling the format JSONC is misleading because several different specifications use that name. The format is JSON-with-comments. It is not JSON5 (a JavaScript subset much broader than JSON-with-comments).
 
