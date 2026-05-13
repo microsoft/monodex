@@ -8,7 +8,7 @@
 //!
 //! 1. Open or create the FTS index for the label
 //! 2. Read all chunks for the label from LanceDB
-//! 3. Determine currently indexed row_ids (from manifest or by scanning Tantivy)
+//! 3. Determine currently indexed row_ids by scanning Tantivy's term dictionary
 //! 4. Compute diff: additions and removals
 //! 5. Apply deletions and additions to Tantivy
 //! 6. Commit and write updated manifest
@@ -166,8 +166,8 @@ fn get_currently_indexed_row_ids(fts_index: &FtsIndex) -> Result<BTreeSet<String
     // Performance guardrail:
     // FTS term-dictionary scans are O(live_docs) per crawl. If profiling on a
     // real-scale catalog shows this scan dominating crawl time, prefer adding
-    // periodic FTS commits during the crawl. Do not weaken this scan;
-    // it is the crawl correctness boundary.
+    // periodic FTS commits during the crawl. Do not introduce a manifest-based
+    // shortcut to skip the scan; the scan is the crawl correctness boundary.
     reconcile_from_index(&searcher, fts_index.fields.row_id)
 }
 

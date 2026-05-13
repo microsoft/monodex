@@ -102,6 +102,9 @@ impl FtsIndex {
         let manifest_path = index_dir.join("manifest.json");
         let manifest_result = read_manifest(&manifest_path);
 
+        // Track whether we created or rebuilt Tantivy state (requires manifest write)
+        let mut created_or_rebuilt = false;
+
         // Handle manifest results that require action before opening Tantivy
         match &manifest_result {
             ManifestRead::IdMismatch { .. } => {
@@ -111,6 +114,7 @@ impl FtsIndex {
                         anyhow!("Failed to remove FTS directory for rebuild: {}", e)
                     })?;
                 }
+                created_or_rebuilt = true;
             }
             ManifestRead::Missing => {
                 // Missing manifest: check if Tantivy state exists
@@ -119,6 +123,7 @@ impl FtsIndex {
                     std::fs::remove_dir_all(&index_dir).map_err(|e| {
                         anyhow!("Failed to remove FTS directory for rebuild: {}", e)
                     })?;
+                    created_or_rebuilt = true;
                 }
                 // No Tantivy state, treat as fresh create
             }
@@ -144,12 +149,14 @@ impl FtsIndex {
                 .map_err(|e| anyhow!("Failed to create FTS directory: {}", e))?;
             let directory = MmapDirectory::open(&index_dir)
                 .map_err(|e| anyhow!("Failed to open MmapDirectory: {}", e))?;
+            created_or_rebuilt = true;
             Index::create(directory, schema.clone(), IndexSettings::default())
                 .map_err(|e| anyhow!("Failed to create Tantivy index: {}", e))?
         } else if !has_tantivy_state(&index_dir) {
             // Directory exists but is empty: initialize a new index
             let directory = MmapDirectory::open(&index_dir)
                 .map_err(|e| anyhow!("Failed to open MmapDirectory: {}", e))?;
+            created_or_rebuilt = true;
             Index::create(directory, schema.clone(), IndexSettings::default())
                 .map_err(|e| anyhow!("Failed to create Tantivy index: {}", e))?
         } else {
@@ -173,12 +180,9 @@ impl FtsIndex {
             path: index_dir.clone(),
         };
 
-        // Step 4: Write manifest if this was a fresh create (no existing manifest)
+        // Step 4: Write manifest if we created or rebuilt Tantivy state
         // This ensures open_existing can validate the index on subsequent opens
-        if matches!(
-            manifest_result,
-            ManifestRead::Missing | ManifestRead::Unreadable { .. }
-        ) {
+        if created_or_rebuilt {
             let manifest = FtsManifest::new();
             write_manifest(&fts_index.manifest_path(), &manifest)?;
         }
@@ -583,6 +587,48 @@ mod tests {
                 assert_eq!(m.fts_tokenizer_id, FTS_TOKENIZER_ID);
             }
             other => panic!("Expected Present manifest, got {:?}", other),
+        }
+    }
+
+    /// Test: open_or_create writes manifest after IdMismatch rebuild (BL12a fixup)
+    #[test]
+    fn test_open_or_create_writes_manifest_after_id_mismatch_rebuild() {
+        use crate::engine::fts::manifest::read_manifest;
+
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path();
+        let label_id = make_label_id("test-catalog", "test-label");
+
+        // Create index (which creates manifest)
+        let fts_index = FtsIndex::open_or_create(db_path, &label_id).unwrap();
+        drop(fts_index);
+
+        // Overwrite manifest with mismatched schema ID
+        let manifest_path = fts_index_dir(db_path, &label_id).join("manifest.json");
+        let bad_manifest = serde_json::json!({
+            "fts_schema_id": "bad-schema-id",
+            "fts_tokenizer_id": FTS_TOKENIZER_ID
+        });
+        std::fs::write(
+            &manifest_path,
+            serde_json::to_string(&bad_manifest).unwrap(),
+        )
+        .unwrap();
+
+        // Open or create should rebuild due to IdMismatch
+        let fts_index = FtsIndex::open_or_create(db_path, &label_id).unwrap();
+        drop(fts_index);
+
+        // Verify a valid manifest was written after rebuild
+        match read_manifest(&manifest_path) {
+            ManifestRead::Present(m) => {
+                assert_eq!(m.fts_schema_id, FTS_SCHEMA_ID);
+                assert_eq!(m.fts_tokenizer_id, FTS_TOKENIZER_ID);
+            }
+            other => panic!(
+                "Expected Present manifest after IdMismatch rebuild, got {:?}",
+                other
+            ),
         }
     }
 }

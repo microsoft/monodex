@@ -47,7 +47,7 @@ The first match wins, reproducing the "nearest ancestor `package.json` governs t
 
 ## Step 4: File processing
 
-For each enumerated file, the work splits into a sentinel-check fast path and a chunk-embed-upsert slow path. This file-enumeration fast path governs whether chunk-row work happens; FTS-side incremental work happens later, in the FTS phase, as a separate batch reconciliation against the staleness manifest.
+For each enumerated file, the work splits into a sentinel-check fast path and a chunk-embed-upsert slow path. This file-enumeration fast path governs whether chunk-row work happens; FTS-side incremental work happens later, in the FTS phase, as a separate batch reconciliation against the per-label Tantivy index.
 
 **Sentinel-check fast path:** Compute `file_id` from `(embedder_id, chunker_id, catalog, blob_id, relative_path)`. Look up the `row_id` of the sentinel chunk (`{file_id}:1`). The qualification predicate is:
 

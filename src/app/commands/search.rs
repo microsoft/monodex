@@ -397,14 +397,14 @@ async fn run_single_method_search<W: Write>(
                     let source_pointer = format_source_pointer(label_metadata);
                     let warning = match reason {
                         FtsStaleReason::IdMismatch | FtsStaleReason::MissingManifestWithState => {
-                            SearchWarning::FtsStaleNoFallback {
+                            SearchWarning::FtsStale {
                                 catalog: preamble.catalog.clone(),
                                 label: preamble.label.clone(),
                                 source_pointer,
                             }
                         }
                         FtsStaleReason::UnreadableManifestWithState => {
-                            SearchWarning::FtsManifestUnreadableNoFallback {
+                            SearchWarning::FtsManifestUnreadable {
                                 catalog: preamble.catalog.clone(),
                                 label: preamble.label.clone(),
                             }
@@ -539,14 +539,14 @@ async fn run_hybrid_search<W: Write>(
                 let source_pointer = format_source_pointer(label_metadata);
                 let warning = match reason {
                     FtsStaleReason::IdMismatch | FtsStaleReason::MissingManifestWithState => {
-                        SearchWarning::FtsStaleDegrade {
+                        SearchWarning::FtsStale {
                             catalog: preamble.catalog.clone(),
                             label: preamble.label.clone(),
                             source_pointer,
                         }
                     }
                     FtsStaleReason::UnreadableManifestWithState => {
-                        SearchWarning::FtsManifestUnreadableDegrade {
+                        SearchWarning::FtsManifestUnreadable {
                             catalog: preamble.catalog.clone(),
                             label: preamble.label.clone(),
                         }
