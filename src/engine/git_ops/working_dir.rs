@@ -312,111 +312,55 @@ fn git_hash_object_batch(repo_root: &Path, paths: &[String]) -> Result<Vec<(Stri
 /// then walks the filesystem to filter by crawl config. The blob IDs
 /// correctly respect .gitattributes, clean filters, and other repo-specific settings.
 pub fn enumerate_working_directory(repo_path: &Path) -> Result<Vec<FileEntry>> {
-    // Build the Git-aware blob map
+    // Build the Git-aware blob map, which is the authoritative source of
+    // what files Git tracks (including files under hidden directories like
+    // .github/, .vscode/, etc.)
     let blob_map = build_working_tree_blob_map(repo_path)?;
 
-    let mut entries: Vec<FileEntry> = Vec::new();
-
-    for entry in walkdir::WalkDir::new(repo_path)
-        .follow_links(false)
+    // Iterate the blob map directly instead of walking the filesystem.
+    // This ensures we include ALL Git-tracked files, regardless of whether
+    // they live under hidden directories.
+    let entries: Vec<FileEntry> = blob_map
+        .blobs_by_path
         .into_iter()
-        .filter_entry(|e| {
-            // Don't filter the root directory itself
-            if e.path() == repo_path {
-                return true;
-            }
-
-            let path = e.path();
-            let name = path
-                .file_name()
-                .map(|n| n.to_string_lossy())
-                .unwrap_or_default();
-
-            // Skip all hidden files and directories (dot-prefixed).
-            if name.starts_with('.') {
-                return false;
-            }
-
-            true
+        .map(|(relative_path, blob_id)| FileEntry {
+            relative_path,
+            blob_id,
         })
-    {
-        let entry = entry.map_err(|e| anyhow!("Failed to read directory entry: {}", e))?;
-        let path = entry.path();
-        if !path.is_file() {
-            continue;
-        }
-
-        let relative_path = path
-            .strip_prefix(repo_path)
-            .map_err(|e| anyhow!("Failed to strip prefix: {}", e))?
-            .to_string_lossy()
-            .replace('\\', "/");
-
-        // Look up the blob ID from our Git-aware map.
-        // Note: Deleted files are already removed from blob_map by build_working_tree_blob_map(),
-        // and won't be found by walkdir() anyway since they don't exist on disk.
-        // This ensures deleted files are never processed as candidates.
-        if let Some(blob_id) = blob_map.blobs_by_path.get(&relative_path) {
-            entries.push(FileEntry {
-                relative_path,
-                blob_id: blob_id.clone(),
-            });
-        }
-        // Files not in blob_map are either:
-        // - in .gitignore (shouldn't be indexed)
-        // - deleted (already removed from blob_map)
-        // We skip them silently.
-    }
+        .collect();
 
     Ok(entries)
 }
 
 /// Build package index from the working directory.
-/// This function walks the filesystem to find all package.json files and extracts
-/// their package names. All hidden directories (dot-prefixed) are excluded.
+/// Uses the Git-aware blob map to find all package.json files Git tracks,
+/// including those under hidden directories like .github/ or .vscode/.
 pub fn build_package_index_for_working_dir(repo_path: &Path) -> Result<PackageIndex> {
     let mut index = PackageIndex::new();
 
-    for entry in walkdir::WalkDir::new(repo_path)
-        .follow_links(false)
-        .into_iter()
-        .filter_entry(|e| {
-            let path = e.path();
-            let name = path
-                .file_name()
-                .map(|n| n.to_string_lossy())
-                .unwrap_or_default();
+    // Build the Git-aware blob map to find all tracked files
+    let blob_map = build_working_tree_blob_map(repo_path)?;
 
-            // Skip all hidden files and directories (dot-prefixed).
-            // This includes .git, .cache, .temp, .idea, .vscode, etc.
-            if name.starts_with('.') {
-                return false;
-            }
-
-            true
-        })
-    {
-        let entry = entry.map_err(|e| anyhow!("Failed to read directory entry: {}", e))?;
-        let path = entry.path();
-        if !path.is_file() {
+    // Find all package.json files Git tracks
+    for relative_path in blob_map.blobs_by_path.keys() {
+        if !relative_path.ends_with("package.json") {
             continue;
         }
 
-        let file_name = path
-            .file_name()
-            .map(|n| n.to_string_lossy())
-            .unwrap_or_default();
-        if file_name != "package.json" {
-            continue;
-        }
-
-        let dir_path = path
-            .parent()
-            .and_then(|p| p.strip_prefix(repo_path).ok())
-            .map(|p| p.to_string_lossy().replace('\\', "/"))
+        // The relative_path might be "package.json" (root) or "some/dir/package.json"
+        // Extract the directory path
+        let dir_path = relative_path
+            .rsplit_once('/')
+            .map(|(_, _)| {
+                relative_path
+                    .strip_suffix("/package.json")
+                    .unwrap_or("")
+                    .to_string()
+            })
             .unwrap_or_default();
 
-        if let Ok(content) = std::fs::read(path)
+        // Read the file content and extract package name
+        if let Ok(content) = read_working_file_content(repo_path, relative_path)
             && let Some(name) = extract_package_name_from_bytes(&content)
         {
             index.package_name_by_dir.insert(dir_path, name);

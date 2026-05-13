@@ -47,6 +47,8 @@ PUBLISHING PROCEDURE:
 
 - **Crashes on tree-sitter-unhandleable TypeScript files.** A pathological `.ts` or `.tsx` file that tree-sitter could not parse used to abort the whole crawl with a panic. Such files are now reported as a warning and skipped.
 
+- **Git-tracked files under hidden directories are no longer dropped.** Working-directory crawls previously skipped files under `.github/`, `.vscode/`, `.config/`, and similar paths even when Git tracked them. Those files are now indexed.
+
 - A handful of crawl-pipeline error-handling and cleanup-gate bugs that could leave a label in an inconsistent state if a phase failed partway through.
 - Stale-hydration warnings in search results now appear in the right place relative to the result that triggered them.
 
