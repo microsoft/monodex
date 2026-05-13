@@ -1,27 +1,27 @@
-# API Documentation
+# Sample Documentation
 
-This document describes the core APIs for the monodex project.
+This document demonstrates various markdown features for testing.
 
 ## Installation
 
-To install monodex, run the following command:
+To install the tool, run the following command:
 
 ```bash
-cargo install monodex
+cargo install example-tool
 ```
 
 Make sure you have Rust 1.70 or later installed.
 
 ## Configuration
 
-Create a configuration file at `~/.monodex/config.json`:
+Create a configuration file at `~/.config/example/config.json`:
 
 ```json
 {
-  "catalogs": {
-    "node-core-library": {
-      "type": "monorepo",
-      "path": "/path/to/rushstack/libraries/node-core-library"
+  "projects": {
+    "my-project": {
+      "type": "library",
+      "path": "/path/to/my-project"
     }
   }
 }
@@ -29,34 +29,34 @@ Create a configuration file at `~/.monodex/config.json`:
 
 ## Usage
 
-### Indexing
+### Basic Commands
 
-To index a catalog:
+To run the tool:
 
 ```bash
-monodex init-db
-monodex crawl --catalog node-core-library --label main --commit HEAD
+example-tool init
+example-tool run --project my-project
 ```
 
 This will:
-1. Scan all TypeScript files
-2. Generate embeddings
-3. Store in the local LanceDB database
+1. Scan all source files
+2. Process the inputs
+3. Generate the output
 
-### Querying
+### Advanced Options
 
-To search the index:
+To customize behavior:
 
 ```bash
-monodex search "JsonFile"
+example-tool run --verbose
 ```
 
 ## Troubleshooting
 
 **Q: I get "No config found" error**
 
-A: Make sure you have created the config file at `~/.monodex/config.json`.
+A: Make sure you have created the config file at `~/.config/example/config.json`.
 
-**Q: I get "No monodex database" error**
+**Q: I get "No database" error**
 
-A: Run `monodex init-db` first to create the database.
+A: Run `example-tool init` first to initialize.

@@ -638,4 +638,32 @@ mod tests {
             "Example monodex-crawl.json does not validate against schema"
         );
     }
+
+    #[test]
+    fn test_example_crawl_config_user_global_validates_against_schema() {
+        use jsonschema::Validator;
+        use std::fs;
+
+        // Load the schema
+        let schema_path = "schemas/crawl.schema.json";
+        let schema_str = fs::read_to_string(schema_path)
+            .expect("Failed to read crawl.schema.json - run from project root");
+        let schema: serde_json::Value =
+            serde_json::from_str(&schema_str).expect("Failed to parse crawl.schema.json as JSON");
+
+        // Compile the schema
+        let validator = Validator::new(&schema).expect("Failed to compile JSON schema");
+
+        // Load and validate the user-global crawl config example
+        let example_path = "examples/monodex-crawl-config.json";
+        let example_str = fs::read_to_string(example_path)
+            .expect("Failed to read monodex-crawl-config.json - run from project root");
+        let example: serde_json::Value = serde_json::from_str(&example_str)
+            .expect("Failed to parse monodex-crawl-config.json as JSON");
+
+        assert!(
+            validator.is_valid(&example),
+            "Example monodex-crawl-config.json does not validate against schema"
+        );
+    }
 }

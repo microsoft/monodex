@@ -3,37 +3,37 @@ source: src/engine/markdown_partitioner.rs
 expression: format_chunks(&chunks)
 ---
 === CHUNK 1 ===
-Breadcrumb: monodex:API.md:api-documentation
+Breadcrumb: monodex:API.md:sample-documentation
 Type: section
 Lines: 1-4
-Size: 84 chars
+Size: 90 chars
 Preview:
-# API Documentation
+# Sample Documentation
 
-This document describes the core APIs for the monodex project.
+This document demonstrates various markdown features for testing.
 
 === CHUNK 2 ===
 Breadcrumb: monodex:API.md:installation
 Type: section
 Lines: 5-14
-Size: 149 chars
+Size: 155 chars
 Preview:
 ## Installation
 
-To install monodex, run the following command:
+To install the tool, run the following command:
 
 ```bash
-cargo install monodex
+cargo install example-tool
 
 === CHUNK 3 ===
 Breadcrumb: monodex:API.md:configuration
 Type: section
 Lines: 15-29
-Size: 234 chars
+Size: 206 chars
 Preview:
 ## Configuration
 
-Create a configuration file at `~/.monodex/config.json`:
+Create a configuration file at `~/.config/example/config.json`:
 
 ```json
 {
@@ -47,39 +47,39 @@ Preview:
 ## Usage
 
 === CHUNK 5 ===
-Breadcrumb: monodex:API.md:indexing
+Breadcrumb: monodex:API.md:basic-commands
 Type: section
 Lines: 32-45
-Size: 235 chars
+Size: 188 chars
 Preview:
-### Indexing
+### Basic Commands
 
-To index a catalog:
+To run the tool:
 
 ```bash
-monodex init-db
+example-tool init
 
 === CHUNK 6 ===
-Breadcrumb: monodex:API.md:querying
+Breadcrumb: monodex:API.md:advanced-options
 Type: section
 Lines: 46-53
-Size: 74 chars
+Size: 85 chars
 Preview:
-### Querying
+### Advanced Options
 
-To search the index:
+To customize behavior:
 
 ```bash
-monodex search "JsonFile"
+example-tool run --verbose
 
 === CHUNK 7 ===
 Breadcrumb: monodex:API.md:troubleshooting
 Type: section
 Lines: 54-62
-Size: 230 chars
+Size: 222 chars
 Preview:
 ## Troubleshooting
 
 **Q: I get "No config found" error**
 
-A: Make sure you have created the config file at `~/.monodex/config.json`.
+A: Make sure you have created the config file at `~/.config/example/config.json`.
