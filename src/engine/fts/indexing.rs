@@ -8,7 +8,7 @@
 //!
 //! 1. Open or create the FTS index for the label
 //! 2. Read all chunks for the label from LanceDB
-//! 3. Determine currently indexed row_ids (from manifest or by scanning Tantivy)
+//! 3. Determine currently indexed row_ids by scanning Tantivy's term dictionary
 //! 4. Compute diff: additions and removals
 //! 5. Apply deletions and additions to Tantivy
 //! 6. Commit and write updated manifest
@@ -18,7 +18,7 @@ use std::collections::BTreeSet;
 use tantivy::doc;
 
 use crate::engine::fts::index::FtsIndex;
-use crate::engine::fts::manifest::{FtsManifest, ManifestRead, reconcile_from_index};
+use crate::engine::fts::manifest::{FtsManifest, reconcile_from_index};
 use crate::engine::fts::tokenizer::tokenize_text;
 use crate::engine::identifier::LabelId;
 use crate::engine::storage::ChunkStorage;
@@ -130,8 +130,11 @@ pub async fn index_chunks_for_fts(
         writer.wait_merging_threads()?;
     }
 
-    // Step 10: Compute post-commit indexed set and write manifest
-    // The manifest contains: currently_indexed - removals + successfully_added
+    // Step 10: Write manifest with current compatibility metadata
+    let manifest = FtsManifest::new();
+    fts_index.write_manifest(&manifest)?;
+
+    // Compute stats
     let added_count = successfully_added.len();
     let removed_count = removals.len();
     let zero_token_skipped = additions.len() - added_count;
@@ -141,9 +144,6 @@ pub async fn index_chunks_for_fts(
         .cloned()
         .chain(successfully_added)
         .collect();
-
-    let manifest = FtsManifest::with_row_ids(final_indexed.clone());
-    fts_index.write_manifest(&manifest)?;
 
     Ok(FtsIndexingStats {
         live_row_ids: final_indexed.len(),
@@ -156,43 +156,19 @@ pub async fn index_chunks_for_fts(
 
 /// Get the currently indexed row_ids from the FTS index.
 ///
-/// Always reconciles from Tantivy to ensure correctness. The manifest is used
-/// only as an optimization when it exactly matches Tantivy's live row_id set.
-///
-/// ## Crash-window handling
-///
-/// A process crash between Tantivy commit and manifest write can leave the manifest
-/// stale (having fewer or different row_ids than Tantivy). We detect this by
-/// deriving Tantivy's live row_id set and comparing it as a set against the manifest.
-/// If they differ for any reason, we use the Tantivy-derived set.
+/// Always derives the live row_id set from Tantivy's term dictionary.
+/// The manifest stores only compatibility metadata (schema/tokenizer IDs);
+/// it does not track row_ids.
 fn get_currently_indexed_row_ids(fts_index: &FtsIndex) -> Result<BTreeSet<String>> {
     let reader = fts_index.reader()?;
     let searcher = reader.searcher();
 
-    // Always derive Tantivy's live row_id set
     // Performance guardrail:
     // FTS term-dictionary scans are O(live_docs) per crawl. If profiling on a
     // real-scale catalog shows this scan dominating crawl time, prefer adding
-    // periodic FTS commits during the crawl. Do not weaken manifest reconciliation
-    // to avoid the scan; reconciliation is the crawl correctness boundary.
-    let tantivy_row_ids = reconcile_from_index(&searcher, fts_index.fields.row_id)?;
-
-    match fts_index.read_manifest() {
-        ManifestRead::Present(manifest) if !manifest.row_ids.is_empty() => {
-            let manifest_row_ids = manifest.row_ids_set();
-            if manifest_row_ids == tantivy_row_ids {
-                // Manifest matches Tantivy exactly; use it
-                Ok(manifest_row_ids)
-            } else {
-                // Manifest disagrees with Tantivy; use Tantivy-derived set
-                Ok(tantivy_row_ids)
-            }
-        }
-        _ => {
-            // Missing, empty, IdMismatch, or Unreadable: use Tantivy-derived set
-            Ok(tantivy_row_ids)
-        }
-    }
+    // periodic FTS commits during the crawl. Do not introduce a manifest-based
+    // shortcut to skip the scan; the scan is the crawl correctness boundary.
+    reconcile_from_index(&searcher, fts_index.fields.row_id)
 }
 
 #[cfg(test)]

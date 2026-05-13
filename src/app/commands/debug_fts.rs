@@ -109,11 +109,12 @@ pub fn run_debug_fts(
             }
 
             // Open FTS index and explain
+            use crate::engine::fts::FtsOpenExistingOutcome;
             match FtsIndex::open_existing(&db_path, &label_id)? {
-                Some(fts_index) => {
+                FtsOpenExistingOutcome::Open(fts_index) => {
                     explain_query(&fts_index, &row_id, query_text, &chunk.text)?;
                 }
-                None => {
+                FtsOpenExistingOutcome::NoIndex => {
                     // Load label metadata to format source pointer, with fallback
                     let label_metadata = label_storage.get_by_label_id(label_id.as_str()).await?;
                     let source_pointer = label_metadata
@@ -125,6 +126,38 @@ pub fn run_debug_fts(
                         "No FTS index for label {}/{}. Run `monodex crawl --label {} {} --retrieval fts` to build it.",
                         catalog_name, label_name, label_name, source_pointer
                     );
+                }
+                FtsOpenExistingOutcome::Stale { reason } => {
+                    // Load label metadata to format source pointer, with fallback
+                    let label_metadata = label_storage.get_by_label_id(label_id.as_str()).await?;
+                    let source_pointer = label_metadata
+                        .as_ref()
+                        .map(format_source_pointer)
+                        .unwrap_or_else(|| "--commit <commit>".to_string());
+                    use crate::engine::fts::FtsStaleReason;
+                    match reason {
+                        FtsStaleReason::IdMismatch | FtsStaleReason::MissingManifestWithState => {
+                            println!();
+                            println!(
+                                "FTS index for {}:{} was built against an older Monodex version and cannot be queried safely.",
+                                catalog_name, label_name
+                            );
+                            println!(
+                                "Re-crawl with: monodex crawl --catalog {} --label {} {}",
+                                catalog_name, label_name, source_pointer
+                            );
+                        }
+                        FtsStaleReason::UnreadableManifestWithState => {
+                            println!();
+                            println!(
+                                "FTS index for {}:{} is in an inconsistent state (manifest unreadable).",
+                                catalog_name, label_name
+                            );
+                            println!(
+                                "Re-crawling may resolve this; if it does not, run `monodex init-db --delete-everything` and re-crawl."
+                            );
+                        }
+                    }
                 }
             }
         }

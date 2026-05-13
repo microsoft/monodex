@@ -47,7 +47,7 @@ The first match wins, reproducing the "nearest ancestor `package.json` governs t
 
 ## Step 4: File processing
 
-For each enumerated file, the work splits into a sentinel-check fast path and a chunk-embed-upsert slow path. This file-enumeration fast path governs whether chunk-row work happens; FTS-side incremental work happens later, in the FTS phase, as a separate batch reconciliation against the staleness manifest.
+For each enumerated file, the work splits into a sentinel-check fast path and a chunk-embed-upsert slow path. This file-enumeration fast path governs whether chunk-row work happens; FTS-side incremental work happens later, in the FTS phase, as a separate batch reconciliation against the per-label Tantivy index.
 
 **Sentinel-check fast path:** Compute `file_id` from `(embedder_id, chunker_id, catalog, blob_id, relative_path)`. Look up the `row_id` of the sentinel chunk (`{file_id}:1`). The qualification predicate is:
 
@@ -80,18 +80,11 @@ The "only after success" rule matters because the touched set is only complete o
 
 ## Step 6: FTS phase
 
-This step runs only if `fts` is in the new retrieval selection. It is a batch reconciliation against the per-label Tantivy index at `<database-dir>/fts/<catalog>/<label>/`, not a per-file fast path. The phase relies on a per-label staleness manifest stored alongside the index, which records the `row_id`s currently indexed and makes incremental diffs cheap.
+This step runs only if `fts` is in the new retrieval selection. It is a batch reconciliation against the per-label Tantivy index at `<database-dir>/fts/<catalog>/<label>/`, not a per-file fast path.
 
-The phase reads the label's chunks from LanceDB (via `get_chunks_for_label`) and diffs them against the chunks currently indexed in Tantivy (sourced from the staleness manifest, with reconciliation rules described below). The diff is computed as a set difference of `row_id`s: chunks present in LanceDB but not in Tantivy are added; chunks present in Tantivy but no longer in LanceDB are removed via `delete_term`. After all additions and deletions are queued, the phase calls `commit()` once. For commit-mode crawls, the phase then calls `wait_merging_threads()` to consolidate; for working-dir crawls, it skips this and accepts fragmentation as the cost of speed (full re-crawl will clean up).
+The phase reads the label's chunks from LanceDB (via `get_chunks_for_label`) and derives the currently indexed `row_id` set from Tantivy's term dictionary (using the alive-bitset filter, so tombstoned-but-not-yet-merged docs do not appear). The diff is computed as a set difference of `row_id`s: chunks present in LanceDB but not in Tantivy are added; chunks present in Tantivy but no longer in LanceDB are removed via `delete_term`. After all additions and deletions are queued, the phase calls `commit()` once. For commit-mode crawls, the phase then calls `wait_merging_threads()` to consolidate; for working-dir crawls, it skips this and accepts fragmentation as the cost of speed (full re-crawl will clean up).
 
-After `commit()` succeeds, the staleness manifest at `<database-dir>/fts/<catalog>/<label>/manifest.json` is rewritten. The manifest contains the `row_id`s actually live in Tantivy after commit (zero-token chunks, which Tantivy cannot index, are excluded), plus the `FTS_SCHEMA_ID` and `FTS_TOKENIZER_ID` constants the index was built with.
-
-**Manifest reconciliation.** The manifest is advisory, not transactional: there is no atomicity available across Tantivy's commit and a sidecar JSON file, and engineering for it (`.tmp` + rename, lockfiles) buys little. The reconciliation rule on the next crawl handles divergence:
-
-- When the manifest exists, always derive Tantivy's live `row_id` set via a term-dictionary scan of the `row_id` field (using the alive-bitset filter, so tombstoned-but-not-yet-merged docs do not appear) and compare it as a set against the manifest. If the sets are equal, use the manifest's value. If they differ for any reason, use the Tantivy-derived set as the currently-indexed set for the diff and rewrite the manifest at end of indexing.
-- When the manifest is missing, the Tantivy-derived set is the only source of truth and the diff proceeds against it.
-
-There is no count-tolerance fast path. A naive "trust the manifest if its size is close to Tantivy's" check would silently miss the same-cardinality-different-rows case and let already-committed docs get added a second time after a process crash between commit and manifest write. The unconditional set comparison closes that hole.
+After `commit()` succeeds, the manifest at `<database-dir>/fts/<catalog>/<label>/manifest.json` is written with the `FTS_SCHEMA_ID` and `FTS_TOKENIZER_ID` constants the index was built with. The manifest stores only compatibility metadata; it does not track row_ids.
 
 **Schema and tokenizer ID mismatch.** The schema and tokenizer behavior are versioned by `FTS_SCHEMA_ID` and `FTS_TOKENIZER_ID` constants in `src/engine/util.rs`. Mismatch is detected via the manifest's stored IDs, not by introspecting Tantivy's on-disk schema:
 

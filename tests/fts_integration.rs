@@ -1737,3 +1737,280 @@ fn test_non_utf8_file_emits_warning__quick_excluded() {
         (monodex_home, repo_dir)
     };
 }
+
+// =============================================================================
+// BL12a: FTS stale state integration tests
+// =============================================================================
+
+/// Test: Hybrid search degrades to vector with stale warning when FTS is stale.
+///
+/// This test verifies that when the FTS index is stale (IdMismatch), hybrid search
+/// falls back to vector-only and emits the appropriate warning.
+#[test]
+#[allow(non_snake_case)]
+fn test_hybrid_search_degrades_on_stale_fts__quick_excluded() {
+    use monodex::engine::fts::{FtsIndex, FtsManifest};
+    use monodex::engine::util::FTS_TOKENIZER_ID;
+
+    let monodex_home = unique_temp_dir();
+    let repo_dir = unique_temp_dir();
+
+    // Create a Git repo with a TypeScript file
+    create_test_git_repo(repo_dir.path());
+
+    // Get the commit OID
+    let git_rev_parse = Command::new("git")
+        .args(["rev-parse", "HEAD"])
+        .current_dir(repo_dir.path())
+        .output()
+        .expect("Failed to run git rev-parse");
+    let commit_oid = String::from_utf8_lossy(&git_rev_parse.stdout)
+        .trim()
+        .to_string();
+
+    // Create config
+    let config = create_test_config(monodex_home.path(), "test-catalog", repo_dir.path());
+
+    // Run init-db
+    run_init_db(&config, false).expect("init-db failed");
+
+    // Run crawl with both methods
+    let crawl_result = monodex::app::commands::crawl::run_crawl_label(
+        &config,
+        "test-catalog",
+        "main",
+        &commit_oid,
+        vec![], // all methods
+        false,
+    );
+    assert!(crawl_result.is_ok(), "Crawl should succeed");
+
+    // Corrupt the FTS manifest to make it stale
+    let db_path = monodex::app::resolve_database_path(&config).unwrap();
+    let label_id = monodex::engine::identifier::LabelId::new("test-catalog", "main").unwrap();
+
+    let fts_index = FtsIndex::open_or_create(&db_path, &label_id).expect("open FTS index");
+    let bad_manifest = FtsManifest {
+        fts_schema_id: "old-schema-id".to_string(),
+        fts_tokenizer_id: FTS_TOKENIZER_ID.to_string(),
+    };
+    fts_index
+        .write_manifest(&bad_manifest)
+        .expect("write bad manifest");
+
+    // Now search - should degrade to vector with warning
+    let mut output = Vec::new();
+    let search_result = run_search(
+        &mut output,
+        &config,
+        "getUserProfile",
+        10,
+        Some("main"),
+        Some("test-catalog"),
+        None, // all methods (hybrid)
+        false,
+    );
+
+    assert!(
+        search_result.is_ok(),
+        "Search should succeed, got error: {:?}",
+        search_result.err()
+    );
+
+    let output_str = String::from_utf8_lossy(&output);
+
+    // Should have the stale warning
+    assert!(
+        output_str.contains("older Monodex version"),
+        "Output should contain stale FTS warning, got:\n{}",
+        output_str
+    );
+
+    // Should still have results from vector search
+    assert!(
+        output_str.contains("example.ts") || output_str.contains("getUserProfile"),
+        "Output should contain results from vector search, got:\n{}",
+        output_str
+    );
+}
+
+/// Test: FTS-only search emits stale warning and zero results when FTS is stale.
+///
+/// This test verifies that when the FTS index is stale and the user requests FTS-only
+/// search, we emit the stale warning and return zero results (not an error).
+#[test]
+#[allow(non_snake_case)]
+fn test_fts_only_search_stale_warning_no_results__quick_excluded() {
+    use monodex::engine::fts::{FtsIndex, FtsManifest};
+    use monodex::engine::retrieval::RetrievalMethod;
+    use monodex::engine::util::FTS_TOKENIZER_ID;
+
+    let monodex_home = unique_temp_dir();
+    let repo_dir = unique_temp_dir();
+
+    // Create a Git repo with a TypeScript file
+    create_test_git_repo(repo_dir.path());
+
+    // Get the commit OID
+    let git_rev_parse = Command::new("git")
+        .args(["rev-parse", "HEAD"])
+        .current_dir(repo_dir.path())
+        .output()
+        .expect("Failed to run git rev-parse");
+    let commit_oid = String::from_utf8_lossy(&git_rev_parse.stdout)
+        .trim()
+        .to_string();
+
+    // Create config
+    let config = create_test_config(monodex_home.path(), "test-catalog", repo_dir.path());
+
+    // Run init-db
+    run_init_db(&config, false).expect("init-db failed");
+
+    // Run crawl with both methods
+    let crawl_result = monodex::app::commands::crawl::run_crawl_label(
+        &config,
+        "test-catalog",
+        "main",
+        &commit_oid,
+        vec![], // all methods
+        false,
+    );
+    assert!(crawl_result.is_ok(), "Crawl should succeed");
+
+    // Corrupt the FTS manifest to make it stale
+    let db_path = monodex::app::resolve_database_path(&config).unwrap();
+    let label_id = monodex::engine::identifier::LabelId::new("test-catalog", "main").unwrap();
+
+    let fts_index = FtsIndex::open_or_create(&db_path, &label_id).expect("open FTS index");
+    let bad_manifest = FtsManifest {
+        fts_schema_id: "old-schema-id".to_string(),
+        fts_tokenizer_id: FTS_TOKENIZER_ID.to_string(),
+    };
+    fts_index
+        .write_manifest(&bad_manifest)
+        .expect("write bad manifest");
+
+    // Now search FTS-only - should emit warning and return no results
+    let mut output = Vec::new();
+    let search_result = run_search(
+        &mut output,
+        &config,
+        "getUserProfile",
+        10,
+        Some("main"),
+        Some("test-catalog"),
+        Some(std::collections::BTreeSet::from([RetrievalMethod::Fts])), // FTS-only
+        false,
+    );
+
+    assert!(
+        search_result.is_ok(),
+        "Search should succeed, got error: {:?}",
+        search_result.err()
+    );
+
+    let output_str = String::from_utf8_lossy(&output);
+
+    // Should have the stale warning
+    assert!(
+        output_str.contains("older Monodex version"),
+        "Output should contain stale FTS warning, got:\n{}",
+        output_str
+    );
+
+    // Should have no results
+    assert!(
+        output_str.contains("No results."),
+        "Output should contain 'No results.', got:\n{}",
+        output_str
+    );
+}
+
+/// Test: FTS-only search emits manifest-unreadable warning and zero results.
+///
+/// This test verifies that when the FTS manifest is unreadable (corrupted JSON)
+/// and the user requests FTS-only search, we emit the unreadable warning
+/// and return zero results (not an error).
+#[test]
+#[allow(non_snake_case)]
+fn test_fts_only_search_unreadable_manifest_warning__quick_excluded() {
+    use monodex::engine::fts::FtsIndex;
+    use monodex::engine::identifier::LabelId;
+    use monodex::engine::retrieval::RetrievalMethod;
+
+    let monodex_home = unique_temp_dir();
+    let repo_dir = unique_temp_dir();
+
+    // Create a Git repo with a TypeScript file
+    create_test_git_repo(repo_dir.path());
+
+    // Get the commit OID
+    let git_rev_parse = Command::new("git")
+        .args(["rev-parse", "HEAD"])
+        .current_dir(repo_dir.path())
+        .output()
+        .expect("Failed to run git rev-parse");
+    let commit_oid = String::from_utf8_lossy(&git_rev_parse.stdout)
+        .trim()
+        .to_string();
+
+    // Create config
+    let config = create_test_config(monodex_home.path(), "test-catalog", repo_dir.path());
+
+    // Run init-db
+    run_init_db(&config, false).expect("init-db failed");
+
+    // Run crawl with both methods
+    let crawl_result = monodex::app::commands::crawl::run_crawl_label(
+        &config,
+        "test-catalog",
+        "main",
+        &commit_oid,
+        vec![], // all methods
+        false,
+    );
+    assert!(crawl_result.is_ok(), "Crawl should succeed");
+
+    // Corrupt the FTS manifest with invalid JSON
+    let db_path = monodex::app::resolve_database_path(&config).unwrap();
+    let label_id = LabelId::new("test-catalog", "main").unwrap();
+    let fts_index = FtsIndex::open_or_create(&db_path, &label_id).expect("open FTS index");
+    std::fs::write(fts_index.manifest_path(), "{ not valid json }")
+        .expect("write corrupt manifest");
+
+    // Now search FTS-only - should emit warning and return no results
+    let mut output = Vec::new();
+    let search_result = run_search(
+        &mut output,
+        &config,
+        "getUserProfile",
+        10,
+        Some("main"),
+        Some("test-catalog"),
+        Some(std::collections::BTreeSet::from([RetrievalMethod::Fts])), // FTS-only
+        false,
+    );
+
+    assert!(
+        search_result.is_ok(),
+        "Search should succeed, got error: {:?}",
+        search_result.err()
+    );
+
+    let output_str = String::from_utf8_lossy(&output);
+
+    // Should have the unreadable manifest warning
+    assert!(
+        output_str.contains("manifest unreadable"),
+        "Output should contain manifest unreadable warning, got:\n{}",
+        output_str
+    );
+
+    // Should have no results
+    assert!(
+        output_str.contains("No results."),
+        "Output should contain 'No results.', got:\n{}",
+        output_str
+    );
+}

@@ -53,6 +53,14 @@ pub enum SearchWarning {
         label: String,
         source_pointer: String,
     },
+    /// FTS index is stale (manifest mismatch) after upgrade.
+    FtsStale {
+        catalog: String,
+        label: String,
+        source_pointer: String,
+    },
+    /// FTS index manifest is unreadable (corrupted).
+    FtsManifestUnreadable { catalog: String, label: String },
     /// A chunk in the FTS index was not found in LanceDB (stale state).
     StaleHydration { row_id: String },
 }
@@ -336,6 +344,33 @@ fn render_warning<W: Write>(writer: &mut W, warning: &SearchWarning) -> io::Resu
                 writer,
                 "⚠️  Chunk {} in FTS index but not in LanceDB (stale state), skipping",
                 row_id
+            )?;
+        }
+        SearchWarning::FtsStale {
+            catalog,
+            label,
+            source_pointer,
+        } => {
+            writeln!(
+                writer,
+                "⚠️  FTS index for {}:{} was built against an older Monodex version and cannot be queried safely.",
+                catalog, label
+            )?;
+            writeln!(
+                writer,
+                "   Re-crawl with: monodex crawl --catalog {} --label {} {}",
+                catalog, label, source_pointer
+            )?;
+        }
+        SearchWarning::FtsManifestUnreadable { catalog, label } => {
+            writeln!(
+                writer,
+                "⚠️  FTS index for {}:{} is in an inconsistent state (manifest unreadable).",
+                catalog, label
+            )?;
+            writeln!(
+                writer,
+                "   Re-crawling may resolve this; if it does not, run `monodex init-db --delete-everything` and re-crawl."
             )?;
         }
     }
@@ -1264,5 +1299,36 @@ mod tests {
         assert_eq!(results[0].fused_hit.row_id, "valid_a");
         assert_eq!(results[1].fused_hit.row_id, "valid_b");
         assert!(trailing.is_empty());
+    }
+
+    #[test]
+    fn test_render_fts_stale_warning_exact_copy() {
+        let warning = SearchWarning::FtsStale {
+            catalog: "my-catalog".to_string(),
+            label: "main".to_string(),
+            source_pointer: "--commit abc123".to_string(),
+        };
+
+        let mut output = Vec::new();
+        render_warning(&mut output, &warning).unwrap();
+        let output = String::from_utf8(output).unwrap();
+
+        let expected = "⚠️  FTS index for my-catalog:main was built against an older Monodex version and cannot be queried safely.\n   Re-crawl with: monodex crawl --catalog my-catalog --label main --commit abc123\n";
+        assert_eq!(output, expected);
+    }
+
+    #[test]
+    fn test_render_fts_manifest_unreadable_warning_exact_copy() {
+        let warning = SearchWarning::FtsManifestUnreadable {
+            catalog: "my-catalog".to_string(),
+            label: "main".to_string(),
+        };
+
+        let mut output = Vec::new();
+        render_warning(&mut output, &warning).unwrap();
+        let output = String::from_utf8(output).unwrap();
+
+        let expected = "⚠️  FTS index for my-catalog:main is in an inconsistent state (manifest unreadable).\n   Re-crawling may resolve this; if it does not, run `monodex init-db --delete-everything` and re-crawl.\n";
+        assert_eq!(output, expected);
     }
 }

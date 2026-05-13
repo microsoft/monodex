@@ -1,20 +1,15 @@
-//! FTS staleness manifest for incremental indexing.
+//! FTS compatibility metadata.
 //!
-//! Purpose: Track which row_ids are indexed in Tantivy to enable cheap diff-based updates.
+//! Purpose: Track FTS schema and tokenizer version to detect stale indexes after upgrade.
 //! Edit here when: Changing manifest format, adding new versioning fields.
 //! Do not edit here for: Tantivy schema (see schema.rs), indexing logic (see indexing.rs).
 //!
 //! ## Design
 //!
-//! The manifest serves two purposes:
-//!
-//! 1. **Fast diff computation**: When re-crawling a label, we can cheaply determine which
-//!    chunks are new (add to Tantivy) vs removed (delete from Tantivy) by comparing
-//!    LanceDB's current row_ids against the manifest's stored set.
-//!
-//! 2. **Version invalidation**: When the FTS schema or tokenizer changes, the stored
-//!    `FTS_SCHEMA_ID` and `FTS_TOKENIZER_ID` will mismatch current constants, triggering
-//!    a full rebuild.
+//! The manifest stores the `FTS_SCHEMA_ID` and `FTS_TOKENIZER_ID` constants the index
+//! was built with. When these don't match the current binary's constants, the index
+//! is stale and must be rebuilt. This enables automatic detection of incompatible
+//! FTS state after a Monodex upgrade.
 
 use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
@@ -49,30 +44,15 @@ pub struct FtsManifest {
     pub fts_schema_id: String,
     /// Tokenizer version identifier. Must match `FTS_TOKENIZER_ID` for the manifest to be valid.
     pub fts_tokenizer_id: String,
-    /// Sorted list of row_ids currently indexed in Tantivy.
-    pub row_ids: Vec<String>,
 }
 
 impl FtsManifest {
-    /// Create a new manifest with the current schema/tokenizer IDs and an empty row_id set.
+    /// Create a new manifest with the current schema/tokenizer IDs.
     pub fn new() -> Self {
         Self {
             fts_schema_id: FTS_SCHEMA_ID.to_string(),
             fts_tokenizer_id: FTS_TOKENIZER_ID.to_string(),
-            row_ids: Vec::new(),
         }
-    }
-
-    /// Create a manifest with the given row_ids.
-    pub fn with_row_ids(row_ids: BTreeSet<String>) -> Self {
-        let mut manifest = Self::new();
-        manifest.row_ids = row_ids.into_iter().collect();
-        manifest
-    }
-
-    /// Get the row_ids as a BTreeSet for efficient set operations.
-    pub fn row_ids_set(&self) -> BTreeSet<String> {
-        self.row_ids.iter().cloned().collect()
     }
 }
 
@@ -86,7 +66,7 @@ impl Default for FtsManifest {
 ///
 /// Returns a `ManifestRead` enum that callers must dispatch on:
 /// - `Missing`: No manifest exists; treat as empty index or check Tantivy state
-/// - `Present(m)`: Valid manifest with matching IDs; use `m.row_ids` as the indexed set
+/// - `Present(m)`: Valid manifest with matching IDs
 /// - `IdMismatch { .. }`: IDs don't match; trigger a rebuild
 /// - `Unreadable { .. }`: Corrupted manifest; check if Tantivy state exists to decide error vs rebuild
 pub fn read_manifest(path: &Path) -> ManifestRead {
@@ -219,7 +199,6 @@ pub fn reconcile_from_index(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::BTreeSet;
     use tempfile::TempDir;
 
     #[test]
@@ -227,17 +206,6 @@ mod tests {
         let manifest = FtsManifest::new();
         assert_eq!(manifest.fts_schema_id, FTS_SCHEMA_ID);
         assert_eq!(manifest.fts_tokenizer_id, FTS_TOKENIZER_ID);
-        assert!(manifest.row_ids.is_empty());
-    }
-
-    #[test]
-    fn test_manifest_with_row_ids() {
-        let mut set = BTreeSet::new();
-        set.insert("row1".to_string());
-        set.insert("row2".to_string());
-
-        let manifest = FtsManifest::with_row_ids(set);
-        assert_eq!(manifest.row_ids, vec!["row1", "row2"]);
     }
 
     #[test]
@@ -256,16 +224,13 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let path = temp_dir.path().join("manifest.json");
 
-        let mut set = BTreeSet::new();
-        set.insert("abc:1".to_string());
-        set.insert("abc:2".to_string());
-
-        let manifest = FtsManifest::with_row_ids(set);
+        let manifest = FtsManifest::new();
         write_manifest(&path, &manifest).unwrap();
 
         match read_manifest(&path) {
             ManifestRead::Present(m) => {
-                assert_eq!(m.row_ids, vec!["abc:1", "abc:2"]);
+                assert_eq!(m.fts_schema_id, FTS_SCHEMA_ID);
+                assert_eq!(m.fts_tokenizer_id, FTS_TOKENIZER_ID);
             }
             other => panic!("Expected Present, got {:?}", other),
         }
@@ -276,13 +241,18 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let path = temp_dir.path().join("manifest.json");
 
-        // Write a manifest with wrong IDs
-        let bad_manifest = FtsManifest {
+        // Write a manifest with wrong schema ID
+        #[derive(Serialize)]
+        struct OldManifest {
+            fts_schema_id: String,
+            fts_tokenizer_id: String,
+        }
+        let bad_manifest = OldManifest {
             fts_schema_id: "old-schema-id".to_string(),
             fts_tokenizer_id: FTS_TOKENIZER_ID.to_string(),
-            row_ids: vec!["row1".to_string()],
         };
-        write_manifest(&path, &bad_manifest).unwrap();
+        let content = serde_json::to_string_pretty(&bad_manifest).unwrap();
+        std::fs::write(&path, content).unwrap();
 
         match read_manifest(&path) {
             ManifestRead::IdMismatch {
@@ -306,5 +276,24 @@ mod tests {
             ManifestRead::Unreadable { .. } => {}
             other => panic!("Expected Unreadable, got {:?}", other),
         }
+    }
+
+    /// Forward-compatibility test: a manifest with extra fields (like the old `row_ids`)
+    /// should deserialize successfully. This guards against accidentally adding
+    /// `#[serde(deny_unknown_fields)]` which would break old-manifest reads.
+    #[test]
+    fn test_manifest_deserializes_with_extra_fields() {
+        let json = r#"{
+            "fts_schema_id": "test-schema",
+            "fts_tokenizer_id": "test-tokenizer",
+            "row_ids": ["row1:1", "row2:1"],
+            "unknown_future_field": "some value"
+        }"#;
+
+        let manifest: FtsManifest =
+            serde_json::from_str(json).expect("Manifest with extra fields should deserialize");
+
+        assert_eq!(manifest.fts_schema_id, "test-schema");
+        assert_eq!(manifest.fts_tokenizer_id, "test-tokenizer");
     }
 }

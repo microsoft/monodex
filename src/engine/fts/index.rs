@@ -29,6 +29,38 @@ use crate::engine::identifier::LabelId;
 /// 200MB provides reasonable performance for typical workloads.
 pub const FTS_HEAP_BUDGET_BYTES: usize = 200_000_000;
 
+// =============================================================================
+// Open-existing outcome types
+// =============================================================================
+
+/// The reason an FTS index is stale and cannot be queried safely.
+///
+/// Used by `FtsOpenExistingOutcome::Stale` to indicate why the index
+/// needs to be rebuilt before querying.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FtsStaleReason {
+    /// Schema or tokenizer ID mismatch (binary upgrade).
+    IdMismatch,
+    /// Manifest file missing but Tantivy state exists.
+    MissingManifestWithState,
+    /// Manifest file exists but is unreadable (corrupted JSON, truncated).
+    UnreadableManifestWithState,
+}
+
+/// The outcome of opening an existing FTS index.
+///
+/// Replaces the previous `Result<Option<FtsIndex>>` with a typed enum that
+/// distinguishes between "no index" and "stale index" states.
+#[derive(Debug)]
+pub enum FtsOpenExistingOutcome {
+    /// Index exists, manifest is valid, and IDs match.
+    Open(FtsIndex),
+    /// No FTS index exists for this label (directory absent or empty).
+    NoIndex,
+    /// Index exists but manifest indicates it cannot be queried safely.
+    Stale { reason: FtsStaleReason },
+}
+
 /// Wrapper around a Tantivy Index with schema field handles.
 pub struct FtsIndex {
     /// The underlying Tantivy index.
@@ -37,6 +69,14 @@ pub struct FtsIndex {
     pub fields: FtsSchemaFields,
     /// Path to the index directory.
     pub path: PathBuf,
+}
+
+impl std::fmt::Debug for FtsIndex {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FtsIndex")
+            .field("path", &self.path)
+            .finish_non_exhaustive()
+    }
 }
 
 impl FtsIndex {
@@ -62,6 +102,9 @@ impl FtsIndex {
         let manifest_path = index_dir.join("manifest.json");
         let manifest_result = read_manifest(&manifest_path);
 
+        // Track whether we created or rebuilt Tantivy state (requires manifest write)
+        let mut created_or_rebuilt = false;
+
         // Handle manifest results that require action before opening Tantivy
         match &manifest_result {
             ManifestRead::IdMismatch { .. } => {
@@ -71,6 +114,18 @@ impl FtsIndex {
                         anyhow!("Failed to remove FTS directory for rebuild: {}", e)
                     })?;
                 }
+                created_or_rebuilt = true;
+            }
+            ManifestRead::Missing => {
+                // Missing manifest: check if Tantivy state exists
+                if has_tantivy_state(&index_dir) {
+                    // Manifest missing but Tantivy state exists: rebuild
+                    std::fs::remove_dir_all(&index_dir).map_err(|e| {
+                        anyhow!("Failed to remove FTS directory for rebuild: {}", e)
+                    })?;
+                    created_or_rebuilt = true;
+                }
+                // No Tantivy state, treat as fresh create
             }
             ManifestRead::Unreadable { error } => {
                 // Check if Tantivy state exists
@@ -94,12 +149,14 @@ impl FtsIndex {
                 .map_err(|e| anyhow!("Failed to create FTS directory: {}", e))?;
             let directory = MmapDirectory::open(&index_dir)
                 .map_err(|e| anyhow!("Failed to open MmapDirectory: {}", e))?;
+            created_or_rebuilt = true;
             Index::create(directory, schema.clone(), IndexSettings::default())
                 .map_err(|e| anyhow!("Failed to create Tantivy index: {}", e))?
         } else if !has_tantivy_state(&index_dir) {
             // Directory exists but is empty: initialize a new index
             let directory = MmapDirectory::open(&index_dir)
                 .map_err(|e| anyhow!("Failed to open MmapDirectory: {}", e))?;
+            created_or_rebuilt = true;
             Index::create(directory, schema.clone(), IndexSettings::default())
                 .map_err(|e| anyhow!("Failed to create Tantivy index: {}", e))?
         } else {
@@ -117,39 +174,80 @@ impl FtsIndex {
 
         let fields = get_fts_fields(&index.schema());
 
-        Ok(FtsIndex {
+        let fts_index = FtsIndex {
             index,
             fields,
-            path: index_dir,
-        })
+            path: index_dir.clone(),
+        };
+
+        // Step 4: Write manifest if we created or rebuilt Tantivy state
+        // This ensures open_existing can validate the index on subsequent opens
+        if created_or_rebuilt {
+            let manifest = FtsManifest::new();
+            write_manifest(&fts_index.manifest_path(), &manifest)?;
+        }
+
+        Ok(fts_index)
     }
 
     /// Open an existing FTS index for read-only access.
     ///
-    /// Returns `Ok(None)` if the index directory does not exist or has no Tantivy state.
-    /// This is the read-side answer to concurrent purge operations.
+    /// Consults the manifest before opening Tantivy to detect stale state.
+    /// Returns a typed outcome that distinguishes between:
+    /// - `NoIndex`: No FTS index exists (directory absent or empty)
+    /// - `Stale`: Index exists but cannot be queried safely (manifest mismatch)
+    /// - `Open`: Index exists and is valid
     ///
-    /// Any `std::io::ErrorKind::NotFound` during the open path returns `Ok(None)`,
-    /// not `Err`. Other Tantivy errors (mmap failures, corruption) remain `Err`.
+    /// This method does NOT auto-rebuild on stale state. Auto-rebuild on the read
+    /// path would violate the reader-lock-free contract in `concurrency.md`.
     ///
     /// # Arguments
     /// * `db_path` - Path to the Monodex database root
     /// * `label_id` - The label identifier
-    pub fn open_existing(db_path: &Path, label_id: &LabelId) -> Result<Option<Self>> {
+    pub fn open_existing(db_path: &Path, label_id: &LabelId) -> Result<FtsOpenExistingOutcome> {
         let index_dir = fts_index_dir(db_path, label_id);
 
-        // Check if directory exists with Tantivy state
+        // Step 1: Check if directory exists with Tantivy state
         if !has_tantivy_state(&index_dir) {
-            return Ok(None);
+            return Ok(FtsOpenExistingOutcome::NoIndex);
         }
 
-        // Try to open the index
+        // Step 2: Read the manifest to check for stale state
+        let manifest_path = index_dir.join("manifest.json");
+        let manifest_result = read_manifest(&manifest_path);
+
+        // Dispatch based on manifest state
+        match manifest_result {
+            ManifestRead::Missing => {
+                // Tantivy state exists but no manifest: stale
+                return Ok(FtsOpenExistingOutcome::Stale {
+                    reason: FtsStaleReason::MissingManifestWithState,
+                });
+            }
+            ManifestRead::IdMismatch { .. } => {
+                // Schema or tokenizer ID mismatch: stale
+                return Ok(FtsOpenExistingOutcome::Stale {
+                    reason: FtsStaleReason::IdMismatch,
+                });
+            }
+            ManifestRead::Unreadable { .. } => {
+                // Manifest exists but is corrupted: stale
+                return Ok(FtsOpenExistingOutcome::Stale {
+                    reason: FtsStaleReason::UnreadableManifestWithState,
+                });
+            }
+            ManifestRead::Present(_) => {
+                // Manifest is valid, proceed to open Tantivy
+            }
+        }
+
+        // Step 3: Try to open the Tantivy index
         let directory = match MmapDirectory::open(&index_dir) {
             Ok(d) => d,
             Err(e) => {
                 // Use typed error discrimination for NotFound
                 if is_not_found_error(&tantivy::TantivyError::OpenDirectoryError(e.clone())) {
-                    return Ok(None);
+                    return Ok(FtsOpenExistingOutcome::NoIndex);
                 }
                 return Err(anyhow!("Failed to open MmapDirectory: {}", e));
             }
@@ -160,20 +258,20 @@ impl FtsIndex {
             Err(e) => {
                 // Use typed error discrimination for NotFound
                 if is_not_found_error(&e) {
-                    return Ok(None);
+                    return Ok(FtsOpenExistingOutcome::NoIndex);
                 }
                 return Err(anyhow!("Failed to open existing Tantivy index: {}", e));
             }
         };
 
-        // Register the custom tokenizer
+        // Step 4: Register the custom tokenizer
         index
             .tokenizers()
             .register(FTS_TOKENIZER_NAME, MonodexFtsTokenizer);
 
         let fields = get_fts_fields(&index.schema());
 
-        Ok(Some(FtsIndex {
+        Ok(FtsOpenExistingOutcome::Open(FtsIndex {
             index,
             fields,
             path: index_dir,
@@ -257,7 +355,9 @@ fn has_tantivy_state(dir: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::engine::fts::manifest::{FtsManifest, ManifestRead};
     use crate::engine::identifier::LabelId;
+    use crate::engine::util::{FTS_SCHEMA_ID, FTS_TOKENIZER_ID};
     use tempfile::TempDir;
 
     fn make_label_id(catalog: &str, label: &str) -> LabelId {
@@ -287,7 +387,7 @@ mod tests {
         let label_id = make_label_id("test-catalog", "missing-label");
 
         let result = FtsIndex::open_existing(db_path, &label_id).unwrap();
-        assert!(result.is_none());
+        assert!(matches!(result, FtsOpenExistingOutcome::NoIndex));
     }
 
     #[test]
@@ -300,8 +400,8 @@ mod tests {
         let _ = FtsIndex::open_or_create(db_path, &label_id).unwrap();
 
         // Open existing
-        let fts_index = FtsIndex::open_existing(db_path, &label_id).unwrap();
-        assert!(fts_index.is_some());
+        let result = FtsIndex::open_existing(db_path, &label_id).unwrap();
+        assert!(matches!(result, FtsOpenExistingOutcome::Open(_)));
     }
 
     #[test]
@@ -327,5 +427,208 @@ mod tests {
 
         // Should be able to create a reader
         let _reader = fts_index.reader().unwrap();
+    }
+
+    // =========================================================================
+    // BL12a: Stale state detection tests
+    // =========================================================================
+
+    /// Test: open_existing returns Stale on IdMismatch
+    #[test]
+    fn test_open_existing_stale_on_id_mismatch() {
+        use crate::engine::fts::manifest::write_manifest;
+        use crate::engine::util::FTS_TOKENIZER_ID;
+
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path();
+        let label_id = make_label_id("test-catalog", "test-label");
+
+        // Create index with correct manifest
+        let fts_index = FtsIndex::open_or_create(db_path, &label_id).unwrap();
+        drop(fts_index);
+
+        // Write a manifest with mismatched schema ID
+        let manifest_path = fts_index_dir(db_path, &label_id).join("manifest.json");
+        let bad_manifest = FtsManifest {
+            fts_schema_id: "old-schema-id".to_string(),
+            fts_tokenizer_id: FTS_TOKENIZER_ID.to_string(),
+        };
+        write_manifest(&manifest_path, &bad_manifest).unwrap();
+
+        // Open existing should return Stale
+        let result = FtsIndex::open_existing(db_path, &label_id).unwrap();
+        match result {
+            FtsOpenExistingOutcome::Stale {
+                reason: FtsStaleReason::IdMismatch,
+            } => {}
+            other => panic!("Expected Stale with IdMismatch, got {:?}", other),
+        }
+    }
+
+    /// Test: open_existing returns Stale on MissingManifestWithState
+    #[test]
+    fn test_open_existing_stale_on_missing_manifest_with_state() {
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path();
+        let label_id = make_label_id("test-catalog", "test-label");
+
+        // Create index (which creates manifest)
+        let fts_index = FtsIndex::open_or_create(db_path, &label_id).unwrap();
+        drop(fts_index);
+
+        // Delete the manifest but leave Tantivy state
+        let manifest_path = fts_index_dir(db_path, &label_id).join("manifest.json");
+        std::fs::remove_file(&manifest_path).unwrap();
+
+        // Open existing should return Stale
+        let result = FtsIndex::open_existing(db_path, &label_id).unwrap();
+        match result {
+            FtsOpenExistingOutcome::Stale {
+                reason: FtsStaleReason::MissingManifestWithState,
+            } => {}
+            other => panic!(
+                "Expected Stale with MissingManifestWithState, got {:?}",
+                other
+            ),
+        }
+    }
+
+    /// Test: open_existing returns Stale on UnreadableManifestWithState
+    #[test]
+    fn test_open_existing_stale_on_unreadable_manifest_with_state() {
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path();
+        let label_id = make_label_id("test-catalog", "test-label");
+
+        // Create index (which creates manifest)
+        let fts_index = FtsIndex::open_or_create(db_path, &label_id).unwrap();
+        drop(fts_index);
+
+        // Corrupt the manifest
+        let manifest_path = fts_index_dir(db_path, &label_id).join("manifest.json");
+        std::fs::write(&manifest_path, "not valid json").unwrap();
+
+        // Open existing should return Stale
+        let result = FtsIndex::open_existing(db_path, &label_id).unwrap();
+        match result {
+            FtsOpenExistingOutcome::Stale {
+                reason: FtsStaleReason::UnreadableManifestWithState,
+            } => {}
+            other => panic!(
+                "Expected Stale with UnreadableManifestWithState, got {:?}",
+                other
+            ),
+        }
+    }
+
+    /// Test: open_existing does not treat missing directory as stale
+    #[test]
+    fn test_open_existing_no_index_for_missing_directory() {
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path();
+        let label_id = make_label_id("test-catalog", "missing-label");
+
+        // Don't create any FTS directory
+
+        let result = FtsIndex::open_existing(db_path, &label_id).unwrap();
+        assert!(
+            matches!(result, FtsOpenExistingOutcome::NoIndex),
+            "Expected NoIndex for missing directory, got {:?}",
+            result
+        );
+    }
+
+    /// Test: open_existing does not treat directory-exists-but-no-Tantivy-state as stale
+    #[test]
+    fn test_open_existing_no_index_for_empty_directory() {
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path();
+        let label_id = make_label_id("test-catalog", "test-label");
+
+        // Create the FTS directory but no Tantivy state
+        let index_dir = fts_index_dir(db_path, &label_id);
+        std::fs::create_dir_all(&index_dir).unwrap();
+
+        let result = FtsIndex::open_existing(db_path, &label_id).unwrap();
+        assert!(
+            matches!(result, FtsOpenExistingOutcome::NoIndex),
+            "Expected NoIndex for empty directory, got {:?}",
+            result
+        );
+    }
+
+    /// Test: open_or_create rebuilds on Missing-with-state (new case from BL12a)
+    #[test]
+    fn test_open_or_create_rebuilds_on_missing_manifest_with_state() {
+        use crate::engine::fts::manifest::read_manifest;
+
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path();
+        let label_id = make_label_id("test-catalog", "test-label");
+
+        // Create index (which creates manifest)
+        let fts_index = FtsIndex::open_or_create(db_path, &label_id).unwrap();
+        drop(fts_index);
+
+        // Delete the manifest but leave Tantivy state
+        let manifest_path = fts_index_dir(db_path, &label_id).join("manifest.json");
+        std::fs::remove_file(&manifest_path).unwrap();
+
+        // Open or create should rebuild (delete and recreate)
+        let fts_index = FtsIndex::open_or_create(db_path, &label_id).unwrap();
+
+        // Verify the index is usable
+        let _writer = fts_index.writer().unwrap();
+
+        // Verify a valid manifest was created
+        match read_manifest(&fts_index.manifest_path()) {
+            ManifestRead::Present(m) => {
+                assert_eq!(m.fts_schema_id, FTS_SCHEMA_ID);
+                assert_eq!(m.fts_tokenizer_id, FTS_TOKENIZER_ID);
+            }
+            other => panic!("Expected Present manifest, got {:?}", other),
+        }
+    }
+
+    /// Test: open_or_create writes manifest after IdMismatch rebuild (BL12a fixup)
+    #[test]
+    fn test_open_or_create_writes_manifest_after_id_mismatch_rebuild() {
+        use crate::engine::fts::manifest::read_manifest;
+
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path();
+        let label_id = make_label_id("test-catalog", "test-label");
+
+        // Create index (which creates manifest)
+        let fts_index = FtsIndex::open_or_create(db_path, &label_id).unwrap();
+        drop(fts_index);
+
+        // Overwrite manifest with mismatched schema ID
+        let manifest_path = fts_index_dir(db_path, &label_id).join("manifest.json");
+        let bad_manifest = serde_json::json!({
+            "fts_schema_id": "bad-schema-id",
+            "fts_tokenizer_id": FTS_TOKENIZER_ID
+        });
+        std::fs::write(
+            &manifest_path,
+            serde_json::to_string(&bad_manifest).unwrap(),
+        )
+        .unwrap();
+
+        // Open or create should rebuild due to IdMismatch
+        let fts_index = FtsIndex::open_or_create(db_path, &label_id).unwrap();
+        drop(fts_index);
+
+        // Verify a valid manifest was written after rebuild
+        match read_manifest(&manifest_path) {
+            ManifestRead::Present(m) => {
+                assert_eq!(m.fts_schema_id, FTS_SCHEMA_ID);
+                assert_eq!(m.fts_tokenizer_id, FTS_TOKENIZER_ID);
+            }
+            other => panic!(
+                "Expected Present manifest after IdMismatch rebuild, got {:?}",
+                other
+            ),
+        }
     }
 }

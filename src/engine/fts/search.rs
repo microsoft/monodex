@@ -20,7 +20,7 @@ use tantivy::query::QueryParser;
 use tantivy::schema::Value;
 
 use crate::engine::fts::error::is_not_found_error;
-use crate::engine::fts::index::FtsIndex;
+use crate::engine::fts::index::{FtsIndex, FtsStaleReason};
 use crate::engine::identifier::LabelId;
 
 /// A hit from FTS search.
@@ -40,6 +40,9 @@ pub enum FtsSearchOutcome {
     /// FTS directory does not exist for this label.
     /// Caller decides whether to warn or silently return empty.
     NoIndex,
+    /// FTS index exists but is stale (manifest mismatch).
+    /// The reason indicates why the index cannot be queried safely.
+    Stale { reason: FtsStaleReason },
     /// Tantivy QueryParser rejected the query string.
     /// String is the parser's error message.
     ParseError(String),
@@ -70,9 +73,13 @@ pub async fn fts_search(
     limit: usize,
 ) -> Result<FtsSearchOutcome> {
     // Step 1: Open the FTS index
+    use crate::engine::fts::index::FtsOpenExistingOutcome;
     let fts_index = match FtsIndex::open_existing(db_path, label_id)? {
-        Some(index) => index,
-        None => return Ok(FtsSearchOutcome::NoIndex),
+        FtsOpenExistingOutcome::Open(index) => index,
+        FtsOpenExistingOutcome::NoIndex => return Ok(FtsSearchOutcome::NoIndex),
+        FtsOpenExistingOutcome::Stale { reason } => {
+            return Ok(FtsSearchOutcome::Stale { reason });
+        }
     };
 
     // Step 2: Build the QueryParser with the monodex-fts tokenizer

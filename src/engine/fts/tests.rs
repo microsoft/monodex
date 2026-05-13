@@ -4,7 +4,6 @@
 //! Edit here when: Adding new FTS integration tests, testing cross-module interactions.
 //! Do not edit here for: Unit tests (co-located with implementation files).
 
-use std::collections::BTreeSet;
 use std::fs::File;
 use std::path::Path;
 
@@ -169,8 +168,7 @@ async fn test_fts_index_with_chunks_ranked_results() -> Result<()> {
     writer.commit()?;
 
     // Write manifest
-    let row_ids: BTreeSet<String> = chunks.iter().map(|c| c.row_id.clone()).collect();
-    let manifest = FtsManifest::with_row_ids(row_ids);
+    let manifest = FtsManifest::new();
     fts_index.write_manifest(&manifest)?;
 
     // Search for "profile" - should match file1:1 and file2:1
@@ -194,6 +192,9 @@ async fn test_fts_index_with_chunks_ranked_results() -> Result<()> {
         }
         FtsSearchOutcome::NoIndex => panic!("Expected Found, got NoIndex"),
         FtsSearchOutcome::ParseError(msg) => panic!("Expected Found, got ParseError: {}", msg),
+        FtsSearchOutcome::Stale { reason } => {
+            panic!("Expected Found, got Stale: {:?}", reason)
+        }
     }
 
     Ok(())
@@ -219,7 +220,6 @@ fn test_manifest_id_mismatch_triggers_rebuild() -> Result<()> {
     let bad_manifest = FtsManifest {
         fts_schema_id: "old-schema:v1".to_string(),
         fts_tokenizer_id: "old-tokenizer:v1".to_string(),
-        row_ids: vec!["old-row:1".to_string()],
     };
     write_manifest(&manifest_path, &bad_manifest)?;
 
@@ -390,16 +390,18 @@ async fn test_zero_token_chunk_excluded_from_manifest() -> Result<()> {
         "zero_token_row_ids should contain the zero-token chunk's row_id"
     );
 
-    // Verify the manifest contains only the normal chunk's row_id
-    let fts_index = FtsIndex::open_existing(db_path, &label_id)?
-        .expect("FTS index should exist after indexing");
+    // Verify the manifest exists and is valid
+    use crate::engine::fts::index::FtsOpenExistingOutcome;
+    let fts_index = match FtsIndex::open_existing(db_path, &label_id)? {
+        FtsOpenExistingOutcome::Open(index) => index,
+        FtsOpenExistingOutcome::NoIndex => panic!("FTS index should exist after indexing"),
+        FtsOpenExistingOutcome::Stale { reason } => {
+            panic!("FTS index should not be stale, got: {:?}", reason)
+        }
+    };
     match fts_index.read_manifest() {
-        ManifestRead::Present(m) => {
-            assert_eq!(m.row_ids.len(), 1, "Manifest should have exactly 1 row_id");
-            assert_eq!(
-                m.row_ids[0], "aaaabbbbcccc1111:1",
-                "Manifest should contain the normal chunk's row_id"
-            );
+        ManifestRead::Present(_) => {
+            // Manifest exists with valid IDs
         }
         other => panic!("Expected Present, got {:?}", other),
     }
@@ -450,6 +452,9 @@ async fn test_fts_search_parse_error() -> Result<()> {
             panic!("Expected ParseError for invalid query, got Found with results");
         }
         FtsSearchOutcome::NoIndex => panic!("Expected ParseError, got NoIndex"),
+        FtsSearchOutcome::Stale { reason } => {
+            panic!("Expected ParseError, got Stale: {:?}", reason)
+        }
     }
 
     Ok(())
@@ -467,234 +472,13 @@ fn test_open_existing_returns_none_for_missing() -> Result<()> {
 
     // Don't create any FTS directory
 
+    use crate::engine::fts::index::FtsOpenExistingOutcome;
     let result = FtsIndex::open_existing(db_path, &label_id)?;
 
-    assert!(result.is_none(), "Expected None for missing index");
-
-    Ok(())
-}
-
-// =============================================================================
-// Additional test: Manifest sanity check fallback
-// =============================================================================
-
-/// This test verifies that when the manifest disagrees with Tantivy's actual
-/// row_id set, the system reconciles from Tantivy rather than trusting the
-/// bogus manifest.
-///
-/// The crash-window scenario: a process crashes between Tantivy commit and
-/// manifest write, leaving Tantivy with more docs than the stale manifest knows.
-/// The set-comparison catches this and uses the Tantivy-derived set.
-#[tokio::test]
-async fn test_manifest_reconciles_when_set_differs() -> Result<()> {
-    let temp_dir = TempDir::new()?;
-    let db_path = temp_dir.path();
-    let label_id = make_label_id("test-catalog", "main");
-
-    // Create database and get chunk storage
-    let db = create_test_db_with_fts(db_path).await;
-    let chunk_storage = db.chunks_storage().await?;
-
-    // Create 1000 chunks
-    let mut chunks: Vec<ChunkRow> = Vec::new();
-    for i in 0..1000 {
-        let row_id = format!("aaaa{:04x}cccc1111:1", i);
-        let file_id = format!("aaaa{:04x}cccc1111", i);
-        chunks.push(test_chunk_row(
-            &row_id,
-            &file_id,
-            1,
-            label_id.as_ref(),
-            &format!("document number {} with some content", i),
-        ));
-    }
-
-    // Insert all chunks into storage
-    insert_test_chunks(&chunk_storage, &chunks).await?;
-
-    // First, do an initial FTS indexing to build a correct index
-    let stats = index_chunks_for_fts(
-        db_path,
-        &label_id,
-        &chunk_storage,
-        true, // is_commit_mode
-    )
-    .await?;
-
-    assert_eq!(stats.added, 1000, "Expected 1000 chunks added");
-    assert_eq!(stats.live_row_ids, 1000, "Expected 1000 live row_ids");
-
-    // Now write a BOGUS manifest with only 100 row_ids
-    // The set comparison will detect this mismatch and reconcile from Tantivy.
-    let mut bogus_row_ids = BTreeSet::new();
-    for i in 0..100 {
-        bogus_row_ids.insert(format!("fake-row-{}", i));
-    }
-    let bogus_manifest = FtsManifest {
-        fts_schema_id: FTS_SCHEMA_ID.to_string(),
-        fts_tokenizer_id: FTS_TOKENIZER_ID.to_string(),
-        row_ids: bogus_row_ids.into_iter().collect(),
-    };
-    let fts_index = FtsIndex::open_existing(db_path, &label_id)?.expect("index exists");
-    fts_index.write_manifest(&bogus_manifest)?;
-
-    // Verify the bogus manifest was written
-    match fts_index.read_manifest() {
-        ManifestRead::Present(m) => {
-            assert_eq!(
-                m.row_ids.len(),
-                100,
-                "Bogus manifest should have 100 row_ids"
-            );
-        }
-        other => panic!("Expected Present, got {:?}", other),
-    }
-
-    // Now run FTS indexing again with no changes
-    // The set comparison detects the manifest disagrees with Tantivy and reconciles
-    let stats = index_chunks_for_fts(
-        db_path,
-        &label_id,
-        &chunk_storage,
-        true, // is_commit_mode
-    )
-    .await?;
-
-    // The reconciliation should have discovered all 1000 docs from Tantivy
-    // Since nothing changed, added/removed should be 0
-    assert_eq!(stats.added, 0, "Expected 0 chunks added (nothing new)");
-    assert_eq!(stats.removed, 0, "Expected 0 chunks removed");
-    assert_eq!(
-        stats.live_row_ids, 1000,
-        "Expected 1000 live row_ids after reconciliation"
+    assert!(
+        matches!(result, FtsOpenExistingOutcome::NoIndex),
+        "Expected NoIndex for missing index"
     );
-
-    // Verify the manifest now reflects the actual indexed set
-    match fts_index.read_manifest() {
-        ManifestRead::Present(m) => {
-            // The manifest should now have ~1000 row_ids, not 100
-            assert_eq!(
-                m.row_ids.len(),
-                1000,
-                "Manifest should have 1000 row_ids after reconciliation, not {}",
-                m.row_ids.len()
-            );
-        }
-        other => panic!("Expected Present, got {:?}", other),
-    }
-
-    Ok(())
-}
-
-/// Test that manifest reconciliation catches same-cardinality mismatches.
-///
-/// This tests the case the old tolerance-based check could not catch:
-/// manifest has N row_ids, Tantivy has N docs, but they're different row_ids.
-/// The set comparison detects this and reconciles from Tantivy.
-#[tokio::test]
-async fn test_manifest_reconciles_same_cardinality_different_rows() -> Result<()> {
-    let temp_dir = TempDir::new()?;
-    let db_path = temp_dir.path();
-    let label_id = make_label_id("test-catalog", "main");
-
-    // Create database and get chunk storage
-    let db = create_test_db_with_fts(db_path).await;
-    let chunk_storage = db.chunks_storage().await?;
-
-    // Create 10 chunks for LanceDB
-    let mut chunks: Vec<ChunkRow> = Vec::new();
-    for i in 0..10 {
-        let row_id = format!("aaaa{:04x}cccc1111:1", i);
-        let file_id = format!("aaaa{:04x}cccc1111", i);
-        chunks.push(test_chunk_row(
-            &row_id,
-            &file_id,
-            1,
-            label_id.as_ref(),
-            &format!("document number {} with some content", i),
-        ));
-    }
-
-    // Insert all chunks into storage
-    insert_test_chunks(&chunk_storage, &chunks).await?;
-
-    // First, do an initial FTS indexing to build a correct index with 10 docs
-    let stats = index_chunks_for_fts(
-        db_path,
-        &label_id,
-        &chunk_storage,
-        true, // is_commit_mode
-    )
-    .await?;
-
-    assert_eq!(stats.added, 10, "Expected 10 chunks added initially");
-    assert_eq!(stats.live_row_ids, 10, "Expected 10 live row_ids initially");
-
-    // Now write a bogus manifest with 10 DIFFERENT row_ids
-    // Same cardinality (10), but completely different row_id values
-    let mut bogus_row_ids = BTreeSet::new();
-    for i in 0..10 {
-        bogus_row_ids.insert(format!("fake-row-{}", i));
-    }
-    let bogus_manifest = FtsManifest {
-        fts_schema_id: FTS_SCHEMA_ID.to_string(),
-        fts_tokenizer_id: FTS_TOKENIZER_ID.to_string(),
-        row_ids: bogus_row_ids.into_iter().collect(),
-    };
-    let fts_index = FtsIndex::open_existing(db_path, &label_id)?.expect("index exists");
-    fts_index.write_manifest(&bogus_manifest)?;
-
-    // Verify the bogus manifest was written with 10 row_ids
-    match fts_index.read_manifest() {
-        ManifestRead::Present(m) => {
-            assert_eq!(m.row_ids.len(), 10, "Bogus manifest should have 10 row_ids");
-        }
-        other => panic!("Expected Present, got {:?}", other),
-    }
-
-    // Now run FTS indexing again with no changes to LanceDB chunks
-    // The set comparison should detect that the manifest's row_ids don't match
-    // Tantivy's actual row_ids, even though counts are equal.
-    let stats = index_chunks_for_fts(
-        db_path,
-        &label_id,
-        &chunk_storage,
-        true, // is_commit_mode
-    )
-    .await?;
-
-    // Since LanceDB still has the same 10 chunks, and Tantivy has 10 docs,
-    // but manifest says 10 different row_ids, reconciliation should:
-    // - discover the 10 actual row_ids from Tantivy
-    // - compute diff: no additions (all 10 are already in Tantivy), no removals
-    // - write manifest with the correct 10 row_ids
-    assert_eq!(stats.added, 0, "Expected 0 chunks added (nothing new)");
-    assert_eq!(stats.removed, 0, "Expected 0 chunks removed");
-    assert_eq!(
-        stats.live_row_ids, 10,
-        "Expected 10 live row_ids after reconciliation"
-    );
-
-    // Verify the manifest now has the CORRECT 10 row_ids (the ones from Tantivy)
-    match fts_index.read_manifest() {
-        ManifestRead::Present(m) => {
-            assert_eq!(
-                m.row_ids.len(),
-                10,
-                "Manifest should have 10 row_ids after reconciliation"
-            );
-            // Verify the row_ids are the correct ones (from our original chunks)
-            for i in 0..10 {
-                let expected_row_id = format!("aaaa{:04x}cccc1111:1", i);
-                assert!(
-                    m.row_ids.contains(&expected_row_id),
-                    "Manifest should contain row_id {}",
-                    expected_row_id
-                );
-            }
-        }
-        other => panic!("Expected Present, got {:?}", other),
-    }
 
     Ok(())
 }

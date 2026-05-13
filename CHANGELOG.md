@@ -55,6 +55,8 @@ PUBLISHING PROCEDURE:
 
 - **Markdown heading detection.** Lines like `#tag`, `#1234`, `#!shebang`, and `#define FOO` are no longer treated as ATX headings by the markdown chunker. The full ATX-opening rule (1-6 `#` characters followed by space, tab, or end-of-line, with at most 3 leading spaces) is now enforced.
 
+- **FTS index stale after upgrade.** When a Monodex upgrade changes the FTS schema or tokenizer version, search now detects the stale index and either degrades to vector-only (hybrid search) or returns no results with a warning (FTS-only search), rather than querying with mismatched tokenizer state that could produce incorrect rankings.
+
 - A handful of crawl-pipeline error-handling and cleanup-gate bugs that could leave a label in an inconsistent state if a phase failed partway through.
 - Stale-hydration warnings in search results now appear in the right place relative to the result that triggered them.
 
