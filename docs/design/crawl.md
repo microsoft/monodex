@@ -100,13 +100,9 @@ There is no count-tolerance fast path. A naive "trust the manifest if its size i
 
 These IDs do not participate in `row_id`. Chunk identity is a chunk-storage concept; FTS has its own invalidation surface, and a tokenizer tweak does not force re-embedding.
 
-**Per-file vector-presence invariant on FTS-only reprocess.** The per-file invariant (for any file with `file_complete = true`, either all chunks have non-NULL `vector` or none do) is what makes the vector-phase fast-path predicate sufficient (see Step 4). The invariant requires care when an FTS-only crawl reprocesses a file whose previous vector phase was interrupted partway through.
+**FTS-only crawl path preserves vectors.** The FTS-only crawl path upserts chunks without modifying existing vector columns. This avoids clobbering vectors from peer labels that share the same blob (same `row_id` derived from `file_id`).
 
-Concretely: vector phase uploads chunks F:1 and F:2 with vectors, then crashes before F:3 is uploaded. Sentinel for F stays `file_complete = false`. A subsequent `crawl --retrieval fts` finds the sentinel incomplete and routes F to the slow path. The chunker re-emits all three chunks; F:1 and F:2 are matched (existing vectors preserved by the storage primitive), F:3 is inserted with `vector = NULL`. Without further action, F would end up with `file_complete = true` and mixed vector presence — a violation of the invariant that future vector-phase crawls would silently fast-path-skip.
-
-The fix happens at the FTS-only slow path: before upserting, the pipeline calls a `null_vectors_for_row_ids` storage primitive that nulls existing vectors for the row_ids about to be upserted. F:1 and F:2's vectors flip to NULL; F:3 lands at NULL; the file ends up all-NULL, restoring the invariant. The blunt rule (always null on FTS-only-path slow path) is correct: a genuinely new file has no rows to null (no-op); a partially-uploaded file gets the fix; a fully-uploaded clean file is fast-path-skipped and never reaches this code.
-
-The storage primitive batches internally (matching the `UPSERT_BATCH_SIZE` discipline used elsewhere) so an FTS-only reprocess of a large fraction of the corpus does not produce an unbounded `IN(...)` predicate.
+The per-file invariant (for any file with `file_complete = true`, either all chunks have non-NULL `vector` or none do) is what makes the vector-phase fast-path predicate sufficient (see Step 4). This invariant is now maintained by structural separation: a vector crawl processes all chunks of a file atomically, and an FTS-only crawl does not touch vectors. Until BL103 lands, an interrupted vector-crawl-then-FTS-only-crawl sequence can leave a file in a partial-vector state (some chunks with vectors, some without). This is a known transient gap; BL103 closes it by enforcing that a label's retrieval selection cannot mix vector and FTS-only modes on the same file.
 
 **Tokenizer.** The tokenizer used during the FTS phase is the same one used at query time. Behavior spec is in [search.md](./search.md).
 

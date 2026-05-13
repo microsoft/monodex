@@ -718,11 +718,14 @@ impl ChunkStorage {
     /// Upsert chunks without vectors with progress reporting.
     ///
     /// This is the combined FTS-only upsert operation that:
-    /// 1. Clears any existing vectors on these rows (handles interrupted vector crawls)
-    /// 2. Upserts the chunks without vectors
-    /// 3. Marks file sentinels as complete
+    /// 1. Upserts the chunks without vectors (preserving any existing vectors)
+    /// 2. Marks file sentinels as complete
     ///
-    /// All three phases run under a single commit mutex acquisition, which is
+    /// Vectors are preserved to avoid clobbering peer labels that share the same
+    /// blob. The invariant that all chunks of a file have consistent vector presence
+    /// is maintained by BL103's structural separation (postrelease).
+    ///
+    /// Both phases run under a single commit mutex acquisition, which is
     /// correct because FTS-only crawls hold the per-catalog writer lock and
     /// other writers against this catalog are already serialized.
     ///
@@ -749,28 +752,10 @@ impl ChunkStorage {
             row.validate()?;
         }
 
-        let row_ids: Vec<&str> = rows.iter().map(|r| r.row_id.as_str()).collect();
         let total_rows = rows.len();
         let total_sentinels = sentinel_row_ids.len();
 
-        // Phase A: Clear vectors for all rows
-        if !rows.is_empty() {
-            for batch_start in (0..row_ids.len()).step_by(UPSERT_BATCH_SIZE) {
-                let batch_end = std::cmp::min(batch_start + UPSERT_BATCH_SIZE, row_ids.len());
-                let batch_ids = &row_ids[batch_start..batch_end];
-
-                self.null_vectors_batch(batch_ids).await?;
-
-                on_progress(StorageProgressEvent {
-                    phase: "Clearing vectors",
-                    completed: batch_end,
-                    total: total_rows,
-                    unit: "chunks",
-                });
-            }
-        }
-
-        // Phase B: Upsert chunks without vectors
+        // Phase A: Upsert chunks without vectors
         if !rows.is_empty() {
             let schema = self.table.schema().await?;
 
@@ -804,7 +789,7 @@ impl ChunkStorage {
             }
         }
 
-        // Phase C: Mark file sentinels as complete
+        // Phase B: Mark file sentinels as complete
         if !sentinel_row_ids.is_empty() {
             let sentinel_strs: Vec<&str> = sentinel_row_ids.iter().map(|s| s.as_str()).collect();
 
