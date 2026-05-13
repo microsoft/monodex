@@ -448,7 +448,6 @@ mod tests {
         let bad_manifest = FtsManifest {
             fts_schema_id: "old-schema-id".to_string(),
             fts_tokenizer_id: FTS_TOKENIZER_ID.to_string(),
-            row_ids: vec![],
         };
         write_manifest(&manifest_path, &bad_manifest).unwrap();
 

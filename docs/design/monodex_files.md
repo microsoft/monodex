@@ -71,14 +71,14 @@ Per-label Tantivy index directories for full-text search. Tool-managed; not desi
       meta.json        (Tantivy's; tracks which segments belong to this index)
       <segment files>  (Tantivy's; immutable per-segment indexes)
       <.del files>     (Tantivy's; per-segment tombstones)
-      manifest.json    (Monodex's staleness manifest)
+      manifest.json    (Monodex's FTS compatibility metadata)
 ```
 
 Each label gets its own Tantivy index because BM25 statistics are computed per-corpus at index time. Sharing one Tantivy index across labels would mix statistics from chunks that don't belong to the queried label.
 
 `<database-dir>/fts/` is created by `monodex init-db`. Per-catalog and per-label subdirectories are created lazily on first FTS write for that label. The colon-form qualified label_id (`catalog:label`) is for in-memory use; the on-disk form uses nested directories to avoid colons (Windows hostility).
 
-The Monodex-side `manifest.json` is the staleness manifest used by the FTS phase for incremental diff. It records the `row_id`s currently live in this label's Tantivy index, plus the `FTS_SCHEMA_ID` and `FTS_TOKENIZER_ID` constants the index was built with. The manifest is advisory rather than transactional: there is no atomicity available across Tantivy's commit and a sidecar JSON file. The next crawl reconciles by cross-checking the manifest against Tantivy's actual contents (term-dictionary scan); divergence is recovered automatically. See [crawl.md](./crawl.md) for the reconciliation rule and [search.md](./search.md) for tokenizer behavior.
+The Monodex-side `manifest.json` stores FTS compatibility metadata: the `FTS_SCHEMA_ID` and `FTS_TOKENIZER_ID` constants the index was built with. When these don't match the current binary's constants, the index is stale and must be rebuilt. The manifest does not track row_ids; the currently indexed set is derived from Tantivy's term dictionary at crawl time. See [crawl.md](./crawl.md) for the indexing flow and [search.md](./search.md) for tokenizer behavior.
 
 Post-purge invariant: after `monodex purge --all` succeeds, `<database-dir>/fts/` exists and is empty, regardless of whether it existed before. After `monodex purge --catalog <C>`, `<database-dir>/fts/<C>/` is removed entirely; sibling catalogs are untouched.
 

@@ -1747,6 +1747,7 @@ fn test_non_utf8_file_emits_warning__quick_excluded() {
 /// This test verifies that when the FTS index is stale (IdMismatch), hybrid search
 /// falls back to vector-only and emits the appropriate warning.
 #[test]
+#[allow(non_snake_case)]
 fn test_hybrid_search_degrades_on_stale_fts__quick_excluded() {
     use monodex::engine::fts::{FtsIndex, FtsManifest};
     use monodex::engine::util::FTS_TOKENIZER_ID;
@@ -1792,7 +1793,6 @@ fn test_hybrid_search_degrades_on_stale_fts__quick_excluded() {
     let bad_manifest = FtsManifest {
         fts_schema_id: "old-schema-id".to_string(),
         fts_tokenizer_id: FTS_TOKENIZER_ID.to_string(),
-        row_ids: vec![],
     };
     fts_index
         .write_manifest(&bad_manifest)
@@ -1840,6 +1840,7 @@ fn test_hybrid_search_degrades_on_stale_fts__quick_excluded() {
 /// This test verifies that when the FTS index is stale and the user requests FTS-only
 /// search, we emit the stale warning and return zero results (not an error).
 #[test]
+#[allow(non_snake_case)]
 fn test_fts_only_search_stale_warning_no_results__quick_excluded() {
     use monodex::engine::fts::{FtsIndex, FtsManifest};
     use monodex::engine::retrieval::RetrievalMethod;
@@ -1886,7 +1887,6 @@ fn test_fts_only_search_stale_warning_no_results__quick_excluded() {
     let bad_manifest = FtsManifest {
         fts_schema_id: "old-schema-id".to_string(),
         fts_tokenizer_id: FTS_TOKENIZER_ID.to_string(),
-        row_ids: vec![],
     };
     fts_index
         .write_manifest(&bad_manifest)
