@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "fileTypes": {
+    ".ts": "typescript",
+    ".tsx": "typescript",
+    ".md": "markdown",
+    ".yml": "lineBased",
+    ".yaml": "lineBased",
+    ".txt": "lineBased",
+    ".css": "lineBased",
+    ".scss": "lineBased"
+  },
+  "patternsToExclude": [
+    "node_modules/",
+    "dist/",
+    "build/",
+    "lib/",
+    "lib-commonjs/",
+    "lib-esm/",
+    "lib-esnext/",
+    "lib-amd/",
+    "lib-dts/",
+    "temp/",
+    ".cache/",
+    ".rush/temp/",
+    "common/temp/",
+    "common/deploy/",
+    ".docusaurus/",
+    "**/*.snap",
+    "**/*.test.ts",
+    "**/*.spec.ts",
+    "**/*.test.tsx",
+    "**/*.spec.tsx",
+    "**/*.js",
+    "**/*.jsx",
+    "**/*.cjs",
+    "**/*.mjs",
+    "**/*.json",
+    "**/package-lock.json",
+    "**/pnpm-lock.yaml",
+    "**/yarn.lock",
+    "**/*.lock",
+    "**/*.tsbuildinfo"
+  ],
+  "patternsToKeep": [
+    "src/",
+    "test/"
+  ]
+}
