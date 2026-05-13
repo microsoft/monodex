@@ -906,7 +906,6 @@ fn test_multi_method_search_shows_preamble__quick_excluded() {
                 "vector",
             ])
             .env("MONODEX_CONFIG_FOLDER", monodex_home.path())
-            .env_remove("MONODEX_CONFIG_FOLDER")
             .output()
             .expect("failed to execute monodex search");
 
