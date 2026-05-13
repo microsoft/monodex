@@ -2,7 +2,24 @@
 //! Edit here when: Adding or modifying chunk types, configuration, or result structures.
 //! Do not edit here for: Debug logging (see `debug.rs`), scoring (see `scoring.rs`), split logic (see `split_search.rs`).
 
+use std::fmt;
+
 use super::debug::PartitionDebug;
+
+/// Error returned when partitioning fails.
+#[derive(Debug, Clone)]
+pub struct PartitionError {
+    /// Human-readable error message
+    pub message: String,
+}
+
+impl fmt::Display for PartitionError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.message)
+    }
+}
+
+impl std::error::Error for PartitionError {}
 
 /// Target chunk size in characters (same as runtime chunker's target_size)
 pub const TARGET_CHARS: usize = 6000;

@@ -13,7 +13,7 @@ pub fn partition_markdown(
     config: &super::partitioner::PartitionConfig,
     file_path: &str,
     catalog: &str,
-) -> Vec<super::partitioner::PartitionedChunk> {
+) -> Result<Vec<super::partitioner::PartitionedChunk>, super::partitioner::PartitionError> {
     use super::partitioner::PartitionedChunk;
     use sha2::{Digest, Sha256};
 
@@ -82,7 +82,7 @@ pub fn partition_markdown(
                 split_part_count: None,
             });
         }
-        return chunks;
+        return Ok(chunks);
     }
 
     // Create chunks for each section
@@ -141,7 +141,7 @@ pub fn partition_markdown(
         }
     }
 
-    chunks
+    Ok(chunks)
 }
 
 /// Extract heading text from a markdown heading line
@@ -367,7 +367,7 @@ Final paragraph.
             ..Default::default()
         };
 
-        let chunks = partition_markdown(source, &config, "test.md", "test");
+        let chunks = partition_markdown(source, &config, "test.md", "test").unwrap();
         assert_snapshot!(format_chunks(&chunks));
     }
 
@@ -380,7 +380,7 @@ Final paragraph.
             ..Default::default()
         };
 
-        let chunks = partition_markdown(source, &config, "API.md", "test");
+        let chunks = partition_markdown(source, &config, "API.md", "test").unwrap();
         assert_snapshot!(format_chunks(&chunks));
     }
 
@@ -406,7 +406,7 @@ Second examples section (duplicate heading).
             ..Default::default()
         };
 
-        let chunks = partition_markdown(source, &config, "README.md", "test");
+        let chunks = partition_markdown(source, &config, "README.md", "test").unwrap();
 
         // Expected breadcrumbs:
         // - "API: Configuration" -> "api-configuration" (colon removed by slugifier)
@@ -448,7 +448,7 @@ Second examples section (duplicate heading).
             ..Default::default()
         };
 
-        let chunks = partition_markdown(&source, &config, "test.md", "test");
+        let chunks = partition_markdown(&source, &config, "test.md", "test").unwrap();
 
         // Should be split into multiple chunks
         assert!(
