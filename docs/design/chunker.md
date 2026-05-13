@@ -126,7 +126,7 @@ Both commands run the partitioner without writing to the database, so they're sa
 
 Heading slugs use GitHub-style slugification via the `github_slugger` crate, which matches GitHub's anchor-link convention. This means a breadcrumb pointing at a heading section also points at the URL fragment that GitHub would generate for it.
 
-The implementation is straightforward (~500 lines) and currently has limited handling of edge cases: very long sections aren't sub-split below the heading level, code blocks are kept as single units even if they exceed the size budget, and front-matter (YAML metadata) isn't specially recognized. These are all candidates for future improvement.
+The implementation is straightforward (~500 lines) and currently has limited handling of edge cases: oversized code blocks are kept as single units even if they exceed the size budget, and front-matter (YAML metadata) isn't specially recognized. These are candidates for future improvement.
 
 ## Line-based splitting
 

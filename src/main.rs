@@ -61,8 +61,13 @@ fn main() -> anyhow::Result<()> {
                 )?;
             }
         }
-        Commands::Purge { catalog, all } => {
-            monodex::app::commands::run_purge(&config, catalog.as_deref(), all, cli.debug)?;
+        Commands::Purge { args } => {
+            monodex::app::commands::run_purge(
+                &config,
+                args.catalog.as_deref(),
+                args.all,
+                cli.debug,
+            )?;
         }
         Commands::DumpChunks {
             file,

@@ -8,7 +8,7 @@
 
 use anyhow::anyhow;
 
-use crate::app::util::chrono_timestamp;
+use crate::app::util::utc_rfc3339_timestamp;
 use crate::engine::identifier::{LabelId, validate_catalog, validate_label};
 use crate::paths::Paths;
 
@@ -78,7 +78,7 @@ pub fn save_default_context(paths: &Paths, catalog: &str, label: &str) -> anyhow
     let context = DefaultContext {
         catalog: catalog.to_string(),
         label: label.to_string(),
-        set_at: chrono_timestamp(),
+        set_at: utc_rfc3339_timestamp(),
     };
 
     let content = serde_json::to_string_pretty(&context)?;

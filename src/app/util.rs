@@ -5,7 +5,8 @@
 use std::collections::HashSet;
 
 /// Get current timestamp for logging (HH:MM:SS format)
-pub fn chrono_timestamp() -> String {
+/// Format current time as HH:MM:SS for progress-log use.
+pub fn log_timestamp() -> String {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
@@ -14,6 +15,52 @@ pub fn chrono_timestamp() -> String {
     let m = (now / 60) % 60;
     let s = now % 60;
     format!("{:02}:{:02}:{:02}", h, m, s)
+}
+
+/// Format current time as UTC RFC 3339 string (e.g., "2024-01-15T10:30:00Z").
+/// Used for machine-readable timestamps like the context file's `set_at` field.
+pub fn utc_rfc3339_timestamp() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+
+    // Convert to calendar time (UTC)
+    let days = now / 86400;
+    let secs_today = now % 86400;
+
+    // Calculate date from days since 1970-01-01
+    // Using the algorithm from: https://en.wikipedia.org/wiki/Julian_day
+    let (year, month, day) = days_to_ymd(days as i64);
+
+    let hour = (secs_today / 3600) as u8;
+    let minute = ((secs_today % 3600) / 60) as u8;
+    let second = (secs_today % 60) as u8;
+
+    format!(
+        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
+        year, month, day, hour, minute, second
+    )
+}
+
+/// Convert days since 1970-01-01 to year, month, day.
+/// Based on the Julian day algorithm.
+fn days_to_ymd(days: i64) -> (i16, u8, u8) {
+    // Julian day number for 1970-01-01 is 2440588
+    let jd = days + 2440588;
+
+    // Algorithm from Richards (2012)
+    let f = jd + 1401 + (((4 * jd + 274277) / 146097) * 3) / 4 - 38;
+    let e = 4 * f + 3;
+    let g = (e % 1461) / 4;
+    let h = 5 * g + 2;
+    let day = ((h % 153) / 5) + 1;
+    let month = ((h / 153 + 2) % 12) + 1;
+    let year = e / 1461 - 4716 + (12 + 2 - month) / 12;
+
+    (year as i16, month as u8, day as u8)
 }
 
 /// Format duration in seconds to human-readable string (e.g., "1h 23m" or "5m 30s")
@@ -292,14 +339,16 @@ pub fn parse_chunk_selector(s: &str) -> anyhow::Result<(String, ChunkSelector)> 
 /// Produces a `--commit <oid>` or `--working-dir` argument string suitable for
 /// suggested crawl commands in error/warning messages.
 pub fn format_source_pointer(row: &crate::engine::storage::LabelMetadataRow) -> String {
+    use crate::engine::storage::{SOURCE_KIND_GIT_COMMIT, SOURCE_KIND_WORKING_DIRECTORY};
+
     match row.source_kind.as_str() {
-        "git-commit" => row
+        SOURCE_KIND_GIT_COMMIT => row
             .vector_source
             .as_ref()
             .or(row.fts_source.as_ref())
             .map(|s| format!("--commit {}", s))
             .unwrap_or_else(|| "--commit <commit>".to_string()),
-        "working-directory" => "--working-dir".to_string(),
+        SOURCE_KIND_WORKING_DIRECTORY => "--working-dir".to_string(),
         _ => "[source]".to_string(),
     }
 }
