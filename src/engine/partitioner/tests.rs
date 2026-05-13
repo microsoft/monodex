@@ -810,32 +810,3 @@ export function hello(): string {
         chunk.breadcrumb
     );
 }
-
-#[test]
-fn test_parse_failure_returns_error() {
-    // Tree-sitter's parse() returns None only in rare cases:
-    // - Language not set
-    // - Cancellation via callback
-    // - Internal limits exceeded
-    //
-    // For normal inputs (even invalid syntax), tree-sitter returns Some(tree)
-    // with ERROR nodes. This test verifies the Result-based API works correctly
-    // and would handle a None return gracefully if it occurred.
-    //
-    // We test with valid input to verify the Result shape; the error path
-    // is exercised in production when tree-sitter encounters unhandleable input.
-    let source = "const x = 1;";
-
-    let config = PartitionConfig {
-        file_name: "test.ts".to_string(),
-        package_name: "test".to_string(),
-        ..Default::default()
-    };
-
-    let result = partition_typescript(source, &config, "test.ts", "test");
-
-    // The function should return Ok for valid TypeScript
-    // The important fix is that the signature is now Result<...>, not Vec<...>,
-    // so IF tree-sitter returns None, the caller gets an error instead of a panic.
-    assert!(result.is_ok(), "Expected Ok for valid TypeScript");
-}

@@ -1029,4 +1029,97 @@ mod tests {
             output_str
         );
     }
+
+    /// Test that chunk_new_files emits a warning for non-UTF-8 file contents.
+    ///
+    /// This verifies the fix for BL17: files whose bytes are not valid UTF-8
+    /// emit a CrawlWarning::FileReadFailed with error "non-UTF-8 file contents".
+    #[test]
+    fn test_chunk_new_files_emits_warning_for_non_utf8() {
+        use crate::engine::crawl_config::get_default_crawl_config;
+        use crate::engine::git_ops::{BlobSource, FileEntry, PackageIndex};
+        use crate::engine::identifier::LabelId;
+        use std::cell::Cell;
+        use std::path::Path;
+
+        // A mock BlobSource that returns non-UTF-8 bytes for any file
+        struct MockBlobSource;
+
+        impl BlobSource for MockBlobSource {
+            fn enumerate(&self) -> anyhow::Result<Vec<FileEntry>> {
+                Ok(vec![])
+            }
+
+            fn read_content(&self, _file: &FileEntry) -> anyhow::Result<Vec<u8>> {
+                // Return bytes that are NOT valid UTF-8
+                Ok(vec![0xFF, 0xFE, 0x00, 0x01])
+            }
+
+            fn build_package_index(&self) -> anyhow::Result<PackageIndex> {
+                Ok(PackageIndex::new())
+            }
+        }
+
+        // Create a file entry for the non-UTF-8 file
+        let file_entry = FileEntry {
+            relative_path: "bad-file.bin".to_string(),
+            blob_id: "abc123".to_string(),
+        };
+
+        let blob_source = MockBlobSource;
+        let package_index = PackageIndex::new();
+        let crawl_config = get_default_crawl_config()
+            .compile()
+            .expect("Default config should compile");
+        let label_id = LabelId::new("test-catalog", "test-label").unwrap();
+        let repo_path = Path::new("/tmp/test-repo");
+        let warning_counter = Cell::new(0);
+
+        // Collect warnings
+        let mut warnings: Vec<CrawlWarning> = Vec::new();
+        let result = chunk_new_files(
+            &[file_entry],
+            &blob_source,
+            &package_index,
+            &crawl_config,
+            "test-catalog",
+            &label_id,
+            repo_path,
+            1,
+            false, // vector_in_selection
+            &warning_counter,
+            &mut |w| warnings.push(w),
+        );
+
+        // The function should succeed (no panic/crash)
+        assert!(result.is_ok(), "chunk_new_files should succeed");
+
+        // Exactly one warning should be emitted
+        assert_eq!(warnings.len(), 1, "Expected exactly one warning");
+
+        // The warning should be FileReadFailed with the correct path and error
+        match &warnings[0] {
+            CrawlWarning::FileReadFailed {
+                relative_path,
+                error,
+            } => {
+                assert_eq!(
+                    relative_path, "bad-file.bin",
+                    "Warning should reference the correct file path"
+                );
+                assert_eq!(
+                    error, "non-UTF-8 file contents",
+                    "Error message should indicate non-UTF-8 contents"
+                );
+            }
+            other => panic!("Expected FileReadFailed warning, got: {:?}", other),
+        }
+
+        // No chunks should be produced for the non-UTF-8 file
+        let output = result.unwrap();
+        assert!(
+            output.chunks.is_empty(),
+            "No chunks should be produced for non-UTF-8 file"
+        );
+    }
 }
