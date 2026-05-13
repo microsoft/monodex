@@ -2,8 +2,6 @@
 //! Edit here when: Adding or modifying user-facing formatting helpers, or chunk selector parsing logic.
 //! Do not edit here for: Engine-wide utilities (see `engine/util.rs`), view command output (see `app/commands/view.rs`).
 
-use std::collections::HashSet;
-
 /// Get current timestamp for logging (HH:MM:SS format)
 /// Format current time as HH:MM:SS for progress-log use.
 pub fn log_timestamp() -> String {
@@ -167,41 +165,6 @@ pub fn format_chunk_report(
 // ============================================================================
 // Chunking Warning State Persistence
 // ============================================================================
-
-/// Get the path to the warning state file for a catalog.
-/// Path: <db_root>/warnings-<catalog>.json
-pub fn get_warning_state_path(db_root: &std::path::Path, catalog_name: &str) -> std::path::PathBuf {
-    db_root.join(format!("warnings-{}.json", catalog_name))
-}
-
-/// Load persisted chunking warning files for a catalog.
-/// Returns a HashSet of relative paths that had chunking warnings.
-pub fn load_warning_state(db_root: &std::path::Path, catalog_name: &str) -> HashSet<String> {
-    let path = get_warning_state_path(db_root, catalog_name);
-    match std::fs::read_to_string(&path) {
-        Ok(content) => serde_json::from_str(&content).unwrap_or_default(),
-        Err(_) => HashSet::new(),
-    }
-}
-
-/// Save chunking warning files for a catalog.
-/// Persists the sorted list of relative paths to <db_root>/warnings-<catalog>.json
-pub fn save_warning_state(
-    db_root: &std::path::Path,
-    catalog_name: &str,
-    warning_files: &[String],
-) -> anyhow::Result<()> {
-    let path = get_warning_state_path(db_root, catalog_name);
-
-    // Ensure parent directory exists
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-
-    let json = serde_json::to_string_pretty(warning_files)?;
-    std::fs::write(&path, json)?;
-    Ok(())
-}
 
 // ============================================================================
 // Lock Progress Callback

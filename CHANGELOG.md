@@ -39,6 +39,8 @@ PUBLISHING PROCEDURE:
 
 - **Breaking: existing databases are not readable.** The on-disk schema has changed and the chunk identity now incorporates the catalog name, so the same content at the same path in two different catalogs no longer produces colliding rows. Older databases are rejected with a schema-mismatch error on first use. The remedy is `monodex init-db --delete-everything` followed by re-crawling each catalog.
 
+- **Breaking: `--incremental-warnings` removed.** The crawl-time `--incremental-warnings` flag and the `<database>/warnings-<catalog>.json` state file it controlled have been removed. Each crawl now emits whatever chunker-fallback warnings it produces this run, with no cross-run persistence. Pre-existing `warnings-<catalog>.json` files are inert on disk and can be removed by `monodex init-db --delete-everything`.
+
 - **`monodex search` output format.** The preamble now names the methods being queried (`Searching: fts, vector`). Each result header gains a `[f]`/`[v]`/`[f+v]` marker, shown unconditionally including under single-method search. Empty result sets now print `No results.` rather than nothing.
 
 - **`monodex search` warnings now print on stdout** alongside results, rather than stderr. This keeps warnings ordered relative to the results they describe and makes piped output deterministic.

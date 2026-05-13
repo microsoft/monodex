@@ -154,7 +154,7 @@ Reusable indexing engine. Does not depend on `src/app/`.
 - `search_decision.rs`: Pure function `decide(metadata, requested) -> Decision`. Computes the active subset, applies the decision table, returns a structured `Decision` outcome (`SingleMethod`, `Hybrid`, `Error`) with structured `DecisionWarning`s. No I/O, no backend dispatch; unit-testable in isolation. The orchestrator translates `DecisionWarning`s into pre-formatted `SearchWarning`s before passing them to the renderer.
 - `system_info.rs`: Detect total RAM, cgroup limits, CPU cores. Implements the `"auto"` heuristic for embedding-model `modelInstances` and `threadsPerInstance`. Cgroup-aware so containerized installs warn correctly.
 - `util.rs`: Hash utilities: `compute_file_id` (xxhash of embedder/chunker/catalog/blob/path), `compute_row_id`, `compute_hash`. Holds the four versioning constants: `EMBEDDER_ID` and `CHUNKER_ID` (participate in `file_id`; bumping forces re-vectorization), `FTS_SCHEMA_ID` and `FTS_TOKENIZER_ID` (do not participate in `file_id`; bumping invalidates only FTS state).
-- `warning.rs`: `CrawlWarning` enum for in-flight crawl events and `DecisionWarning` enum for search-decision events translated to `SearchWarning` by the app layer. Distinct from the on-disk `<database-dir>/warnings-<catalog>.json` file, which tracks chunker-fallback paths.
+- `warning.rs`: `CrawlWarning` enum for in-flight crawl events and `DecisionWarning` enum for search-decision events translated to `SearchWarning` by the app layer.
 - `working_dir_sentinel.rs`: Generate per-crawl-unique sentinel strings for working-directory crawls.
 
 ### src/engine/fts/

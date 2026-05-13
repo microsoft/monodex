@@ -143,8 +143,6 @@ pub struct ClassifyOutput {
 pub async fn classify_files(
     files: &[FileEntry],
     chunk_storage: &ChunkStorage,
-    prior_warning_files: &HashSet<String>,
-    incremental_warnings: bool,
     catalog_name: &str,
     vector_in_selection: bool,
     warnings: WarningSink<'_>,
@@ -157,10 +155,6 @@ pub async fn classify_files(
     let mut existing_count = 0;
 
     for file_entry in files {
-        // When incremental_warnings is false and file had prior warning, force reprocessing
-        let force_reprocess =
-            !incremental_warnings && prior_warning_files.contains(&file_entry.relative_path);
-
         let file_id = crate::engine::util::compute_file_id(
             crate::engine::util::EMBEDDER_ID,
             crate::engine::util::CHUNKER_ID,
@@ -168,13 +162,6 @@ pub async fn classify_files(
             &file_entry.blob_id,
             &file_entry.relative_path,
         );
-
-        if force_reprocess {
-            // Treat as new file to re-chunk and re-index
-            new_files.push(file_entry.clone());
-            new_count += 1;
-            continue;
-        }
 
         // Check sentinel status (includes vector presence check)
         let sentinel_row_id = format!("{}:1", file_id);
@@ -789,25 +776,6 @@ pub fn print_narrowing_announcement(
             _ => {}
         }
     }
-}
-
-/// Saves warning state to disk.
-pub fn save_warning_state(
-    db_path: &std::path::Path,
-    catalog_name: &str,
-    crawl_warning_files: &HashSet<String>,
-    prior_warning_files: &HashSet<String>,
-    incremental_warnings: bool,
-) -> Result<Vec<String>> {
-    let mut next_warning_files: HashSet<String> = HashSet::new();
-    next_warning_files.extend(crawl_warning_files.iter().cloned());
-    if incremental_warnings {
-        next_warning_files.extend(prior_warning_files.iter().cloned());
-    }
-    let mut sorted_warning_files: Vec<String> = next_warning_files.iter().cloned().collect();
-    sorted_warning_files.sort();
-    crate::app::save_warning_state(db_path, catalog_name, &sorted_warning_files)?;
-    Ok(sorted_warning_files)
 }
 
 /// Prints the warning summary.

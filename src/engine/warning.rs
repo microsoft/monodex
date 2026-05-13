@@ -5,10 +5,6 @@
 //! Do not edit here for: Rendering warnings to stdout/stderr (see `app/crawl/warning.rs`), persisting warnings to disk (see `app/crawl/phases.rs`).
 
 /// In-flight crawl warning. Surfaces immediately; not retained.
-///
-/// Distinct from `warnings-<catalog>.json` path-keyed bookkeeping
-/// (chunker fallback-split tracking in chunk_new_files), which is a
-/// separate flow and does not migrate.
 #[derive(Debug, Clone)]
 pub enum CrawlWarning {
     /// Chunker fell back to line-based splitting on a file.

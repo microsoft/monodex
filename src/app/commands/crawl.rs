@@ -14,14 +14,14 @@ use crate::app::crawl::phases::{
     add_label_to_existing_files, build_package_index, chunk_new_files, classify_files,
     enumerate_files, filter_files, format_selection_for_display, open_storage,
     print_narrowing_announcement, print_summary, print_warning_summary, run_fts_phase,
-    run_label_cleanup, save_warning_state, update_final_metadata, write_in_progress_metadata,
+    run_label_cleanup, update_final_metadata, write_in_progress_metadata,
 };
 use crate::app::crawl::types::{CrawlSourceMetadata, PhaseResults};
 use crate::app::crawl::warning::create_warning_sink;
-use crate::app::util::{format_count, stderr_lock_progress};
+use crate::app::util::stderr_lock_progress;
 use crate::app::{
-    Config, load_warning_state, resolve_database_path, run_embed_upload_pipeline,
-    run_upsert_without_vectors, validate_config_path,
+    Config, resolve_database_path, run_embed_upload_pipeline, run_upsert_without_vectors,
+    validate_config_path,
 };
 use crate::engine::crawl_config::load_compiled_crawl_config;
 use crate::engine::git_ops::{
@@ -60,7 +60,6 @@ pub fn run_crawl_label(
     catalog_name: &str,
     label: &str,
     commit: &str,
-    incremental_warnings: bool,
     retrieval: Vec<RetrievalMethod>,
     debug: bool,
 ) -> Result<()> {
@@ -103,16 +102,6 @@ pub fn run_crawl_label(
     let _db_guard = acquire_database_shared(&db_path, &stderr_lock_progress)?;
     let _catalog_guard = acquire_catalog_lock(&db_path, catalog_name, &stderr_lock_progress)?;
 
-    // Load persisted chunking warning files (sticky by default)
-    let prior_warning_files = load_warning_state(&db_path, catalog_name);
-    if !prior_warning_files.is_empty() {
-        println!(
-            "Found {} files with prior chunking warnings",
-            format_count(prior_warning_files.len() as u64)
-        );
-    }
-    println!();
-
     // Resolve commit to full SHA before constructing the blob source
     println!("📦 Resolving commit...");
     let commit_oid = resolve_commit_oid(&repo_path, commit)?;
@@ -131,11 +120,9 @@ pub fn run_crawl_label(
         config,
         catalog_name,
         label,
-        incremental_warnings,
         &repo_path,
         &label_id,
         &crawl_config,
-        &prior_warning_files,
         &db_path,
         total_start,
         debug,
@@ -151,7 +138,6 @@ pub fn run_crawl_working_dir(
     config: &Config,
     catalog_name: &str,
     label: &str,
-    incremental_warnings: bool,
     retrieval: Vec<RetrievalMethod>,
     debug: bool,
 ) -> Result<()> {
@@ -194,16 +180,6 @@ pub fn run_crawl_working_dir(
     let _db_guard = acquire_database_shared(&db_path, &stderr_lock_progress)?;
     let _catalog_guard = acquire_catalog_lock(&db_path, catalog_name, &stderr_lock_progress)?;
 
-    // Load persisted chunking warning files (sticky by default)
-    let prior_warning_files = load_warning_state(&db_path, catalog_name);
-    if !prior_warning_files.is_empty() {
-        println!(
-            "Found {} files with prior chunking warnings",
-            format_count(prior_warning_files.len() as u64)
-        );
-    }
-    println!();
-
     // Construct the blob source and metadata
     let blob_source = WorkingDirBlobSource::new(repo_path.clone());
     let source_metadata = CrawlSourceMetadata {
@@ -216,11 +192,9 @@ pub fn run_crawl_working_dir(
         config,
         catalog_name,
         label,
-        incremental_warnings,
         &repo_path,
         &label_id,
         &crawl_config,
-        &prior_warning_files,
         &db_path,
         total_start,
         debug,
@@ -235,11 +209,9 @@ async fn run_crawl_async(
     config: &Config,
     catalog_name: &str,
     label: &str,
-    incremental_warnings: bool,
     repo_path: &std::path::Path,
     label_id: &LabelId,
     crawl_config: &crate::engine::crawl_config::CompiledCrawlConfig,
-    prior_warning_files: &HashSet<String>,
     db_path: &std::path::Path,
     total_start: std::time::Instant,
     debug: bool,
@@ -297,8 +269,6 @@ async fn run_crawl_async(
     let classify_output = classify_files(
         &files_to_process,
         &chunk_storage,
-        prior_warning_files,
-        incremental_warnings,
         catalog_name,
         vector_in_selection,
         &mut warning_sink,
@@ -460,15 +430,6 @@ async fn run_crawl_async(
         fts_phase_failed,
     );
 
-    // Phase: Save warning state
-    let warning_state_result = save_warning_state(
-        db_path,
-        catalog_name,
-        &chunking_output.warning_files,
-        prior_warning_files,
-        incremental_warnings,
-    );
-
     // Phase: Print warning summary
     print_warning_summary(&chunking_output.warning_files);
 
@@ -476,27 +437,18 @@ async fn run_crawl_async(
     // An earlier-phase error is the root cause of any subsequent skipped work.
     // When returning a phase error, log any post-finalize errors to stderr.
     if let Some(e) = vector_phase_error {
-        if let Err(ref we) = warning_state_result {
-            eprintln!("  Warning: Failed to save warning state: {}", we);
-        }
         if let Err(ref me) = final_metadata_result {
             eprintln!("  Warning: Failed to update label metadata: {}", me);
         }
         return Err(e);
     }
     if let Some(e) = label_reassignment_error {
-        if let Err(ref we) = warning_state_result {
-            eprintln!("  Warning: Failed to save warning state: {}", we);
-        }
         if let Err(ref me) = final_metadata_result {
             eprintln!("  Warning: Failed to update label metadata: {}", me);
         }
         return Err(e);
     }
     if let Some(e) = fts_phase_error {
-        if let Err(ref we) = warning_state_result {
-            eprintln!("  Warning: Failed to save warning state: {}", we);
-        }
         if let Err(ref me) = final_metadata_result {
             eprintln!("  Warning: Failed to update label metadata: {}", me);
         }
@@ -506,9 +458,6 @@ async fn run_crawl_async(
     // No captured phase error: post-finalize errors propagate normally.
     if let Err(e) = final_metadata_result {
         return Err(e.context("Failed to update label metadata"));
-    }
-    if let Err(e) = warning_state_result {
-        return Err(e.context("Failed to save warning state"));
     }
 
     // No captured phase error, but had per-chunk failures or other issues

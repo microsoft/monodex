@@ -69,10 +69,6 @@ pub enum Commands {
         #[command(flatten)]
         source: CrawlSourceArgs,
 
-        /// Allow files with chunking warnings to participate in incremental skipping
-        #[arg(long, default_value_t = false)]
-        incremental_warnings: bool,
-
         /// Set retrieval methods to build for this label.
         /// Repeatable; default is all methods. Values: vector, fts.
         #[arg(long, value_parser = clap::value_parser!(RetrievalMethod))]

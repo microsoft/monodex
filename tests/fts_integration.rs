@@ -174,7 +174,6 @@ fn test_crawl_then_search__quick_excluded() {
             "test-catalog",
             "main",
             &commit_oid,
-            false,  // incremental_warnings
             vec![], // retrieval: empty = all methods
             false,  // debug
         )
@@ -279,7 +278,6 @@ fn test_selection_narrowing__quick_excluded() {
             "test-catalog",
             "main",
             &commit_oid,
-            false,  // incremental_warnings
             vec![], // retrieval: empty = all methods
             false,  // debug
         )
@@ -292,7 +290,6 @@ fn test_selection_narrowing__quick_excluded() {
             "test-catalog",
             "main",
             &commit_oid,
-            false,                      // incremental_warnings
             vec![RetrievalMethod::Fts], // retrieval: fts only
             false,                      // debug
         )
@@ -382,7 +379,6 @@ fn test_selection_widening__quick_excluded() {
             "test-catalog",
             "main",
             &commit_oid,
-            false,  // incremental_warnings
             vec![], // retrieval: empty = all methods
             false,  // debug
         )
@@ -394,7 +390,6 @@ fn test_selection_widening__quick_excluded() {
             "test-catalog",
             "main",
             &commit_oid,
-            false,                      // incremental_warnings
             vec![RetrievalMethod::Fts], // retrieval: fts only
             false,                      // debug
         )
@@ -406,7 +401,6 @@ fn test_selection_widening__quick_excluded() {
             "test-catalog",
             "main",
             &commit_oid,
-            false,  // incremental_warnings
             vec![], // retrieval: empty = all methods
             false,  // debug
         )
@@ -508,7 +502,6 @@ fn test_first_time_crawl_fts_only__quick_excluded() {
             "test-catalog",
             "main",
             &commit_oid,
-            false,                      // incremental_warnings
             vec![RetrievalMethod::Fts], // retrieval: fts only
             false,                      // debug
         )
@@ -595,7 +588,6 @@ fn test_purge_cleanup__quick_excluded() {
             "test-catalog",
             "main",
             &commit_oid,
-            false,  // incremental_warnings
             vec![], // retrieval: empty = all methods
             false,  // debug
         )
@@ -627,7 +619,6 @@ fn test_purge_cleanup__quick_excluded() {
             "test-catalog",
             "main",
             &commit_oid,
-            false,
             vec![],
             false,
         )
@@ -751,7 +742,6 @@ fn test_fts_query_parse_error__quick_excluded() {
             "test-catalog",
             "main",
             &commit_oid,
-            false,                      // incremental_warnings
             vec![RetrievalMethod::Fts], // retrieval: fts only
             false,                      // debug
         )
@@ -827,7 +817,6 @@ fn test_multi_method_explicit_search__quick_excluded() {
             "test-catalog",
             "main",
             &commit_oid,
-            false,  // incremental_warnings
             vec![], // no --retrieval = all methods
             false,  // debug
         )
@@ -889,7 +878,6 @@ fn test_multi_method_search_shows_preamble__quick_excluded() {
             "test-catalog",
             "main",
             &commit_oid,
-            false,  // incremental_warnings
             vec![], // no --retrieval = all methods
             false,  // debug
         )
@@ -987,7 +975,6 @@ fn test_cross_label_active_labels_preserved__quick_excluded() {
             "test-catalog",
             "label-a",
             &commit_oid,
-            false,                      // incremental_warnings
             vec![RetrievalMethod::Fts], // FTS-only
             false,                      // debug
         )
@@ -999,7 +986,6 @@ fn test_cross_label_active_labels_preserved__quick_excluded() {
             "test-catalog",
             "label-b",
             &commit_oid,
-            false,  // incremental_warnings
             vec![], // empty = all methods
             false,  // debug
         )
@@ -1086,7 +1072,6 @@ fn test_working_dir_remediation_message__quick_excluded() {
             &config,
             "test-catalog",
             "working-label",
-            false,                      // incremental_warnings
             vec![RetrievalMethod::Fts], // FTS-only
             false,                      // debug
         )
@@ -1183,7 +1168,6 @@ fn test_post_finalize_error_propagates_when_no_phase_error__quick_excluded() {
             "test-catalog",
             "test-label",
             &commit_oid,
-            false,  // incremental_warnings
             vec![], // empty = all methods
             false,  // debug
         );
@@ -1239,7 +1223,6 @@ fn test_fts_parse_error_under_hybrid__quick_excluded() {
             "test-catalog",
             "main",
             &commit_oid,
-            false,  // incremental_warnings
             vec![], // empty = all methods
             false,  // debug
         )
@@ -1308,7 +1291,6 @@ fn test_fts_noindex_degradation_under_hybrid__quick_excluded() {
             "test-catalog",
             "main",
             &commit_oid,
-            false,  // incremental_warnings
             vec![], // empty = all methods
             false,  // debug
         )
@@ -1434,7 +1416,6 @@ fn test_empty_corpus__quick_excluded() {
             "test-catalog",
             "main",
             &commit_oid,
-            false,  // incremental_warnings
             vec![], // empty = all methods
             false,  // debug
         )
@@ -1504,7 +1485,6 @@ fn test_end_of_results_sentinel__quick_excluded() {
             "test-catalog",
             "main",
             &commit_oid,
-            false,  // incremental_warnings
             vec![], // empty = all methods
             false,  // debug
         )
@@ -1580,7 +1560,6 @@ fn test_crawl_then_vector_search__quick_excluded() {
             "test-catalog",
             "main",
             &commit_oid,
-            false,  // incremental_warnings
             vec![], // retrieval: empty = all methods
             false,  // debug
         )
@@ -1651,7 +1630,6 @@ fn test_first_time_crawl_vector_only__quick_excluded() {
             "test-catalog",
             "main",
             &commit_oid,
-            false,                         // incremental_warnings
             vec![RetrievalMethod::Vector], // vector only
             false,                         // debug
         )

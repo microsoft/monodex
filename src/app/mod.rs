@@ -21,6 +21,6 @@ pub use context::{
 pub use crawl::{CrawlFailures, run_embed_upload_pipeline, run_upsert_without_vectors};
 pub use util::{
     ChunkSelector, format_chunk_report, format_count, format_duration, format_eta,
-    format_source_pointer, load_warning_state, log_timestamp, parse_chunk_selector,
-    sanitize_for_terminal, save_warning_state, utc_rfc3339_timestamp,
+    format_source_pointer, log_timestamp, parse_chunk_selector, sanitize_for_terminal,
+    utc_rfc3339_timestamp,
 };

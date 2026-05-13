@@ -82,10 +82,6 @@ The Monodex-side `manifest.json` is the staleness manifest used by the FTS phase
 
 Post-purge invariant: after `monodex purge --all` succeeds, `<database-dir>/fts/` exists and is empty, regardless of whether it existed before. After `monodex purge --catalog <C>`, `<database-dir>/fts/<C>/` is removed entirely; sibling catalogs are untouched.
 
-### `<database-dir>/warnings-<catalog>.json`
-
-One file per catalog. Records the list of repo-relative paths that produced chunker warnings (`[fallback-split]` markers; see [chunker.md](./chunker.md)) on the most recent crawl, used by the next crawl to decide which previously-warned files to revisit. Format: a JSON array of repo-relative path strings. Written at the end of each crawl by `src/app/util.rs`; read at the start of each crawl. Safe to delete; the next crawl will rebuild it.
-
 ### `<database-dir>/locks/`
 
 Lockfiles used by the writer-lock layer (see [concurrency.md](./concurrency.md)). Contents are empty; the file's role is as a named handle for OS-level file locking (`flock` on POSIX, `LockFileEx` on Windows). The directory contains `database.lock`, `commit.lock`, and a `per-catalog/` subdirectory holding one lockfile per catalog. Lockfiles are persistent: they are not deleted on lock release, and `rm -rf locks/` is safe when no Monodex process is running.

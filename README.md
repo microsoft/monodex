@@ -285,8 +285,6 @@ monodex crawl --catalog rushstack --label main --commit HEAD --retrieval vector
 
 **Label reassignment:** When you re-crawl a label with a new commit, chunks from the old commit that no longer exist are removed from that label's membership.
 
-**Incremental warnings:** By default, files with chunking warnings are always re-processed. Use `--incremental-warnings` to allow them to be skipped if unchanged (useful for large codebases with known chunking issues).
-
 ### Search the Database
 
 ```bash
