@@ -24,7 +24,7 @@ use crate::paths::Paths;
 #[serde(deny_unknown_fields)]
 pub struct DatabaseConfig {
     /// Optional path to the database directory.
-    /// If not specified, defaults to <tool_home>/default-db.
+    /// If not specified, defaults to <config_folder>/default-db.
     /// Must be an absolute path; tilde (~) and environment variables ($VAR) are not supported.
     pub path: Option<String>,
 }
@@ -211,16 +211,17 @@ pub struct Config {
 /// - Other IO errors: preserved with context
 /// - Parse/validation errors: preserved
 pub fn load_config(paths: Paths) -> anyhow::Result<Config> {
-    let content = std::fs::read_to_string(&paths.config_path).map_err(|e| {
+    let config_path = paths.config_file();
+    let content = std::fs::read_to_string(&config_path).map_err(|e| {
         if e.kind() == std::io::ErrorKind::NotFound {
             anyhow!(
                 "No config found at {}. See the README for instructions on creating a config file.",
-                paths.config_path.display()
+                config_path.display()
             )
         } else {
             anyhow!(
                 "Failed to read config file {}: {}",
-                paths.config_path.display(),
+                config_path.display(),
                 e
             )
         }
@@ -282,7 +283,7 @@ pub fn validate_config_path(field_name: &str, value: &str) -> anyhow::Result<Pat
 /// Resolve the database path from config.
 ///
 /// - If `database.path` is specified in config, validates it as an absolute path and returns it.
-/// - Otherwise returns `<tool_home>/default-db`.
+/// - Otherwise returns `<config_folder>/default-db`.
 pub fn resolve_database_path(config: &Config) -> anyhow::Result<PathBuf> {
     // Check if database.path is specified in config
     if let Some(db_config) = &config.database
@@ -291,8 +292,8 @@ pub fn resolve_database_path(config: &Config) -> anyhow::Result<PathBuf> {
         return validate_config_path("database.path", path);
     }
 
-    // Default: <tool_home>/default-db
-    let result = config.paths.tool_home.join("default-db");
+    // Default: <config_folder>/default-db
+    let result = config.paths.config_folder.join("default-db");
     Ok(result)
 }
 
@@ -455,7 +456,7 @@ pub fn print_memory_warning(resolved: &ResolvedEmbeddingConfig) {
             excess_pct
         );
         eprintln!("   Consider adjusting \"embeddingModel.modelInstances\" or");
-        eprintln!("   \"embeddingModel.threadsPerInstance\" in config.json");
+        eprintln!("   \"embeddingModel.threadsPerInstance\" in monodex-config.json");
         eprintln!("   Suggestion: start with modelInstances = 1");
     }
 }
@@ -505,7 +506,7 @@ mod tests {
     #[test]
     fn test_load_config_validates_catalog_types() {
         let dir = tempdir().unwrap();
-        let config_path = dir.path().join("config.json");
+        let config_path = dir.path().join("monodex-config.json");
         let mut file = std::fs::File::create(&config_path).unwrap();
 
         // Config with invalid catalog type
@@ -535,7 +536,7 @@ mod tests {
     #[test]
     fn test_load_config_accepts_monorepo_type() {
         let dir = tempdir().unwrap();
-        let config_path = dir.path().join("config.json");
+        let config_path = dir.path().join("monodex-config.json");
         let mut file = std::fs::File::create(&config_path).unwrap();
 
         writeln!(
@@ -559,7 +560,7 @@ mod tests {
     #[test]
     fn test_load_config_accepts_database_path() {
         let dir = tempdir().unwrap();
-        let config_path = dir.path().join("config.json");
+        let config_path = dir.path().join("monodex-config.json");
         let mut file = std::fs::File::create(&config_path).unwrap();
 
         writeln!(
@@ -586,7 +587,7 @@ mod tests {
     #[test]
     fn test_load_config_database_section_optional() {
         let dir = tempdir().unwrap();
-        let config_path = dir.path().join("config.json");
+        let config_path = dir.path().join("monodex-config.json");
         let mut file = std::fs::File::create(&config_path).unwrap();
 
         writeln!(
@@ -610,7 +611,7 @@ mod tests {
     #[test]
     fn test_resolve_database_path_rejects_tilde() {
         let dir = tempdir().unwrap();
-        let config_path = dir.path().join("config.json");
+        let config_path = dir.path().join("monodex-config.json");
         let mut file = std::fs::File::create(&config_path).unwrap();
 
         writeln!(
@@ -642,7 +643,7 @@ mod tests {
     #[test]
     fn test_resolve_database_path_rejects_env_var() {
         let dir = tempdir().unwrap();
-        let config_path = dir.path().join("config.json");
+        let config_path = dir.path().join("monodex-config.json");
         let mut file = std::fs::File::create(&config_path).unwrap();
 
         writeln!(
@@ -674,7 +675,7 @@ mod tests {
     #[test]
     fn test_resolve_database_path_rejects_relative_path() {
         let dir = tempdir().unwrap();
-        let config_path = dir.path().join("config.json");
+        let config_path = dir.path().join("monodex-config.json");
         let mut file = std::fs::File::create(&config_path).unwrap();
 
         writeln!(
@@ -706,7 +707,7 @@ mod tests {
     #[test]
     fn test_resolve_database_path_accepts_absolute_path() {
         let dir = tempdir().unwrap();
-        let config_path = dir.path().join("config.json");
+        let config_path = dir.path().join("monodex-config.json");
         let mut file = std::fs::File::create(&config_path).unwrap();
 
         writeln!(
@@ -725,10 +726,10 @@ mod tests {
     }
 
     #[test]
-    fn test_resolve_database_path_defaults_to_tool_home() {
-        // When no database.path, should use <tool_home>/default-db
+    fn test_resolve_database_path_defaults_to_config_folder() {
+        // When no database.path, should use <config_folder>/default-db
         let dir = tempdir().unwrap();
-        let config_path = dir.path().join("config.json");
+        let config_path = dir.path().join("monodex-config.json");
         let mut file = std::fs::File::create(&config_path).unwrap();
 
         writeln!(
@@ -743,14 +744,14 @@ mod tests {
         let config = load_config(paths).unwrap();
         let path = resolve_database_path(&config).unwrap();
 
-        // Should be <tool_home>/default-db
+        // Should be <config_folder>/default-db
         assert_eq!(path, dir.path().join("default-db"));
     }
 
     #[test]
     fn test_resolve_database_path_config_without_database_section() {
         let dir = tempdir().unwrap();
-        let config_path = dir.path().join("config.json");
+        let config_path = dir.path().join("monodex-config.json");
         let mut file = std::fs::File::create(&config_path).unwrap();
 
         writeln!(
@@ -765,14 +766,14 @@ mod tests {
         let config = load_config(paths).unwrap();
         let path = resolve_database_path(&config).unwrap();
 
-        // Should be <tool_home>/default-db
+        // Should be <config_folder>/default-db
         assert_eq!(path, dir.path().join("default-db"));
     }
 
     #[test]
     fn test_config_rejects_unknown_fields() {
         let dir = tempdir().unwrap();
-        let config_path = dir.path().join("config.json");
+        let config_path = dir.path().join("monodex-config.json");
         let mut file = std::fs::File::create(&config_path).unwrap();
 
         // Config with an unknown field "qdrant" (old Qdrant-era config)
@@ -825,7 +826,7 @@ mod tests {
     #[test]
     fn test_load_config_parses_jsonc_with_line_comments() {
         let dir = tempdir().unwrap();
-        let config_path = dir.path().join("config.json");
+        let config_path = dir.path().join("monodex-config.json");
         let mut file = std::fs::File::create(&config_path).unwrap();
 
         // Config with // line comments (JSONC)
@@ -865,18 +866,18 @@ mod tests {
         let validator = Validator::new(&schema).expect("Failed to compile JSON schema");
 
         // Load the example config (JSONC - has comments)
-        let example_path = "examples/config.json";
+        let example_path = "examples/monodex-config.json";
         let example_str = std::fs::read_to_string(example_path)
-            .expect("Failed to read examples/config.json - run from project root");
+            .expect("Failed to read examples/monodex-config.json - run from project root");
 
         // Strip comments and parse (same approach as load_config)
         let stripped = json_comments::StripComments::new(example_str.as_bytes());
         let example: serde_json::Value = serde_json::from_reader(stripped)
-            .expect("Failed to parse examples/config.json as JSON");
+            .expect("Failed to parse examples/monodex-config.json as JSON");
 
         assert!(
             validator.is_valid(&example),
-            "examples/config.json does not validate against schema"
+            "examples/monodex-config.json does not validate against schema"
         );
     }
 }

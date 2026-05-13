@@ -182,15 +182,15 @@ mod tests {
         let validator = Validator::new(&schema).expect("Failed to compile JSON schema");
 
         // Load and validate the example context
-        let example_path = "examples/context.json";
+        let example_path = "examples/monodex-state.json";
         let example_str = std::fs::read_to_string(example_path)
-            .expect("Failed to read examples/context.json - run from project root");
+            .expect("Failed to read examples/monodex-state.json - run from project root");
         let example: serde_json::Value = serde_json::from_str(&example_str)
-            .expect("Failed to parse examples/context.json as JSON");
+            .expect("Failed to parse examples/monodex-state.json as JSON");
 
         assert!(
             validator.is_valid(&example),
-            "examples/context.json does not validate against schema"
+            "examples/monodex-state.json does not validate against schema"
         );
     }
 

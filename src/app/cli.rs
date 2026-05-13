@@ -15,9 +15,9 @@ use crate::engine::TARGET_CHARS;
 #[derive(Parser)]
 #[command(name = "monodex", version, about)]
 pub struct Cli {
-    /// Config file path (default: ~/.monodex/config.json)
+    /// Config folder path (default: ~/.monodex)
     #[arg(long)]
-    pub config: Option<PathBuf>,
+    pub config_folder: Option<PathBuf>,
 
     /// Enable verbose debug logging for storage operations.
     /// When passed to search, shows diagnostic detail per result, including raw method-local scores.

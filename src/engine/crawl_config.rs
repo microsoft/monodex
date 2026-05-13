@@ -307,7 +307,7 @@ const DEFAULT_CRAWL_CONFIG_JSON: &str = r#"{
 ///
 /// Precedence order (first found wins):
 /// 1. `<repo-root>/monodex-crawl.json` (repo-local)
-/// 2. `~/.monodex/crawl.json` (user-global)
+/// 2. `~/.monodex/monodex-crawl-config.json` (user-global)
 /// 3. Embedded default (compiled into binary)
 ///
 /// No merging is performed - exactly one config is used.

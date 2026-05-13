@@ -24,7 +24,7 @@ fn test_happy_path_creates_database() {
     let temp_dir = TempDir::new().unwrap();
 
     // Create minimal config
-    let config_path = temp_dir.path().join("config.json");
+    let config_path = temp_dir.path().join("monodex-config.json");
     write_minimal_config(&config_path);
 
     // Load config (simulating main.rs behavior)
@@ -59,7 +59,7 @@ fn test_happy_path_creates_database() {
 fn test_idempotent_second_run_succeeds() {
     let temp_dir = TempDir::new().unwrap();
 
-    let config_path = temp_dir.path().join("config.json");
+    let config_path = temp_dir.path().join("monodex-config.json");
     write_minimal_config(&config_path);
 
     // Load config (simulating main.rs behavior)
@@ -85,7 +85,7 @@ fn test_parent_missing_non_default_db() {
 
     // Use an absolute path whose parent definitely doesn't exist
     let db_path_str = "/nonexistent-xyz-12345/db";
-    let config_path = temp_dir.path().join("config.json");
+    let config_path = temp_dir.path().join("monodex-config.json");
     write_config_with_db_path(&config_path, db_path_str);
 
     // Load config (simulating main.rs behavior)
@@ -112,7 +112,7 @@ fn test_path_exists_but_not_monodex_database() {
         .write_all(b"not a monodex database")
         .unwrap();
 
-    let config_path = temp_dir.path().join("config.json");
+    let config_path = temp_dir.path().join("monodex-config.json");
     write_config_with_db_path(&config_path, db_path.to_str().unwrap());
 
     // Load config (simulating main.rs behavior)
@@ -131,7 +131,7 @@ fn test_corrupt_meta_file() {
     let temp_dir = TempDir::new().unwrap();
 
     // First, create a valid database
-    let config_path = temp_dir.path().join("config.json");
+    let config_path = temp_dir.path().join("monodex-config.json");
     write_minimal_config(&config_path);
 
     // Load config (simulating main.rs behavior)
@@ -160,7 +160,7 @@ fn test_schema_version_mismatch() {
     let temp_dir = TempDir::new().unwrap();
 
     // First, create a valid database
-    let config_path = temp_dir.path().join("config.json");
+    let config_path = temp_dir.path().join("monodex-config.json");
     write_minimal_config(&config_path);
 
     let paths = Paths::for_test(temp_dir.path().into());
@@ -195,7 +195,7 @@ fn test_meta_exists_tables_missing() {
     let meta_path = db_path.join(META_FILE);
     Database::write_meta(&meta_path, &meta).unwrap();
 
-    let config_path = temp_dir.path().join("config.json");
+    let config_path = temp_dir.path().join("monodex-config.json");
     write_minimal_config(&config_path);
 
     let paths = Paths::for_test(temp_dir.path().into());
@@ -217,7 +217,7 @@ fn test_tables_exist_meta_missing() {
     fs::create_dir_all(db_path.join("chunks.lance")).unwrap();
     fs::create_dir_all(db_path.join("label_metadata.lance")).unwrap();
 
-    let config_path = temp_dir.path().join("config.json");
+    let config_path = temp_dir.path().join("monodex-config.json");
     write_minimal_config(&config_path);
 
     let paths = Paths::for_test(temp_dir.path().into());
@@ -239,7 +239,7 @@ fn test_empty_directory_with_locks_dir_succeeds() {
     fs::create_dir_all(db_path.join("locks")).unwrap();
     std::fs::File::create(db_path.join("locks/database.lock")).unwrap();
 
-    let config_path = temp_dir.path().join("config.json");
+    let config_path = temp_dir.path().join("monodex-config.json");
     write_minimal_config(&config_path);
 
     let paths = Paths::for_test(temp_dir.path().into());
@@ -266,7 +266,7 @@ fn test_empty_directory_with_fts_dir_succeeds() {
     let db_path = temp_dir.path().join("default-db");
     fs::create_dir_all(db_path.join("fts")).unwrap();
 
-    let config_path = temp_dir.path().join("config.json");
+    let config_path = temp_dir.path().join("monodex-config.json");
     write_minimal_config(&config_path);
 
     let paths = Paths::for_test(temp_dir.path().into());
@@ -327,7 +327,7 @@ fn test_delete_everything_with_existing_database() {
     // Test that --delete-everything wipes an existing database and recreates it
     let temp_dir = TempDir::new().unwrap();
 
-    let config_path = temp_dir.path().join("config.json");
+    let config_path = temp_dir.path().join("monodex-config.json");
     write_minimal_config(&config_path);
 
     let paths = Paths::for_test(temp_dir.path().into());
@@ -370,7 +370,7 @@ fn test_delete_everything_with_nonexistent_database() {
     // Test that --delete-everything on a non-existent database prints a note but succeeds
     let temp_dir = TempDir::new().unwrap();
 
-    let config_path = temp_dir.path().join("config.json");
+    let config_path = temp_dir.path().join("monodex-config.json");
     write_minimal_config(&config_path);
 
     let paths = Paths::for_test(temp_dir.path().into());
@@ -394,7 +394,7 @@ fn test_delete_everything_with_current_version_database() {
     // Test that --delete-everything works even on a database with the current schema version
     let temp_dir = TempDir::new().unwrap();
 
-    let config_path = temp_dir.path().join("config.json");
+    let config_path = temp_dir.path().join("monodex-config.json");
     write_minimal_config(&config_path);
 
     let paths = Paths::for_test(temp_dir.path().into());
@@ -425,7 +425,7 @@ fn test_delete_everything_with_v3_database() {
     // version doesn't match the current version.
     let temp_dir = TempDir::new().unwrap();
 
-    let config_path = temp_dir.path().join("config.json");
+    let config_path = temp_dir.path().join("monodex-config.json");
     write_minimal_config(&config_path);
 
     let paths = Paths::for_test(temp_dir.path().into());

@@ -76,13 +76,13 @@ pub fn run_init_db(config: &Config, delete_everything: bool) -> Result<()> {
     validate_parent_directory(&config.paths, &db_path)?;
 
     // Step 3: Create the database root directory (if it doesn't exist)
-    // For default-db, we can create tool_home if needed. For custom paths, parent must exist.
-    let tool_home = &config.paths.tool_home;
-    let default_db_path = tool_home.join("default-db");
+    // For default-db, we can create config_folder if needed. For custom paths, parent must exist.
+    let config_folder = &config.paths.config_folder;
+    let default_db_path = config_folder.join("default-db");
 
     if db_path == default_db_path {
-        // default-db: ensure tool_home exists, then create default-db if needed
-        fs::create_dir_all(tool_home)?;
+        // default-db: ensure config_folder exists, then create default-db if needed
+        fs::create_dir_all(config_folder)?;
         fs::create_dir_all(&db_path)?;
     } else if !db_path.exists() {
         // Custom path: parent must exist (validated above), create only db_path
@@ -319,12 +319,12 @@ fn check_existing_database(db_path: &Path) -> Result<Option<MetaFile>> {
 
 /// Validate that the parent directory exists, with exception for default-db.
 fn validate_parent_directory(paths: &crate::paths::Paths, db_path: &Path) -> Result<()> {
-    // Special case: if the path is exactly the default-db path under tool_home,
-    // we can create tool_home itself.
-    let default_db_path = paths.tool_home.join("default-db");
+    // Special case: if the path is exactly the default-db path under config_folder,
+    // we can create config_folder itself.
+    let default_db_path = paths.config_folder.join("default-db");
 
     if db_path == default_db_path {
-        // default-db: tool_home will be created by run_init_db
+        // default-db: config_folder will be created by run_init_db
         return Ok(());
     }
 
