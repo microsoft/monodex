@@ -1,65 +1,147 @@
 # Backlog
 
-This is a maintainer scratch pad for sketching out what might come next for Monodex. Items are organized by priority bucket; ordering within a bucket is rough.
+A sketch of directions Monodex is thinking about. Items are grouped by how settled the work is, not by scheduling. Nothing here is a commitment about what ships next.
 
 For official feature requests, create a GitHub issue. If an issue needs higher priority, tell us via Zulip or join the monthly Rush Hour video call.
 
-## 1. Immediate
+## Near term
 
-This bucket is for stabilization and quick wins. These items should land before or alongside the next major investment so that bigger work doesn't have to navigate around them.
+<a id="BL38"></a>
 
-**Test scenarios that need actual execution.** Several end-to-end behaviors of the crawl pipeline have never been exercised by an automated test, only by manual verification during development. The two that most need automation are interrupted-crawl resume (Ctrl+C mid-crawl, verify chunks already written persist with their label, sentinel chunks skip correctly on resume, the relevant per-method completion flag stays false until the resumed crawl finishes, label reassignment does not run on the partial crawl but does run after the successful resume) and file-moves-between-packages (move a file from `packages/A/src/example.ts` to `packages/B/src/example.ts` between two crawls of the same label, verify the new path produces new chunks via a different `file_id`, verify the old path's chunks lose the label during reassignment, verify the orphan chunks are detectable for the planned GC). This entry is a sketch; the implementing PR should specify exact reproduction steps and pass/fail criteria.
+**BL38 Test scenarios that need actual execution.** Several end-to-end behaviors of the crawl pipeline have never been exercised by an automated test, only by manual verification. The two that most need automation: interrupted-crawl resume (Ctrl+C mid-crawl, verify chunks already written persist with their label, sentinel chunks skip correctly on resume, the per-method completion flag stays false until the resumed crawl finishes, label reassignment does not run on the partial crawl but does run after the successful resume); file-moves-between-packages (move a file between packages between two crawls of the same label, verify new path produces new chunks via different `file_id`, old path's chunks lose the label during reassignment, orphan chunks are detectable for the planned GC). Sketch only; the implementing PR specifies exact reproduction steps and pass/fail criteria.
 
-**Database-on-network-filesystem refusal.** Users can configure `database.path` to point at any absolute path. NFS, SMB, and synced cloud folders (Dropbox, OneDrive, iCloud, Google Drive) have different concurrency and durability semantics from local filesystems and are not supported. Monodex should detect these at database-open time and refuse with a clear message rather than silently misbehaving. The README's configuration section should also state this declaratively.
+(severity=test-coverage, work=large)
 
-**Side-by-side dependency duplication guard.** The released binary is already 152MB stripped; side-by-side copies of large dependencies (Tantivy, LanceDB, Arrow, ONNX runtime) compound this fast and are easy to introduce by accident through transitive-dep version drift. The fix is two-step at investigation time and one-step at steady state. Investigation: `cargo tree -d` to enumerate duplicates, then `cargo bloat --filter <crate>` per duplicate to confirm whether each one actually costs binary size (some duplicates are zero-cost when only one path is reachable; some are expensive). Once a duplicate is found and resolved, the resolution can be non-trivial: a downgrade or pin can break compatibility with a transitive dep that wanted the newer version. Steady state: a CI step that asserts no large-dependency duplicates appear, with the exact crate list (Tantivy, LanceDB, Arrow, ONNX runtime, plus whatever else lands later) tuned over time. The current discipline (Tantivy aligned with LanceDB's transitive Tantivy version) is documented in `docs/design/architecture.md`, but the broader guard is what keeps it enforced.
+<a id="BL39"></a>
 
-**Crawl-side warning sink writer injection.** The search path emits all output through an injected `&mut dyn Write` (search renderer takes the writer as a parameter), so unit tests capture output as `Vec<u8>` and assert on bytes; nothing leaks to the real stdout/stderr during a test run. The crawl-side `WarningSink` was not updated to the same shape: production sinks call `println!` / `eprintln!` directly inside their closures, so warning unit tests inherit those unconditional writes and emit warning text into the build log indistinguishable from real warnings (e.g. `"⚠️  Failed to read file2.ts: error"`, `"Warning: Couldn't find a splitpoint for file1.ts"`). This defeats the property that a clean build run produces a clean log; a real warning during a test is invisible against the noise of expected warnings from sink tests. Fix shape is parallel to the search-side discipline: the production sink-construction site takes a writer (or two — stdout-bound and stderr-bound, matching the current routing); tests hand it a `Vec<u8>`; nothing reaches the build log. Touches `engine/warning.rs`, `app/crawl/warning.rs`, the call sites in `commands/crawl.rs`, and the existing warning unit tests.
+**BL39 Database-on-network-filesystem refusal.** Users can configure `database.path` to point anywhere. NFS, SMB, and synced cloud folders (Dropbox, OneDrive, iCloud, Google Drive) have different concurrency and durability semantics from local filesystems and are not supported. Monodex should detect these at database-open time and refuse with a clear message rather than silently misbehaving. README's configuration section should also state this declaratively.
 
-**Simplify the config-file surface.** Scheduled to ship in a near-term release; it is a disruptive break that warrants being grouped with other user-visible changes rather than dribbled out. Today there are three knobs covering config-file location: `MONODEX_HOME` (env var, sets the tool home directory), `MONODEX_CONFIG` (env var, sets the config-file path), and `--config` (CLI flag, same effect as `MONODEX_CONFIG`). The latter two allow the config file to live outside the tool home, which produces a divergence-without-purpose: a user invoking `monodex --config /elsewhere/config.json` has the config file at `/elsewhere/` but their context, crawl prefs, database, lockfiles, and warnings under `~/.monodex/`. No use case justifies this split — `MONODEX_HOME` already covers the legitimate cases (CI isolation, dotfiles synchronization via symlink). Proposed simplification: remove `--config` and `MONODEX_CONFIG` entirely; rename `MONODEX_HOME` to `MONODEX_CONFIG_FOLDER` and add a `--config-folder` CLI flag (the word "home" is Unix tradition that doesn't translate; "config folder" tells the reader what the directory is). Pair this with renaming the three JSON files to be self-describing: `config.json` → `monodex-config.json`, `context.json` → `monodex-state.json`, and the user-global `crawl.json` → `monodex-crawl-config.json` (the repo-local version is already `monodex-crawl.json`; the user-global one needs a longer name to avoid implying they're the same file). The current migration warning function (`warn_old_tool_home_if_present`) is shaped around the obsolete `--config` flag; it should be rewritten from scratch as part of this work, not ported. A side benefit is that the migration warning's current edge case (false-positive when `--config` overrides the location of `config.json` to outside the tool home) becomes unreachable code rather than a bug worth fixing in place.
+(severity=correctness, work=medium)
 
-## 2. After the storage layout settles
+<a id="BL40"></a>
 
-These are known-needed features whose architectural ripples are easier to reason about now that the storage layout has settled around two retrieval methods. They were deferred during the FTS work to keep that change focused.
+**BL40 Side-by-side dependency duplication guard.** The released binary is 152MB stripped; side-by-side copies of large dependencies (Tantivy, LanceDB, Arrow, ONNX runtime) compound this fast and are easy to introduce via transitive-dep version drift. Two-step at investigation time (`cargo tree -d`, then `cargo bloat --filter <crate>` per duplicate), one-step at steady state (a CI step that asserts no large-dependency duplicates appear, with the exact crate list tuned over time). Resolutions can be non-trivial: a downgrade or pin can break compat with a transitive dep that wanted the newer version. Current discipline (Tantivy aligned with LanceDB's transitive Tantivy version) is documented in `docs/design/architecture.md`; the broader guard keeps it enforced.
 
-**Benchmark suite for retrieval quality.** A repeatable evaluation measuring retrieval quality on the Rush Stack codebase against curated queries with known-good answers. The point is to make chunker changes, ranking changes, and model changes measurable rather than vibes-based. Most useful once both retrieval methods exist.
+(severity=binary-size, work=medium)
 
-**Multi-database support.** Named-database registry in `config.json`, `--db <name>` on commands. Today exactly one database path is supported; the registry shape is a straightforward extension.
+<a id="BL42"></a>
 
-**Retire the per-file sentinel mechanism.** Each chunk row carries a `file_complete` flag, and chunk 1 of every file is treated as a sentinel that flips to `true` only after all of the file's chunks are durably written. The "is this file fully indexed?" check is a sentinel-row lookup. This is a Qdrant-era workaround: Qdrant has no tables, so cross-row atomicity has to be encoded in row content. LanceDB has manifest-version atomicity, which makes the sentinel unnecessary if the writer batches all of a file's chunks into one `merge_insert` call. The "file is fully indexed" check then becomes "any chunk row exists for this file_id," which is a primitive table predicate. Retirement requires a small per-file buffer in the writer thread (collect a file's chunks before writing), removal of `file_complete` from the schema, and updates to all the fast-path predicates that consult it. The sentinel does not foreclose anything; it just is more elaborate than LanceDB-shaped storage warrants. Trigger: when sentinel mechanics start costing readability or correctness on a touching change, or when a future schema bump is rolling through anyway. Not aesthetics.
+**BL42 Cargo feature gating for `ort`/`tantivy`/`jieba-rs`.** Every `cargo build` of monodex unconditionally compiles `ort` (which triggers a ~50-100MB ONNX Runtime native library download via build script) and pulls in `tantivy` plus `jieba-rs` (the latter ships a 5MB Han dictionary). Runtime is correctly gated (FTS-only invocations do not construct `ParallelEmbedder` or download the Jina model; vector-only invocations do not open Tantivy), but build/distribution cost is not. Three implementation paths: keep current always-build model; add optional `vector`/`fts` Cargo features defaulting to both; make one method default with the other opt-in. The third is a strategy call as much as engineering. Adjacent to the existing dep-duplication-guard item, which deals with binary size for what gets built but not with whether you can build without the heavy deps.
 
-**Structured JSON output for `search` and `view`.** This is a community contribution from [PR #24](https://github.com/microsoft/monodex/pull/24). The motivating use case is composing Monodex into small scripts and editor helpers: workflows where a stable named-field interface is more useful than terminal-formatted output, even though the default text mode remains better for direct agent usage. The work introduces two formats: a full `--format=json` and a reduced `--format=json-lite` that strips the high-token-cost fields. The PR has design notes from the maintainer that diverge from the contributor's original approach; align with those before basing further work on the PR diff.
+(severity=build, work=medium)
 
-**Watch mode.** A long-running process that periodically re-crawls or watches the filesystem for changes and incrementally updates the index. Watch mode is architecturally consequential because it changes the pipeline from one-shot to long-lived: process-level locking semantics shift, the embedding-pool lifecycle changes, and error recovery has to happen in-process rather than at the next invocation.
+<a id="BL101"></a>
 
-**`monodex init` command, with `examples/` rename.** Generate `<tool-home>/config.json`, `<tool-home>/crawl.json`, and `<tool-home>/context.json` from the templates currently under `examples/`, with `$schema` URLs set to the published locations. This removes a setup step for new users. The implementation is straightforward: use `include_bytes!` to embed templates at compile time, plus a small command handler that writes them to disk with the standard "file already exists" handling. The work depends on the templates being embedded (a trivial Rust idiom; not a real blocker) and ideally on **Schema publication and Microsoft hosting** below (otherwise the `$schema` URLs are placeholders).
+**BL101 Separate CLI from invokable API.** Refactor the codebase so the CLI is a thin layer over a documented API rather than a place where algorithms live. Move useful logic out of `commands/*.rs` files and designate "public" entry points that expose complete functionality, so external scripts can drive Monodex directly without going through our CLI. The CLI becomes a client of the API rather than the source of truth. Mark everything as experimental and subject to change at any time, with no attempt to maintain compatibility for now; a later self-motivating work item will evolve this into a stable API when the lack of stability starts causing visible friction.
 
-The directory should be renamed from `examples/` to `config-templates/` as part of this work, since the current name is a misnomer that confuses the relationship between schemas, templates, and the init flow.
+(severity=feature, work=medium)
 
-## 3. Good ideas
+<a id="BL48"></a>
 
-These items have at least one non-obvious insight worth recording, but no commitment to ship. Some may never happen; they're here so the thinking isn't lost. A workaround exists for each.
+**BL48 Retire the per-file sentinel mechanism.** Each chunk row carries a `file_complete` flag, and chunk 1 of every file is treated as a sentinel that flips true only after all of the file's chunks are durably written. This is a Qdrant-era workaround (Qdrant has no tables, so cross-row atomicity has to be encoded in row content). LanceDB has manifest-version atomicity, which makes the sentinel unnecessary if the writer batches all of a file's chunks into one `merge_insert` call. The "file is fully indexed" check then becomes "any chunk row exists for this file_id." Requires a small per-file buffer in the writer thread, removal of `file_complete` from the schema, and updates to all the fast-path predicates. The durability concern (chunk 1 being a marker that the previous crawl finished writing) is the load-bearing piece; the lookup half is just a Qdrant-era affordance LanceDB makes less necessary. Trigger: when sentinel mechanics start costing readability or correctness on a touching change, or when a future schema bump is rolling through anyway. Not aesthetics.
 
-**Orphan reclamation garbage collection.** Three orphan kinds, swept by one GC command:
+(severity=storage-refactor, work=medium)
 
-- *Chunk-row orphan.* A row in `chunks` with `active_label_ids = []`, typically from an interrupted crawl that wrote chunks before label assignment finished. Reclaimed by deleting the row.
-- *Vector-payload orphan.* A row in `chunks` with non-NULL `vector`, but no in-selection vector method on any label points at this chunk (e.g. the only label that referenced this chunk for vector has had vector dropped from its selection). The row may still be active for fts; only the vector column is unreferenced. Reclaimed by setting `vector = NULL` (the row stays).
-- *Tantivy-directory orphan.* A directory under `<database-dir>/fts/<catalog>/<label>/` for a label whose selection no longer includes fts, or for a label that no longer exists. Reclaimed by deleting the directory.
+<a id="BL51"></a>
 
-All three share the same conceptual structure (content unreferenced by any in-selection label state) and the same operational constraint: the only safe identification is a full scan comparing on-disk state against known labels and their selections, which requires the database to be quiescent. They are one feature, an offline `monodex gc` command, not continuous background work. The workaround for all three is `monodex purge` and rebuild from scratch. The workaround is acceptable today because no user is running long enough that orphan accumulation matters; this should be revisited when there are users with multi-month-old databases.
+**BL51 `monodex init` command, with `examples/` rename.** Generate `<tool-home>/config.json`, `<tool-home>/crawl.json`, and `<tool-home>/context.json` from the templates currently under `examples/`, with `$schema` URLs set to the published locations. Removes a setup step for new users. Implementation: `include_bytes!` to embed templates at compile time, plus a small command handler with the standard "file already exists" handling. Depends on the templates being embedded (trivial) and ideally on schema publication (otherwise `$schema` URLs are placeholders). The directory should be renamed from `examples/` to `config-templates/` as part of this work, since the current name is a misnomer.
 
-**MCP server.** Expose Monodex as an MCP-compatible service so AI agent platforms can connect to it as a first-class tool rather than via CLI shell-out. The intent is for MCP payloads to map closely to existing CLI parameters; the value is the service-style lifecycle (a warm process with no per-call startup cost), not a separately-designed protocol. This is easy to add at any time, since the Rust ecosystem has MCP server libraries and the existing CLI already enumerates the operations that would map to MCP tools. It is lower priority than it might appear, because agents using the CLI today are not blocked: they shell out, parse output, and proceed.
+(severity=feature, work=small)
 
-**Filter out alphanumeric-free chunks at chunking time.** The TypeScript AST partitioner can produce chunks whose text contains no alphanumeric characters at all, only punctuation and whitespace: typically the trailing stretch of close-braces and semicolons of several nested blocks (`});\n});\n}`). The existing whitespace-only filter does not catch these. They have non-zero line spans and sit at AST boundaries, so they look structurally legitimate, but they carry no symbol names, no identifiers, and no content useful to either retrieval method. The FTS tokenizer correctly produces no tokens for them; vector embedding produces a meaningless vector that pollutes nearest-neighbor search results without any visible warning. Empirically, on the rushstack codebase about 0.05% of chunks fall into this category. The fix is a chunker-side filter analogous to the whitespace-only filter: drop chunks with zero alphanumeric characters before they enter the chunk stream. This is not the same as suppressing the FTS zero-token warning at indexing time, which is a downstream symptom; the right fix is upstream at the partitioner. Bumping `CHUNKER_ID` would force re-indexing, but selective change to drop a chunk is benign without a bump in the sense that the missing chunks just won't be in newly-crawled labels; older labels keep them until re-crawled. Trigger: when the FTS-phase summary line reports a non-trivial percentage of zero-token skips, or when the planned retrieval-quality benchmark shows these chunks are dragging down vector recall.
+<a id="BL58"></a>
 
-**Search result boosting.** Currently search results are ordered by similarity score alone. Plausible boosters include recency (more-recently-edited files weighted higher), breadcrumb specificity (deeper symbol-level matches over file-level matches), package importance signals, or query-type-conditional boosts (a query that looks like an error message weighted toward error-handling code). There is no urgency until the **Benchmark suite for retrieval quality** exists and shows where current ranking falls short. Without that benchmark, boosting is parameter-tuning by vibes.
+**BL58 Rust language support.** Today TypeScript has a dedicated AST-based partitioner; markdown has its own splitter; everything else routes through generic line-based chunking. Rust is the natural next language to give a dedicated partitioner, both because Monodex itself is written in Rust (maintainer dogfooding capacity) and because the `tree-sitter-rust` grammar is mature. Other languages stay untracked; specific requests get their own items when they arrive.
 
-**Hardware-conditional GPU adapter.** A CUDA proof-of-concept by Nick Pape ([rushdex-prototype PR #1](https://github.com/octogonz/rushdex-prototype/pull/1)) demonstrated 4-12x speedup over CPU baseline on an RTX 3090 with batched inference. It was not merged because of intervening codebase changes, and reapplying it is non-trivial. This is lower priority than a strict speed comparison would suggest, because most crawls after the first are cheap regardless of embedding speed (the sentinel-based incremental skip path), and ongoing GPU support would require team access to the relevant hardware. A future contributor could revisit this as a hardware-conditional adapter alongside the CPU runtime; details and rejected alternatives are in [chunker.md](./design/chunker.md).
+(severity=feature, work=medium)
 
-**Vector indexing (ANN).** Vector search is currently a brute-force scan over the chunks table. Acceptable at current scale on a developer laptop; if it stops being acceptable, LanceDB supports IVF and HNSW indexes via `Table::create_index`. Worth knowing the option exists before reaching for harder optimizations.
+<a id="BL50"></a>
 
-**Broader language support.** TypeScript is the only language with a custom AST partitioner today. Markdown and `lineBased` cover other text formats with simpler strategies. Adding language-specific partitioners would extend accuracy to more codebases; Go and Rust are the most likely next candidates. This is lower priority until TypeScript chunking has demonstrated itself.
+**BL50 Watch mode.** A long-running process that watches the filesystem for changes and incrementally updates the index, instead of being re-invoked for each crawl. Changes the pipeline from one-shot to long-lived: process-level locking semantics shift, the embedding-pool lifecycle changes, and error recovery has to happen in-process.
 
-**Schema publication and Microsoft hosting.** Per Rush Stack convention, JSON schemas live at `https://developer.microsoft.com/json-schemas/...` URLs hosted from the [microsoft/json-schemas](https://github.com/microsoft/json-schemas) repo. Publication is a manual procedure handled outside Monodex. Today Monodex schemas aren't published anywhere, and the templates in `examples/` have placeholder or absent `$schema` URLs. Each Monodex schema change involves a coordinated step outside this repo to publish the new schema version.
+(severity=architecture-consequential, work=large)
 
-**Non-Git catalog types.** Today `monorepo` is the only catalog type. "Catalog" is a generic name for a data source Monodex indexes, not a synonym for "Git repository." Other plausible types (issue trackers, discussion forums, meeting notes) are conceivable but no concrete work is planned.
+## Good ideas
+
+Items with at least one non-obvious insight worth recording, but no commitment to ship.
+
+<a id="BL46"></a>
+
+**BL46 Public benchmark suite for retrieval quality.** A repeatable evaluation that ships with the project, measuring retrieval quality on the public Rush Stack codebase against curated queries with known-good answers. Gives outside parties a shared baseline they can run themselves: anyone evaluating Monodex against another tool, anyone in the open-source community wanting to discuss tradeoffs between chunkers or ranking strategies, anyone running it on their own GitHub-visible monorepo. Most useful once both retrieval methods exist (they now do). Many of the items below explicitly trigger off this existing.
+
+(severity=measurement-foundation, work=large)
+
+<a id="BL47"></a>
+
+**BL47 Multi-database support.** Named-database registry in `config.json`, `--db <name>` on commands. Today exactly one database path is supported; the registry shape is a straightforward extension.
+
+(severity=feature, work=medium)
+
+<a id="BL52"></a>
+
+**BL52 Orphan reclamation garbage collection.** Three orphan kinds, swept by one `monodex gc` command: chunk-row orphans (rows in `chunks` with `active_label_ids = []`, typically from interrupted crawls; reclaimed by deleting the row), vector-payload orphans (non-NULL `vector` on a row no in-selection vector method points at; reclaimed by setting `vector = NULL`, row stays), Tantivy-directory orphans (a directory under `<db>/fts/<catalog>/<label>/` for a label whose selection no longer includes FTS, or no longer exists; reclaimed by deleting the directory). All three share the same conceptual structure (content unreferenced by any in-selection label state) and operational constraint (requires the database to be quiescent for a full scan). One feature, offline command, not continuous background work. Workaround until the verb exists: `purge` and rebuild from scratch. Revisit once databases live long enough that orphan accumulation matters in practice. Implementation note: an internal `null_vectors_for_row_ids` primitive already exists, which nulls vector columns while preserving the rows. It may be the right mechanism for vector-only invalidation or orphan cleanup.
+
+(severity=feature, work=large)
+
+<a id="BL53"></a>
+
+**BL53 MCP server.** Expose Monodex as an MCP-compatible service so AI agent platforms can connect as a first-class tool rather than via CLI shell-out. MCP payloads map closely to existing CLI parameters; the value is service-style lifecycle (warm process with no per-call startup cost), not a separately-designed protocol. Priority is currently deferred because the CLI works well for the maintainers' own agent workflows. If users find the CLI insufficient for their integration, file an issue describing the gap; concrete community demand bumps the priority of this item.
+
+(severity=feature, work=medium)
+
+<a id="BL54"></a>
+
+**BL54 Filter out alphanumeric-free chunks at chunking time.** The TypeScript AST partitioner can produce chunks whose text contains no alphanumeric characters at all, only punctuation and whitespace (typically trailing stretches of close-braces and semicolons). The existing whitespace-only filter does not catch these. They have non-zero line spans and sit at AST boundaries, so they look structurally legitimate, but they carry no identifiers and no useful content. FTS tokenizer correctly produces no tokens; vector embedding produces a meaningless vector that pollutes nearest-neighbor results without any visible warning. On rushstack about 0.05% of chunks fall into this category. Fix: chunker-side filter analogous to the whitespace-only filter. Not the same as suppressing the FTS zero-token warning at indexing time (that is a downstream symptom). Bumping `CHUNKER_ID` would force re-indexing; selective change to drop a chunk is benign without a bump (missing chunks won't be in newly-crawled labels; older labels keep them until re-crawled). Trigger: when the FTS-phase summary line reports non-trivial zero-token skips, or when the planned benchmark shows these chunks dragging down vector recall.
+
+(severity=quality, work=small)
+
+<a id="BL55"></a>
+
+**BL55 Search result boosting.** Currently search results are ordered by similarity score alone. Plausible boosters: recency, breadcrumb specificity (deeper symbol-level matches over file-level), package importance signals, query-type-conditional boosts (error-message-looking queries weighted toward error-handling code). No urgency until the benchmark suite exists and shows where current ranking falls short; boosting without that signal is parameter-tuning without measurement.
+
+(severity=quality, work=medium)
+
+<a id="BL56"></a>
+
+**BL56 Hardware-conditional GPU adapter.** A CUDA proof-of-concept by Nick Pape (rushdex-prototype PR #1) demonstrated 4-12x speedup over CPU baseline on an RTX 3090 with batched inference. The PR doesn't apply against current main due to intervening codebase changes; the same idea would need to be reimplemented. The maintainers will pick this up for the hardware we use when crawl speed actually pressures us, but most crawls after the first are cheap regardless of embedding speed (sentinel-based incremental skip), so that pressure has not arrived. If you have different hardware (CUDA, Metal, ROCm) and want faster crawls on it, a contributor PR adding that GPU path alongside the CPU runtime is welcome.
+
+(severity=performance, work=medium)
+
+<a id="BL57"></a>
+
+**BL57 Vector indexing (ANN).** Vector search is currently a brute-force scan over the chunks table. Acceptable at current scale on a developer laptop; if it stops being acceptable, LanceDB supports IVF and HNSW via `Table::create_index`. Worth knowing the option exists before reaching for harder optimizations.
+
+(severity=performance, work=small)
+
+<a id="BL60"></a>
+
+**BL60 Non-Git catalog types.** Today `monorepo` is the only catalog type. "Catalog" is a generic name for a data source Monodex indexes, not a synonym for "Git repository." Other plausible types (issue trackers, discussion forums, meeting notes) would be natural next steps.
+
+(severity=feature, work=large)
+
+<a id="BL63"></a>
+
+**BL63 RRF tuning surface.** Per-method weights, configurable `k`, configurable candidate window. Triggered by retrieval-quality benchmarking showing measurable wins. The benchmark suite is the precursor. `k = 60` is currently hardcoded.
+
+(severity=tuning, work=small)
+
+<a id="BL67"></a>
+
+**BL67 `monodex upgrade-db` verb.** The forward story for schema changes. `monodex_schema_version` exists in `monodex-meta.json` but no migration verb does. Today's policy (refuse to open old DBs with a clear error, tell users to delete and re-crawl) is appropriate while no user has a database old enough that recrawl is non-trivial. Trigger: the first user with a database large enough that recrawl is painful. The schema-mismatch error message already names this verb.
+
+(severity=feature, work=large)
+
+<a id="BL68"></a>
+
+**BL68 Orphaned per-catalog lockfile cleanup command.** Per-catalog lockfiles get created lazily and never deleted; the lockfile directory grows monotonically as catalogs come and go. Bounded and tiny per the design's framing in `concurrency.md:134` and `:168`, but a real loose end with no current owner. A future maintenance command can sweep orphaned per-catalog lockfiles for catalogs no longer in `config.json`.
+
+(severity=hygiene, work=small)
+
+## Deferred
+
+Items here are deferred with a stated rationale or trigger condition. The intent is to record both the idea and the reason it's not being acted on, so a future contributor (or future maintainer) can see whether the conditions have changed before re-proposing.
+
+<a id="BL23a"></a>
+
+**BL23a Tokenizer offsets remain zero (deliberate simplification with a documented trigger).** `MonodexFtsTokenStream` sets `offset_from` and `offset_to` to `0` for every token. This is a deliberate choice that keeps the tokenizer implementation smaller and has no observable downside under current Monodex paths. Tantivy's `QueryParser` builds phrase queries from `token.position` only (no offsets used in phrase matching; `test_phrase_query_matches_sequential_tokens` is consistent with that). The only Tantivy consumer of offsets is `SnippetGenerator` for result highlighting, and Monodex does not use it (preview lines come from LanceDB-stored chunk text via `render_preview_lines`). Trigger to revisit: before any Tantivy-backed snippets, highlighting, or exact-hit-span features are added. Any tokenizer behavior change at that point should also be considered against the `FTS_TOKENIZER_ID` policy.
+
+(severity=simplification, work=small)
