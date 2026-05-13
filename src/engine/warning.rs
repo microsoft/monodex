@@ -2,7 +2,7 @@
 //!
 //! Purpose: Define warning events that can occur during a crawl and a sink abstraction for emitting them.
 //! Edit here when: Adding new warning types, changing warning categorization.
-//! Do not edit here for: Rendering warnings to stdout/stderr (see `app/crawl/warning.rs`), persisting warnings to disk (see `app/crawl/phases.rs`).
+//! Do not edit here for: Rendering warnings to stdout/stderr (see `app/crawl/warning.rs`).
 
 /// In-flight crawl warning. Surfaces immediately; not retained.
 #[derive(Debug, Clone)]

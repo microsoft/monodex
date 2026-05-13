@@ -46,7 +46,7 @@ The `embedder_id` and `chunker_id` constants live in `src/engine/util.rs`. Bumpi
 
 Chunk 1 of each file is the sentinel: the row with `chunk_ordinal = 1` is also the only row with `file_complete = true` once the file finishes indexing. The crawl checks for the sentinel row by `row_id` lookup; if the file qualifies for the fast path, the file is skipped, and only `active_label_ids` is updated to add the current label. This is what makes re-crawling cheap.
 
-This file-enumeration fast path serves the vector phase. Under nullable-vector chunks, the qualification predicate is "sentinel exists, `file_complete = true`, and the sentinel row's `vector` column is non-NULL"; the last clause is necessary because an FTS-only crawl can produce complete sentinels with NULL vectors, which a later vector crawl must not skip. The writer maintains the invariant that all chunks of a file are in the same vector-presence state when the sentinel flips complete, so checking the sentinel row's `vector` is sufficient proof for the whole file.
+This file-enumeration fast path serves the vector phase. Under nullable-vector chunks, the qualification predicate is "sentinel exists, `file_complete = true`, and the sentinel row's `vector` column is non-NULL"; the last clause is necessary because an FTS-only crawl can produce complete sentinels with NULL vectors, which a later vector crawl must not skip. The per-file invariant that all chunks of a file have the same vector-presence state when the sentinel flips complete is a known transient gap until BL103 lands; see [crawl.md](./crawl.md) for details.
 
 The FTS phase does not enumerate files. It is a batch reconciliation, run once after the file-processing pass: read the label's chunks from LanceDB, diff against the per-label staleness manifest, apply additions and removals to the Tantivy index, commit. The manifest makes the diff cheap; it is not a per-file skip predicate.
 
@@ -112,14 +112,14 @@ Application-layer code, CLI-specific. Not reusable as a library.
 - `config.rs`: Load and validate `config.json` (catalogs, database path, embedding-model knobs). Contains the `Config` and `DatabaseConfig` structs and the resolver that picks the database path.
 - `context.rs`: Persist and resolve the default catalog/label set by `monodex use`. Owns the `DefaultContext` struct and read/write to `<tool-home>/context.json`.
 - `search.rs`: Search-output renderer. Takes a `&mut dyn Write` and emits preamble, warnings, results, debug continuations, and end-of-results sentinels in a fixed order. The single-writer routing is what makes search-time output testable from byte buffers; see [search.md](../design/search.md) for the output-ordering rule.
-- `util.rs`: Formatting and display helpers: timestamps, durations, byte sizes, terminal sanitization for search output, warning-state persistence, chunk-selector parsing, and `format_source_pointer` for warning remediation strings.
+- `util.rs`: Formatting and display helpers: timestamps, durations, byte sizes, terminal sanitization for search output, chunk-selector parsing, and `format_source_pointer` for warning remediation strings.
 
 ### src/app/commands/
 
 One file per CLI subcommand handler. Most are thin: parse args, call into the engine, format output.
 
 - `audit_chunks.rs`: `audit-chunks`: sample TypeScript files from a directory and report aggregate chunk-quality scores. AST-only mode.
-- `crawl.rs`: `crawl`: enumerate files (commit tree or working dir), drive the embed/upload pipeline, run label reassignment after success, persist warnings.
+- `crawl.rs`: `crawl`: enumerate files (commit tree or working dir), drive the embed/upload pipeline, run label reassignment after success.
 - `debug_fts.rs`: `debug-fts`: print tokens for a chunk and optionally explain query ranking. Diagnostic for FTS tokenization issues.
 - `dump_chunks.rs`: `dump-chunks`: visualize partitioner output for a single file. Supports debug, visualize, and with-fallback modes.
 - `init_db/`: `init-db`: create or validate a database directory, write the LanceDB tables, create the empty `fts/` directory, write `monodex-meta.json`, and handle `--delete-everything`.
@@ -204,7 +204,7 @@ LanceDB storage layer. Typed operations on the two tables.
 
 Sub-module for chunk-table operations, separated from the rest of `storage/` because it's larger than the others and has its own tests file.
 
-- `mod.rs`: Upsert-with-vectors, upsert-without-vectors, vector search, label-membership add/remove, per-file chunk lookup, sentinel checks, row-id hydration, deletion, truncation, and `null_vectors_for_row_ids` for the FTS-only slow path; see [crawl.md](./crawl.md) for the vector-presence invariant.
+- `mod.rs`: Upsert-with-vectors, upsert-without-vectors, vector search, label-membership add/remove, per-file chunk lookup, sentinel checks, row-id hydration, deletion, truncation; see [crawl.md](./crawl.md) for the vector-presence invariant.
 
 ## All markdown files in this repo
 

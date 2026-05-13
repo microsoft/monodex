@@ -100,8 +100,6 @@ The result of the split-search is reflected in the breadcrumb attached to each c
 - **`:[degraded-ast-split]`.** The split was at an AST boundary but produced at least one tiny chunk. Operationally usable but indicates the file's structure didn't fit the algorithm's assumptions cleanly.
 - **`:[fallback-split]`.** No AST split was found and the partitioner fell back to a line-based cut. This is the failure mode and indicates a genuine chunker problem worth investigating.
 
-Files producing fallback splits are tracked in a sidecar warnings file during crawl (see [crawl.md](./crawl.md)) so they can be revisited as the algorithm improves.
-
 ### Quality scoring
 
 `src/engine/partitioner/scoring.rs` computes a 0-100% score for a complete partitioning, used by `audit-chunks` to summarize chunker behavior across a sample of files. The score combines two badnesses:

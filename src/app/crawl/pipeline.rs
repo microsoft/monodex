@@ -291,12 +291,8 @@ impl Drop for ProgressGuard {
     }
 }
 
-/// Chunks are written with NULL vectors. Before upserting, any existing vectors
-/// on matched rows are cleared to maintain the per-file vector-presence invariant
-/// (all chunks of a file must have the same vector presence when file_complete=true).
-///
-/// The storage primitive `upsert_without_vectors` preserves vectors at the row level;
-/// this function clears vectors separately before calling it.
+/// Chunks are written with NULL vectors. Existing vectors on matched rows are
+/// preserved (not cleared). The `active_label_ids` set is merged on matched rows.
 ///
 /// Returns (touched_file_ids, failures) for the crawl.
 pub async fn run_upsert_without_vectors(

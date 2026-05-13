@@ -1250,10 +1250,9 @@ impl ChunkStorage {
 
     /// Set the vector column to NULL for multiple chunks.
     ///
-    /// This is used by FTS-only crawls to clear stale vectors when reprocessing
-    /// files that were partially indexed by a previous interrupted vector crawl.
-    /// The per-file vector-presence invariant requires that all chunks of a file
-    /// have the same vector presence (all NULL or all non-NULL) when file_complete=true.
+    /// This is a storage primitive used by tests pinning the no-vector-write invariant.
+    /// No production caller exists today; the FTS-only crawl path preserves vectors
+    /// rather than clearing them.
     ///
     /// Batching is handled internally using the same UPSERT_BATCH_SIZE as upsert operations.
     /// The commit mutex is acquired once at function entry, then released on drop.

@@ -93,7 +93,7 @@ pub fn run_crawl_label(
     let crawl_config = load_compiled_crawl_config(&config.paths, Some(&repo_path))?;
     println!("Loaded crawl configuration for repository");
 
-    // Resolve database path (needed for warning state file location)
+    // Resolve database path (needed for locks and metadata)
     let db_path = resolve_database_path(config)?;
     println!("Database: {}", db_path.display());
 
@@ -171,7 +171,7 @@ pub fn run_crawl_working_dir(
     let crawl_config = load_compiled_crawl_config(&config.paths, Some(&repo_path))?;
     println!("Loaded crawl configuration for repository");
 
-    // Resolve database path (needed for warning state file location)
+    // Resolve database path (needed for locks and metadata)
     let db_path = resolve_database_path(config)?;
     println!("Database: {}", db_path.display());
 

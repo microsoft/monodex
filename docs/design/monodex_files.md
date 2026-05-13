@@ -42,7 +42,7 @@ Earlier prerelease versions placed these files at platform-dependent locations (
 
 ## Database directory
 
-`<database-dir>` contains a metadata file, the LanceDB tables, and per-catalog warning state. It is not designed to be edited by hand. Every file in it is tool-managed except where noted.
+`<database-dir>` contains a metadata file and the LanceDB tables. It is not designed to be edited by hand. Every file in it is tool-managed except where noted.
 
 The database location must be on a local filesystem. Network filesystems and synced cloud folders (NFS, SMB, Dropbox, OneDrive, iCloud, Google Drive, etc.) are not supported. The writer-lock layer that coordinates concurrent operations against this directory is described in [concurrency.md](./concurrency.md); its lockfiles live under `<database-dir>/locks/`.
 

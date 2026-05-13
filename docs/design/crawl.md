@@ -20,7 +20,7 @@ Two enumeration paths, depending on the source:
 
 **Commit mode:** Use `gix` to walk the commit tree recursively. The walker emits a sequence of `(blob_id, relative_path)` pairs for every blob in the tree. Non-blob entries (submodules, symlinks under some repo configurations) are filtered out. Monodex doesn't follow submodule pointers and doesn't materialize symlink targets.
 
-**Working-directory mode:** Walk the filesystem from the repo root using `walkdir`, skipping hidden directories (except `.git`), `node_modules`, `target`, `dist`, `build`, `.cache`, and `temp`. For each surviving file, compute a Git-compatible blob ID by shelling out to the `git` CLI. The minimum required Git version is 2.35.0 (for `git ls-files --format`).
+**Working-directory mode:** Read the tracked-file set from `git ls-files` and `git status` to build a blob map of `(relative_path, blob_id)` pairs. Git-tracked files under hidden directories (`.github/`, `.vscode/`, etc.) are included because the enumeration is driven by the blob map, not a filesystem walk. For each file, compute a Git-compatible blob ID by shelling out to `git hash-object`. The minimum required Git version is 2.35.0 (for `git ls-files --format`).
 
 The blob-ID compatibility between the two modes is load-bearing: it's what makes a `--working-dir` re-crawl over an unchanged repo skip every file via the sentinel check, with no re-embedding. Earlier versions used a SHA-256 content hash for working-dir mode, which produced different `file_id` values from commit mode and broke incremental skipping. The current implementation uses `git ls-files`, `git status`, and `git hash-object --stdin-paths` so that `.gitattributes`, clean filters, and other repo-specific settings are respected and the resulting blob IDs match what `git` would compute on commit.
 
@@ -60,7 +60,7 @@ The vector-in-selection predicate's vector-non-NULL check relies on an invariant
 
 **Slow path:** Read the blob bytes (commit mode: from Git, via the cat-file batch process; working-dir mode: from the filesystem). Resolve the package name via the package index. Compute the breadcrumb prefix. Dispatch to the chunker via `src/engine/chunker.rs` (see [chunker.md](./chunker.md) for the algorithm) to produce chunks. If vector is in the current selection, embed each chunk via the parallel ONNX embedder pool (see `src/engine/parallel_embedder.rs`); otherwise leave each chunk row's `vector` column NULL. Upsert each resulting `ChunkRow` to the `chunks` table, with `active_label_ids` containing the current `label_id`. The sentinel chunk (ordinal 1) gets `file_complete = true` once all chunks for the file have been written.
 
-Files that the chunker reports warnings for (`[fallback-split]` quality marker; see [chunker.md](./chunker.md)) are tracked in a sidecar warnings file. By default, files with warnings are always re-processed on subsequent crawls so chunker improvements can take effect; the `--incremental-warnings` flag opts into skipping them when unchanged, useful for large repos with known chunker issues that aren't blocking work.
+
 
 The pipeline is parallel: a worker thread pool drives chunking and embedding via `crossbeam` channels and `rayon`, with a separate writer thread doing the LanceDB upserts. Per-chunk failures (tokenizer edge cases, model issues on specific content) are tracked in `CrawlFailures` and reported at the end; structural errors (disk full, dataset corruption) abort immediately.
 
@@ -102,7 +102,7 @@ These IDs do not participate in `row_id`. Chunk identity is a chunk-storage conc
 
 **FTS-only crawl path preserves vectors.** The FTS-only crawl path upserts chunks without modifying existing vector columns. This avoids clobbering vectors from peer labels that share the same blob (same `row_id` derived from `file_id`).
 
-The per-file invariant (for any file with `file_complete = true`, either all chunks have non-NULL `vector` or none do) is what makes the vector-phase fast-path predicate sufficient (see Step 4). This invariant is now maintained by structural separation: a vector crawl processes all chunks of a file atomically, and an FTS-only crawl does not touch vectors. Until BL103 lands, an interrupted vector-crawl-then-FTS-only-crawl sequence can leave a file in a partial-vector state (some chunks with vectors, some without). This is a known transient gap; BL103 closes it by enforcing that a label's retrieval selection cannot mix vector and FTS-only modes on the same file.
+The per-file invariant (for any file with `file_complete = true`, either all chunks have non-NULL `vector` or none do) is what makes the vector-phase fast-path predicate sufficient (see Step 4). This invariant will be maintained by structural separation tracked in BL103: a vector crawl will process all chunks of a file atomically, and an FTS-only crawl does not touch vectors. Until BL103 lands, an interrupted vector-crawl-then-FTS-only-crawl sequence can leave a file in a partial-vector state (some chunks with vectors, some without). This is a known transient gap; BL103 closes it by enforcing that a label's retrieval selection cannot mix vector and FTS-only modes on the same file.
 
 **Tokenizer.** The tokenizer used during the FTS phase is the same one used at query time. Behavior spec is in [search.md](./search.md).
 
