@@ -65,9 +65,14 @@ impl Paths {
 
     /// Inner config folder resolution logic.
     fn resolve_config_folder(override_path: Option<PathBuf>) -> Result<PathBuf> {
-        // Check CLI override first
+        // Check CLI override first (trim and treat empty/whitespace as unset)
         if let Some(path) = override_path {
-            return Self::absolutize_if_relative(path);
+            let path_str = path.to_string_lossy();
+            let trimmed = path_str.trim();
+            if !trimmed.is_empty() {
+                return Self::absolutize_if_relative(PathBuf::from(trimmed));
+            }
+            // Empty/whitespace override falls through to env var
         }
 
         // Check MONODEX_CONFIG_FOLDER env var
@@ -236,6 +241,38 @@ mod tests {
         let cwd = std::fs::canonicalize(".").unwrap();
         let expected = cwd.join("relative/path");
         assert_eq!(paths.config_folder, expected);
+    }
+
+    #[test]
+    #[serial(monodex_config_folder)]
+    fn test_resolve_from_env_empty_override_falls_back_to_env() {
+        let _guard = EnvGuard::capture();
+        let temp_dir = tempfile::tempdir().unwrap();
+
+        // Set env var to a specific path
+        unsafe {
+            env::set_var("MONODEX_CONFIG_FOLDER", temp_dir.path());
+        }
+
+        // Empty override should fall through to env var
+        let paths = Paths::resolve_from_env(Some(PathBuf::from(""))).unwrap();
+        assert_eq!(paths.config_folder, temp_dir.path());
+    }
+
+    #[test]
+    #[serial(monodex_config_folder)]
+    fn test_resolve_from_env_whitespace_override_falls_back_to_env() {
+        let _guard = EnvGuard::capture();
+        let temp_dir = tempfile::tempdir().unwrap();
+
+        // Set env var to a specific path
+        unsafe {
+            env::set_var("MONODEX_CONFIG_FOLDER", temp_dir.path());
+        }
+
+        // Whitespace-only override should fall through to env var
+        let paths = Paths::resolve_from_env(Some(PathBuf::from("   "))).unwrap();
+        assert_eq!(paths.config_folder, temp_dir.path());
     }
 
     #[test]

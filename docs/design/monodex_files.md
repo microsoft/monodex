@@ -1,6 +1,6 @@
 # Files Monodex reads and writes
 
-This document inventories every file involved in Monodex's runtime contract: tool-home state, the database directory, repo-local files Monodex reads from the indexed repository, and the schema and template files that ship with the project. It is the central reference for "what is this file, who owns it, what writes it, and is it safe to modify by hand."
+This document inventories every file involved in Monodex's runtime contract: config-folder state, the database directory, repo-local files Monodex reads from the indexed repository, and the schema and template files that ship with the project. It is the central reference for "what is this file, who owns it, what writes it, and is it safe to modify by hand."
 
 Two placeholders are used throughout:
 
@@ -100,7 +100,7 @@ Two sets of files travel with the Monodex source code but are neither documentat
 
 The current state is best described as not-yet-plumbed. Cargo doesn't natively support shipping non-source files alongside a binary, so a `cargo install monodex` produces a binary without these files on the user's system. The schemas and templates exist in the repo today for development purposes — a contributor can edit them, hand-copy them to a test installation, validate them against the loader — but they are not part of a user's installation.
 
-The intended end state is: schemas published to a Microsoft-hosted schema server (URLs of the form `https://developer.microsoft.com/json-schemas/monodex/v0/...`, hosted from the [microsoft/json-schemas](https://github.com/microsoft/json-schemas) repo, manually published per Rush Stack convention); templates embedded in the binary via `include_bytes!` and written into `<tool-home>/` by a `monodex init` command. Both are future work, not yet implemented.
+The intended end state is: schemas published to a Microsoft-hosted schema server (URLs of the form `https://developer.microsoft.com/json-schemas/monodex/v0/...`, hosted from the [microsoft/json-schemas](https://github.com/microsoft/json-schemas) repo, manually published per Rush Stack convention); templates embedded in the binary via `include_bytes!` and written into `<config-folder>/` by a `monodex init` command. Both are future work, not yet implemented.
 
 ### `schemas/*.schema.json`
 

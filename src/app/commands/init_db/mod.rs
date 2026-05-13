@@ -66,7 +66,7 @@ fn log_already_initialized(db_path: &Path, schema_version: u32) -> String {
 /// database is valid. The database contains LanceDB tables for chunks and label metadata.
 ///
 /// Note: Config must be loaded by the caller (main.rs) and passed in.
-/// This ensures the --config flag is respected uniformly across all commands.
+/// This ensures path/config resolution is performed uniformly before command dispatch.
 pub fn run_init_db(config: &Config, delete_everything: bool) -> Result<()> {
     // Step 1: Resolve database path from config
     let db_path = resolve_database_path(config)?;

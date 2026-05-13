@@ -92,7 +92,7 @@ Four versioning constants live in `src/engine/util.rs` and govern when on-disk s
 
 ## Filesystem footprint
 
-Monodex reads and writes files in three places: the user's tool home (`~/.monodex/`), the repository being indexed (the repo-local crawl config and `package.json` files), and editor-consumed schema files that ship with the project. The full inventory, with notes on which files are user-editable and which are tool-managed, lives in [monodex_files.md](./monodex_files.md).
+Monodex reads and writes files in three places: the user's config folder (`~/.monodex/`), the repository being indexed (the repo-local crawl config and `package.json` files), and editor-consumed schema files that ship with the project. The full inventory, with notes on which files are user-editable and which are tool-managed, lives in [monodex_files.md](./monodex_files.md).
 
 ## Source tree
 
@@ -102,7 +102,7 @@ Module-organization rules — file size targets, where new code goes, banned pat
 
 - `lib.rs`: Crate root; declares `app`, `engine`, and `paths` modules.
 - `main.rs`: Binary entry point; parses CLI args and dispatches to command handlers.
-- `paths.rs`: Resolves filesystem paths for tool state (config, context, crawl config) under the tool home directory.
+- `paths.rs`: Resolves filesystem paths for tool state (config, context, crawl config) under the config folder.
 
 ### src/app/
 
@@ -222,5 +222,5 @@ Every `.md` file in the repo, with a one-line description. Add an entry when add
 - [`docs/design/search.md`](./search.md): Search-side behavior: retrieval methods, decision rules, RRF fusion, tokenizer, output format, debug-fts.
 - [`docs/design/chunker.md`](./chunker.md): Chunking algorithms: TypeScript AST partitioning (the "two worlds model"), markdown splitting, quality markers and scoring.
 - [`docs/design/concurrency.md`](./concurrency.md): Writer lock taxonomy (database, catalog, commit mutex), reader-lock-free contract, interaction with LanceDB MVCC and Tantivy's per-directory locks.
-- [`docs/design/monodex_files.md`](./monodex_files.md): Inventory of files monodex reads or writes: tool-home state, repo-local config files monodex reads from the indexed repo, editor-consumed schemas, init templates.
+- [`docs/design/monodex_files.md`](./monodex_files.md): Inventory of files monodex reads or writes: config-folder state, repo-local config files monodex reads from the indexed repo, editor-consumed schemas, init templates.
 - [`schemas/editing.md`](../../schemas/editing.md): Cross-reference back to the Rust structs that mirror these schemas, plus a policy reminder that these files are publicly published artifacts.

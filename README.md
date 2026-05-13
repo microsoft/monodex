@@ -458,7 +458,7 @@ RUST_LOG=debug ./target/release/monodex crawl --catalog sparo --label main --com
 
 The crawl behavior (which files to index and how to chunk them) can be customized via configuration files.
 
-For the full inventory of files Monodex reads or writes (tool-home state, the database directory layout, repo-local config files), see [docs/design/monodex_files.md](https://github.com/microsoft/monodex/blob/main/docs/design/monodex_files.md).
+For the full inventory of files Monodex reads or writes (config-folder state, the database directory layout, repo-local config files), see [docs/design/monodex_files.md](https://github.com/microsoft/monodex/blob/main/docs/design/monodex_files.md).
 
 ### Config Discovery
 
@@ -478,6 +478,7 @@ JSON schemas are available in the `schemas/` directory for IDE autocomplete and 
 | ------------------------- | ----------------------------- |
 | `monodex-config.json`     | `schemas/config.schema.json`  |
 | `monodex-crawl.json`      | `schemas/crawl.schema.json`   |
+| `monodex-crawl-config.json` | `schemas/crawl.schema.json` |
 | `monodex-state.json`      | `schemas/context.schema.json` |
 
 Create a `monodex-crawl.json` file:
