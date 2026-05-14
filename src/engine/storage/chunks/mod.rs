@@ -23,7 +23,9 @@ use std::sync::Arc;
 
 use crate::engine::schema::VECTOR_DIMENSION;
 use crate::engine::storage::locks::acquire_commit_mutex;
-use crate::engine::storage::predicate::{array_contains_str, eq_str, in_quoted_strs};
+use crate::engine::storage::predicate::{
+    array_contains_str, eq_str, in_quoted_strs, quoted_str_array,
+};
 use crate::engine::storage::{ChunkRow, ScoredChunkRow};
 
 /// Batch size for upsert operations. Storage-layer internal detail.
@@ -1214,8 +1216,8 @@ impl ChunkStorage {
         }
 
         // Build SQL array literal like "['label1', 'label2']"
-        let quoted: Vec<String> = new_labels.iter().map(|l| format!("'{}'", l)).collect();
-        let labels_sql = format!("[{}]", quoted.join(", "));
+        let labels_sql =
+            quoted_str_array(&new_labels.iter().map(|s| s.as_str()).collect::<Vec<_>>());
 
         let predicate = eq_str("row_id", row_id);
 
