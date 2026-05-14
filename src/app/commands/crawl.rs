@@ -250,7 +250,7 @@ async fn run_crawl_async(
     .await?;
 
     // Print narrowing announcement if this crawl narrows the selection
-    print_narrowing_announcement(&previous_selection, &selection);
+    print_narrowing_announcement(&mut std::io::stdout(), &previous_selection, &selection);
 
     // Determine retrieval method presence early (used for fast-path predicate)
     let vector_in_selection = selection.contains(&RetrievalMethod::Vector);

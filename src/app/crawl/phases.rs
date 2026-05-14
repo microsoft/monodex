@@ -754,6 +754,7 @@ pub fn format_selection_for_display(selection: &BTreeSet<RetrievalMethod>) -> St
 /// which happens after storage is opened. The announcement prints separately
 /// from the main preamble (which prints before storage is open).
 pub fn print_narrowing_announcement(
+    writer: &mut dyn std::io::Write,
     previous_selection: &BTreeSet<RetrievalMethod>,
     new_selection: &BTreeSet<RetrievalMethod>,
 ) {
@@ -764,18 +765,19 @@ pub fn print_narrowing_announcement(
 
         match (has_fts, has_vector) {
             (true, false) => {
-                println!();
-                println!("👉 This crawl narrows retrieval selection to fts only, no vector.");
-                println!(
+                writeln!(writer).unwrap();
+                writeln!(writer, "👉 This crawl narrows retrieval selection to fts only, no vector.").unwrap();
+                writeln!(
+                    writer,
                     "   Any vector data from a previous crawl is preserved and will be reused"
-                );
-                println!("   if you re-add vector to the selection.");
+                ).unwrap();
+                writeln!(writer, "   if you re-add vector to the selection.").unwrap();
             }
             (false, true) => {
-                println!();
-                println!("👉 This crawl narrows retrieval selection to vector only, no fts.");
-                println!("   Any fts data from a previous crawl is preserved and will be reused");
-                println!("   if you re-add fts to the selection.");
+                writeln!(writer).unwrap();
+                writeln!(writer, "👉 This crawl narrows retrieval selection to vector only, no fts.").unwrap();
+                writeln!(writer, "   Any fts data from a previous crawl is preserved and will be reused").unwrap();
+                writeln!(writer, "   if you re-add fts to the selection.").unwrap();
             }
             // Empty selection or other narrowing combinations are not expected in practice,
             // but if they occur, we don't print a misleading message.
@@ -849,8 +851,11 @@ mod tests {
         // Previous: both methods, New: fts only -> should print narrowing announcement
         let previous = make_selection(&[RetrievalMethod::Fts, RetrievalMethod::Vector]);
         let new = make_selection(&[RetrievalMethod::Fts]);
-        // This test verifies the function doesn't panic; the actual output goes to stdout
-        print_narrowing_announcement(&previous, &new);
+        let mut output = Vec::new();
+        print_narrowing_announcement(&mut output, &previous, &new);
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.contains("narrows retrieval selection to fts only"));
+        assert!(output.contains("vector data from a previous crawl is preserved"));
     }
 
     #[test]
@@ -858,7 +863,11 @@ mod tests {
         // Previous: both methods, New: vector only -> should print narrowing announcement
         let previous = make_selection(&[RetrievalMethod::Fts, RetrievalMethod::Vector]);
         let new = make_selection(&[RetrievalMethod::Vector]);
-        print_narrowing_announcement(&previous, &new);
+        let mut output = Vec::new();
+        print_narrowing_announcement(&mut output, &previous, &new);
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.contains("narrows retrieval selection to vector only"));
+        assert!(output.contains("fts data from a previous crawl is preserved"));
     }
 
     #[test]
@@ -866,7 +875,9 @@ mod tests {
         // Previous and new are the same -> no announcement
         let previous = make_selection(&[RetrievalMethod::Fts, RetrievalMethod::Vector]);
         let new = make_selection(&[RetrievalMethod::Fts, RetrievalMethod::Vector]);
-        print_narrowing_announcement(&previous, &new);
+        let mut output = Vec::new();
+        print_narrowing_announcement(&mut output, &previous, &new);
+        assert!(output.is_empty());
     }
 
     #[test]
@@ -874,7 +885,9 @@ mod tests {
         // Previous: fts only, New: both -> widening, not narrowing
         let previous = make_selection(&[RetrievalMethod::Fts]);
         let new = make_selection(&[RetrievalMethod::Fts, RetrievalMethod::Vector]);
-        print_narrowing_announcement(&previous, &new);
+        let mut output = Vec::new();
+        print_narrowing_announcement(&mut output, &previous, &new);
+        assert!(output.is_empty());
     }
 
     #[test]
@@ -882,7 +895,9 @@ mod tests {
         // Previous: empty (first crawl), New: both -> no narrowing announcement
         let previous: BTreeSet<RetrievalMethod> = BTreeSet::new();
         let new = make_selection(&[RetrievalMethod::Fts, RetrievalMethod::Vector]);
-        print_narrowing_announcement(&previous, &new);
+        let mut output = Vec::new();
+        print_narrowing_announcement(&mut output, &previous, &new);
+        assert!(output.is_empty());
     }
 
     /// Test that update_final_metadata correctly maps PhaseResults to per-method completion flags.
