@@ -42,7 +42,7 @@ pub(super) fn get_meaningful_children<'a>(
 }
 
 /// Get the end line of import statements (0 if no imports)
-pub(super) fn extract_imports_end_line(root: Node, _source: &[u8]) -> usize {
+pub(super) fn extract_imports_end_line(root: Node) -> usize {
     let mut cursor = root.walk();
     let mut last_import_end = 0usize;
 

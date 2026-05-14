@@ -112,7 +112,7 @@ pub fn run_debug_fts(
             use crate::engine::fts::FtsOpenExistingOutcome;
             match FtsIndex::open_existing(&db_path, &label_id)? {
                 FtsOpenExistingOutcome::Open(fts_index) => {
-                    explain_query(&fts_index, &row_id, query_text, &chunk.text)?;
+                    explain_query(&fts_index, &row_id, query_text)?;
                 }
                 FtsOpenExistingOutcome::NoIndex => {
                     // Load label metadata to format source pointer, with fallback
@@ -243,12 +243,7 @@ fn parse_chunk_id(s: &str) -> Result<(String, usize)> {
 /// Explain query ranking for a chunk.
 ///
 /// Uses Tantivy's explain() to show BM25 scoring details.
-fn explain_query(
-    fts_index: &FtsIndex,
-    row_id: &str,
-    query_text: &str,
-    _chunk_text: &str,
-) -> Result<()> {
+fn explain_query(fts_index: &FtsIndex, row_id: &str, query_text: &str) -> Result<()> {
     println!();
 
     // Get a reader and searcher

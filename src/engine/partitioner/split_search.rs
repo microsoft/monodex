@@ -75,7 +75,6 @@ pub(crate) fn find_best_split(
     start_line: usize,
     end_line: usize,
     chunk_size: usize,
-    target_size: usize,
     min_chunk_size: usize,
     source: &[u8],
     debug: &PartitionDebug,
@@ -114,7 +113,6 @@ pub(crate) fn find_best_split(
                 start_line,
                 end_line,
                 chunk_size,
-                target_size,
                 min_chunk_size,
             ) {
                 debug.log_split_decision("USABLE SPLIT", Some(split_line));
@@ -466,7 +464,6 @@ pub(crate) fn find_usable_split(
     start_line: usize,
     end_line: usize,
     chunk_size: usize,
-    _target_size: usize,
     min_chunk_size: usize,
 ) -> Option<usize> {
     if candidates.is_empty() {

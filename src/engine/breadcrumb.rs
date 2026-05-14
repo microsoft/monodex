@@ -42,22 +42,6 @@ pub fn encode_path_component(s: &str) -> String {
 ///
 /// Uses the `github-slugger` crate for consistent heading ID generation.
 /// Duplicate headings get numbered suffixes (e.g., `examples`, `examples-1`).
-///
-/// # Example
-///
-/// ```
-/// use monodex::engine::breadcrumb::slugify_heading;
-/// use github_slugger::Slugger;
-///
-/// let mut slugger = Slugger::default();
-/// assert_eq!(slugify_heading(&mut slugger, "API: Configuration"), "api-configuration");
-/// assert_eq!(slugify_heading(&mut slugger, "Examples"), "examples");
-/// assert_eq!(slugify_heading(&mut slugger, "Examples"), "examples-1");
-/// ```
-pub fn slugify_heading(slugger: &mut github_slugger::Slugger, heading: &str) -> String {
-    slugger.slug(heading)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -109,52 +93,6 @@ mod tests {
 
         // Alphanumeric
         assert_eq!(encode_path_component("File123"), "File123");
-    }
-
-    #[test]
-    fn test_slugify_heading_basic() {
-        let mut slugger = github_slugger::Slugger::default();
-
-        assert_eq!(
-            slugify_heading(&mut slugger, "Introduction"),
-            "introduction"
-        );
-        assert_eq!(
-            slugify_heading(&mut slugger, "API Reference"),
-            "api-reference"
-        );
-        assert_eq!(slugify_heading(&mut slugger, "What's New?"), "whats-new");
-    }
-
-    #[test]
-    fn test_slugify_heading_duplicates() {
-        let mut slugger = github_slugger::Slugger::default();
-
-        // First occurrence gets base slug
-        assert_eq!(slugify_heading(&mut slugger, "Examples"), "examples");
-
-        // Second occurrence gets numbered suffix
-        assert_eq!(slugify_heading(&mut slugger, "Examples"), "examples-1");
-
-        // Third occurrence
-        assert_eq!(slugify_heading(&mut slugger, "Examples"), "examples-2");
-    }
-
-    #[test]
-    fn test_slugify_heading_special_chars() {
-        let mut slugger = github_slugger::Slugger::default();
-
-        // Colons become hyphens
-        assert_eq!(
-            slugify_heading(&mut slugger, "API: Configuration"),
-            "api-configuration"
-        );
-
-        // Multiple spaces become multiple hyphens (GitHub slugger behavior)
-        assert_eq!(
-            slugify_heading(&mut slugger, "Multiple   Spaces"),
-            "multiple---spaces"
-        );
     }
 
     #[test]

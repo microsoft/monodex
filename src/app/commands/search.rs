@@ -283,19 +283,15 @@ fn format_decision_error(
                 vector_source, fts_source, label, source_pointer
             )
         }
-        DecisionError::MethodNotInSelection { method } => {
-            format!(
-                "Method {} is not in this label's retrieval selection. Re-run `monodex crawl --label {} {} --retrieval {}` to add it.",
-                method, label, source_pointer, method
-            )
-        }
-        DecisionError::MethodsNotInSelection { methods } => {
+        DecisionError::MethodNotInSelection { methods } => {
             let methods_str: Vec<String> = methods.iter().map(|m| format!("{}", m)).collect();
+            let retrieval_flags: Vec<String> = methods.iter().map(|m| format!("--retrieval {}", m)).collect();
             format!(
-                "Methods {} are not in this label's retrieval selection. Re-run `monodex crawl --label {} {}` to add them.",
+                "The requested retrieval method ({}) is not in this label's retrieval selection. Re-run `monodex crawl --label {} {} {}` to add it.",
                 methods_str.join(", "),
                 label,
-                source_pointer
+                source_pointer,
+                retrieval_flags.join(" ")
             )
         }
     }
@@ -812,14 +808,18 @@ mod tests {
     #[test]
     fn test_format_decision_error_method_not_in_selection() {
         use crate::engine::retrieval::RetrievalMethod;
+        use std::collections::BTreeSet;
 
         let metadata = make_test_metadata();
-        let err = crate::engine::search_decision::DecisionError::MethodNotInSelection {
-            method: RetrievalMethod::Fts,
-        };
+        let mut methods: BTreeSet<RetrievalMethod> = BTreeSet::new();
+        methods.insert(RetrievalMethod::Fts);
+
+        let err = crate::engine::search_decision::DecisionError::MethodNotInSelection { methods };
         let result = format_decision_error(&err, &metadata, "main", false);
 
-        assert!(result.contains("Method fts is not in this label's retrieval selection."));
+        assert!(result.contains(
+            "The requested retrieval method (fts) is not in this label's retrieval selection."
+        ));
         assert!(result.contains(
             "Re-run `monodex crawl --label main --commit abc123 --retrieval fts` to add it."
         ));
@@ -835,14 +835,14 @@ mod tests {
         methods.insert(RetrievalMethod::Fts);
         methods.insert(RetrievalMethod::Vector);
 
-        let err = crate::engine::search_decision::DecisionError::MethodsNotInSelection { methods };
+        let err = crate::engine::search_decision::DecisionError::MethodNotInSelection { methods };
         let result = format_decision_error(&err, &metadata, "main", false);
 
         assert!(
-            result.contains("Methods fts, vector are not in this label's retrieval selection.")
+            result.contains("The requested retrieval method (fts, vector) is not in this label's retrieval selection.")
         );
         assert!(
-            result.contains("Re-run `monodex crawl --label main --commit abc123` to add them.")
+            result.contains("Re-run `monodex crawl --label main --commit abc123 --retrieval fts --retrieval vector` to add it.")
         );
     }
 }

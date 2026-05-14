@@ -62,7 +62,7 @@ pub fn partition_typescript(
     }];
 
     // Also extract imports end line for chunk_kind metadata (but don't pre-split)
-    let import_end_line = extract_imports_end_line(root, source.as_bytes());
+    let import_end_line = extract_imports_end_line(root);
 
     // Step 2: Iteratively split chunks that exceed budget
     let min_chunk_size = (config.target_size as f64 * MIN_CHUNK_RATIO) as usize;
@@ -84,7 +84,6 @@ pub fn partition_typescript(
                     chunk_range.start_line,
                     chunk_range.end_line,
                     chunk_size,
-                    config.target_size,
                     min_chunk_size,
                     source.as_bytes(),
                     &config.debug,

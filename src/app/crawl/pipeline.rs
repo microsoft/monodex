@@ -244,9 +244,6 @@ pub async fn run_embed_upload_pipeline(
     Ok((touched_file_ids, failures))
 }
 
-/// Run the FTS-only upsert pipeline (no embedding).
-///
-/// This is used for FTS-only crawls where we don't compute embeddings.
 /// RAII guard for the progress reporter thread.
 ///
 /// Dropping the guard closes the sender channel (causing the reporter's recv to return
@@ -261,21 +258,6 @@ impl ProgressGuard {
         Self {
             sender: Some(sender),
             handle: Some(handle),
-        }
-    }
-
-    /// Explicitly finish the reporter thread before the guard's natural drop.
-    ///
-    /// This ensures the progress reporter is fully joined before any subsequent
-    /// output (e.g., "Storage complete") on the main thread, preventing stdout/stderr
-    /// interleaving. On success, call this before printing final output; on error
-    /// paths, the Drop impl still handles cleanup.
-    fn finish(mut self) {
-        // Drop sender first so the reporter thread's recv returns Disconnected.
-        drop(self.sender.take());
-        // Join the thread to ensure clean shutdown.
-        if let Some(h) = self.handle.take() {
-            let _ = h.join();
         }
     }
 }
@@ -445,7 +427,7 @@ pub async fn run_upsert_without_vectors(
 
     // Join the reporter thread before printing to stdout, to avoid interleaving
     // stderr (progress) with stdout (completion message).
-    guard.finish();
+    drop(guard);
 
     let elapsed = start.elapsed();
     let rate = total_chunks as f64 / elapsed.as_secs_f64().max(0.001);
@@ -570,7 +552,7 @@ async fn upload_and_mark_complete(
         .collect();
 
     // Upsert chunks with vectors (storage handles batching internally)
-    upsert_chunks_with_vectors(chunk_storage, &rows, &vectors).await?;
+    chunk_storage.upsert_with_vectors(&rows, &vectors).await?;
 
     // Track uploaded counts and mark files complete
     // Count chunks per file in this batch
@@ -628,23 +610,6 @@ fn chunk_to_row(chunk: &Chunk) -> ChunkRow {
         split_part_count: chunk.split_part_count.map(|n| n as i32),
         file_complete: false, // Initially false; set to true when all chunks uploaded
     }
-}
-
-/// Upsert chunks with their vectors to LanceDB.
-///
-/// This is a separate function because ChunkRow doesn't include the vector,
-/// so we need to construct the RecordBatch with vectors separately.
-async fn upsert_chunks_with_vectors(
-    storage: &ChunkStorage,
-    rows: &[ChunkRow],
-    vectors: &[Vec<f32>],
-) -> Result<()> {
-    if rows.is_empty() {
-        return Ok(());
-    }
-
-    // Persist chunks and their embedding vectors through the storage layer.
-    storage.upsert_with_vectors(rows, vectors).await
 }
 
 #[cfg(test)]

@@ -78,10 +78,8 @@ pub fn run_view(
         println!("Catalog: {}", catalog_name);
         println!("Label: {}", label);
         println!();
-    }
 
-    // Collect unique catalogs for preamble
-    if !chunks_only {
+        // Collect unique catalogs for preamble
         let catalogs: HashSet<&str> = all_results
             .iter()
             .flat_map(|(_, _, results)| results.iter().map(|r| r.catalog.as_str()))

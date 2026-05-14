@@ -208,20 +208,6 @@ fn git_list_dirty_paths(repo_root: &Path) -> Result<Vec<DirtyEntry>> {
         let path = &part[3..]; // Skip "XY "
 
         match xy {
-            " M" | "AM" | "MM" => {
-                // Modified in worktree (not staged, or both staged and unstaged changes)
-                result.push(DirtyEntry {
-                    path: path.to_string(),
-                    exists_in_worktree: true,
-                });
-            }
-            " D" | "AD" | "MD" => {
-                // Deleted in worktree
-                result.push(DirtyEntry {
-                    path: path.to_string(),
-                    exists_in_worktree: false,
-                });
-            }
             "??" => {
                 // Untracked
                 result.push(DirtyEntry {

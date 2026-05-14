@@ -31,6 +31,10 @@ PUBLISHING PROCEDURE:
 
 - **Consolidated duplicate test helper functions.** The `create_test_storage` function was duplicated across three integration test files. It now lives in a shared `tests/common/mod.rs` module, reducing code duplication and maintenance burden.
 
+### Removed
+
+- **Dead code and redundant patterns cleaned up.** Several unused parameters, redundant function wrappers, duplicate match arms, and misleading docstrings were removed. Internal cleanup with no user-visible behavior change.
+
 ## 0.6.0 (2026-05-13)
 
 ### Added
