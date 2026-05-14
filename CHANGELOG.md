@@ -21,6 +21,12 @@ PUBLISHING PROCEDURE:
 5. After publishing, the next PR author will add a new "## Unreleased" section
 -->
 
+## Unreleased
+
+### Changed
+
+- **Performance: commit-mode crawls now reuse the gix repository handle.** Previously, each file operation during a commit-mode crawl opened the repository independently, adding unnecessary overhead. The repository handle is now cached in the `CommitBlobSource` struct and reused across all file reads.
+
 ## 0.6.0 (2026-05-13)
 
 ### Added

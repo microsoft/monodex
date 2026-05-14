@@ -109,7 +109,7 @@ pub fn run_crawl_label(
     println!();
 
     // Construct the blob source and metadata
-    let blob_source = CommitBlobSource::new(repo_path.clone(), commit_oid.clone());
+    let blob_source = CommitBlobSource::new(&repo_path, commit_oid.clone())?;
     let source_metadata = CrawlSourceMetadata {
         source_kind: SOURCE_KIND_GIT_COMMIT,
         source_value: commit_oid,
