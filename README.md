@@ -126,10 +126,10 @@ Create `~/.monodex/monodex-config.json`:
 
 ```js
 {
-  // Database configuration (optional, defaults to ~/.monodex/default-db)
-  // "database": {
-  //   "path": "/absolute/path/to/your/db"
-  // },
+  // Database configuration (optional, defaults shown)
+  "database": {
+    "path": "~/.monodex/default-db"
+  },
 
   // Catalog definitions (required)
   "catalogs": {
@@ -141,13 +141,13 @@ Create `~/.monodex/monodex-config.json`:
       "type": "monorepo",
       "path": "/path/to/rushstack"
     }
-  }
+  },
 
   // Embedding model configuration (optional, defaults shown)
-  // "embeddingModel": {
-  //   "modelInstances": "auto",
-  //   "threadsPerInstance": "auto"
-  // }
+  "embeddingModel": {
+    "modelInstances": "auto",
+    "threadsPerInstance": "auto"
+  }
 }
 ```
 
