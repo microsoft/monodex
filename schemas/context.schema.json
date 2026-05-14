@@ -6,6 +6,10 @@
   "required": ["catalog", "label", "set_at"],
   "additionalProperties": false,
   "properties": {
+    "$schema": {
+      "description": "Part of the JSON Schema standard, this optional keyword declares the URL of the schema that the file conforms to. Editors may download the schema and use it to perform syntax highlighting.",
+      "type": "string"
+    },
     "catalog": {
       "type": "string",
       "description": "Default catalog name for commands. Kebab-case, 1-64 chars (e.g., my-repo, frontend-app). The schema pattern is intentionally permissive; full syntax is validated at runtime with detailed error messages.",

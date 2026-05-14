@@ -1,8 +1,8 @@
 {
-  // Database configuration (optional, defaults to ~/.monodex/default-db)
-  // "database": {
-  //   "path": "/absolute/path/to/your/db"
-  // },
+  // Database configuration (optional, defaults shown)
+  "database": {
+    "path": "~/.monodex/default-db"
+  },
 
   // Catalog definitions (required)
   "catalogs": {
@@ -14,11 +14,11 @@
       "type": "monorepo",
       "path": "/absolute/path/to/another-monorepo"
     }
-  }
+  },
 
   // Embedding model configuration (optional, defaults shown)
-  // "embeddingModel": {
-  //   "modelInstances": "auto",
-  //   "threadsPerInstance": "auto"
-  // }
+  "embeddingModel": {
+    "modelInstances": "auto",
+    "threadsPerInstance": "auto"
+  }
 }

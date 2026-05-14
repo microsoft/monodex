@@ -1,6 +1,11 @@
 //! Purpose: Subprocess-based reading of the working directory using the `git` CLI to compute Git-compatible blob IDs that respect `.gitattributes` and clean filters.
 //! Edit here when: Changing the `git ls-files` / `git status` / `git hash-object` orchestration, the dirty-path detection, batching strategy, or the minimum-Git-version check.
 //! Do not edit here for: The `BlobSource` trait or `PackageIndex` type (see `mod.rs`), gix-based commit reading (see `commit.rs`).
+//!
+//! The working-tree view includes tracked files at their current working-tree contents
+//! (including local modifications), plus untracked non-ignored files reported by `git status -u`.
+//! Deleted files are removed from the view. `.gitignore`-excluded files are not included
+//! even when present on disk.
 
 use anyhow::{Result, anyhow};
 use std::collections::HashMap;
@@ -308,13 +313,13 @@ fn git_hash_object_batch(repo_root: &Path, paths: &[String]) -> Result<Vec<(Stri
 
 /// Enumerate files from the working directory using Git-aware blob IDs.
 ///
-/// This function builds a complete blob map using Git CLI batch commands,
-/// then walks the filesystem to filter by crawl config. The blob IDs
-/// correctly respect .gitattributes, clean filters, and other repo-specific settings.
+/// Returns all files in Git's working-tree view: tracked files at their current
+/// working-tree contents (including local modifications), plus untracked non-ignored
+/// files. Blob IDs are computed via `git hash-object` so they respect `.gitattributes`,
+/// clean filters, and other repo-specific settings.
 pub fn enumerate_working_directory(repo_path: &Path) -> Result<Vec<FileEntry>> {
     // Build the Git-aware blob map, which is the authoritative source of
-    // what files Git tracks (including files under hidden directories like
-    // .github/, .vscode/, etc.)
+    // Git's working-tree view: tracked files plus untracked non-ignored files.
     let blob_map = build_working_tree_blob_map(repo_path)?;
 
     // Iterate the blob map directly instead of walking the filesystem.
@@ -333,8 +338,9 @@ pub fn enumerate_working_directory(repo_path: &Path) -> Result<Vec<FileEntry>> {
 }
 
 /// Build package index from the working directory.
-/// Uses the Git-aware blob map to find all package.json files Git tracks,
-/// including those under hidden directories like .github/ or .vscode/.
+/// Uses the Git-aware blob map to find all `package.json` files in Git's working-tree
+/// view (tracked plus untracked non-ignored), including those under hidden directories
+/// like .github/ or .vscode/.
 pub fn build_package_index_for_working_dir(repo_path: &Path) -> Result<PackageIndex> {
     let mut index = PackageIndex::new();
 

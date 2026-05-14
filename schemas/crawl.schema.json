@@ -6,6 +6,10 @@
   "required": ["version", "fileTypes", "patternsToExclude", "patternsToKeep"],
   "additionalProperties": false,
   "properties": {
+    "$schema": {
+      "description": "Part of the JSON Schema standard, this optional keyword declares the URL of the schema that the file conforms to. Editors may download the schema and use it to perform syntax highlighting.",
+      "type": "string"
+    },
     "version": {
       "type": "integer",
       "description": "Config schema version (currently only 1 is supported)",

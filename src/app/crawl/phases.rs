@@ -1032,8 +1032,8 @@ mod tests {
 
     /// Test that chunk_new_files emits a warning for non-UTF-8 file contents.
     ///
-    /// This verifies the fix for BL17: files whose bytes are not valid UTF-8
-    /// emit a CrawlWarning::FileReadFailed with error "non-UTF-8 file contents".
+    /// Files whose bytes are not valid UTF-8 should emit a CrawlWarning::FileReadFailed
+    /// with error "non-UTF-8 file contents" and be skipped, not crash the crawl.
     #[test]
     fn test_chunk_new_files_emits_warning_for_non_utf8() {
         use crate::engine::crawl_config::get_default_crawl_config;

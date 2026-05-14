@@ -182,15 +182,43 @@ mod tests {
         let validator = Validator::new(&schema).expect("Failed to compile JSON schema");
 
         // Load and validate the example context
-        let example_path = "examples/context.json";
+        let example_path = "examples/monodex-state.json";
         let example_str = std::fs::read_to_string(example_path)
-            .expect("Failed to read examples/context.json - run from project root");
+            .expect("Failed to read examples/monodex-state.json - run from project root");
         let example: serde_json::Value = serde_json::from_str(&example_str)
-            .expect("Failed to parse examples/context.json as JSON");
+            .expect("Failed to parse examples/monodex-state.json as JSON");
 
         assert!(
             validator.is_valid(&example),
-            "examples/context.json does not validate against schema"
+            "examples/monodex-state.json does not validate against schema"
+        );
+    }
+
+    #[test]
+    fn test_context_schema_accepts_schema_field() {
+        use jsonschema::Validator;
+
+        // Load the schema
+        let schema_path = "schemas/context.schema.json";
+        let schema_str = std::fs::read_to_string(schema_path)
+            .expect("Failed to read context.schema.json - run from project root");
+        let schema: serde_json::Value =
+            serde_json::from_str(&schema_str).expect("Failed to parse context.schema.json as JSON");
+
+        // Compile the schema
+        let validator = Validator::new(&schema).expect("Failed to compile JSON schema");
+
+        // Test that a $schema field is accepted
+        let context_with_schema = serde_json::json!({
+            "$schema": "https://example.com/schemas/monodex-state.json",
+            "catalog": "my-repo",
+            "label": "main",
+            "set_at": "2024-01-15T10:30:00Z"
+        });
+
+        assert!(
+            validator.is_valid(&context_with_schema),
+            "Schema should accept $schema field in monodex-state.json"
         );
     }
 
@@ -208,7 +236,7 @@ mod tests {
         // Compile the schema
         let validator = Validator::new(&schema).expect("Failed to compile JSON schema");
 
-        // Test that an HH:MM:SS timestamp (like the old BL14 bug) is rejected
+        // Test that an HH:MM:SS timestamp is rejected (the format lacks date/timezone)
         let bad_context = serde_json::json!({
             "catalog": "my-repo",
             "label": "main",

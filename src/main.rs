@@ -12,11 +12,7 @@ fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
     // Resolve paths from environment and CLI overrides
-    let paths = Paths::resolve_from_env(cli.config.clone())?;
-
-    // Warn if old tool home files exist (before load_config, so it fires even
-    // when there's no config file at the new location)
-    monodex::paths::warn_old_tool_home_if_present(&paths);
+    let paths = Paths::resolve_from_env(cli.config_folder.clone())?;
 
     // Load config
     let config = load_config(paths)?;

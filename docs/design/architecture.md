@@ -46,7 +46,7 @@ The `embedder_id` and `chunker_id` constants live in `src/engine/util.rs`. Bumpi
 
 Chunk 1 of each file is the sentinel: the row with `chunk_ordinal = 1` is also the only row with `file_complete = true` once the file finishes indexing. The crawl checks for the sentinel row by `row_id` lookup; if the file qualifies for the fast path, the file is skipped, and only `active_label_ids` is updated to add the current label. This is what makes re-crawling cheap.
 
-This file-enumeration fast path serves the vector phase. Under nullable-vector chunks, the qualification predicate is "sentinel exists, `file_complete = true`, and the sentinel row's `vector` column is non-NULL"; the last clause is necessary because an FTS-only crawl can produce complete sentinels with NULL vectors, which a later vector crawl must not skip. The per-file invariant that all chunks of a file have the same vector-presence state when the sentinel flips complete is a known transient gap until BL103 lands; see [crawl.md](./crawl.md) for details.
+This file-enumeration fast path serves the vector phase. Under nullable-vector chunks, the qualification predicate is "sentinel exists, `file_complete = true`, and the sentinel row's `vector` column is non-NULL"; the last clause is necessary because an FTS-only crawl can produce complete sentinels with NULL vectors, which a later vector crawl must not skip. The per-file invariant that all chunks of a file have the same vector-presence state when the sentinel flips complete is a known transient gap that will be resolved by structural separation in a future release; see [crawl.md](./crawl.md) for details.
 
 The FTS phase does not enumerate files. It is a batch reconciliation, run once after the file-processing pass: read the label's chunks from LanceDB, derive the currently indexed set from Tantivy's term dictionary, apply additions and removals to the Tantivy index, commit.
 
@@ -56,7 +56,7 @@ A crawl run, end to end:
 
 1. **Label upsert**: Resolve `--commit` to a full SHA (or note that this is a `--working-dir` run); update the label's retrieval selection from `--retrieval` (set per-method `source` columns to the resolved commit, NULL out methods being dropped) and mark each in-selection method's `complete` flag false.
 2. **Tree visitor**: Enumerate files from the commit tree or from the working-directory blob map (`git ls-files` + `git status`).
-3. **Package indexing**: Build the package index, a map from directory paths to package names, by reading every Git-tracked `package.json` in the source.
+3. **Package indexing**: Build the package index, a map from directory paths to package names, by reading every `package.json` in the source (for commit mode, all `package.json` files in the commit tree; for working-directory mode, all `package.json` files in Git's working-tree view).
 4. **File processing**: For each file: compute `file_id`, check the sentinel, and either skip-with-label-add or read-chunk-embed-upsert.
 5. **Label reassignment**: After all files succeed, scan chunks tagged with this label, drop the label from any whose `file_id` wasn't touched, and delete chunks whose `active_label_ids` becomes empty.
 6. **FTS phase**: If `fts` is in the new retrieval selection, batch-reconcile the per-label Tantivy index against the label's current chunks. Derive the currently indexed set from Tantivy's term dictionary, apply additions and removals, commit once. Schema/tokenizer ID mismatch on existing FTS state triggers a per-label rebuild.
@@ -92,7 +92,7 @@ Four versioning constants live in `src/engine/util.rs` and govern when on-disk s
 
 ## Filesystem footprint
 
-Monodex reads and writes files in three places: the user's tool home (`~/.monodex/`), the repository being indexed (the repo-local crawl config and `package.json` files), and editor-consumed schema files that ship with the project. The full inventory, with notes on which files are user-editable and which are tool-managed, lives in [monodex_files.md](./monodex_files.md).
+Monodex reads and writes files in three places: the user's config folder (`~/.monodex/`), the repository being indexed (the repo-local crawl config and `package.json` files), and editor-consumed schema files that ship with the project. The full inventory, with notes on which files are user-editable and which are tool-managed, lives in [monodex_files.md](./monodex_files.md).
 
 ## Source tree
 
@@ -102,15 +102,15 @@ Module-organization rules — file size targets, where new code goes, banned pat
 
 - `lib.rs`: Crate root; declares `app`, `engine`, and `paths` modules.
 - `main.rs`: Binary entry point; parses CLI args and dispatches to command handlers.
-- `paths.rs`: Resolves filesystem paths for tool state (config, context, crawl config) under the tool home directory.
+- `paths.rs`: Resolves filesystem paths for tool state (config, context, crawl config) under the config folder.
 
 ### src/app/
 
 Application-layer code, CLI-specific. Not reusable as a library.
 
 - `cli.rs`: Clap argument definitions; `Cli`, `Commands`, `CrawlSourceArgs`. Edit here for new flags or subcommand wiring.
-- `config.rs`: Load and validate `config.json` (catalogs, database path, embedding-model knobs). Contains the `Config` and `DatabaseConfig` structs and the resolver that picks the database path.
-- `context.rs`: Persist and resolve the default catalog/label set by `monodex use`. Owns the `DefaultContext` struct and read/write to `<tool-home>/context.json`.
+- `config.rs`: Load and validate `monodex-config.json` (catalogs, database path, embedding-model knobs). Contains the `Config` and `DatabaseConfig` structs and the resolver that picks the database path.
+- `context.rs`: Persist and resolve the default catalog/label set by `monodex use`. Owns the `DefaultContext` struct and read/write to `<config-folder>/monodex-state.json`.
 - `search.rs`: Search-output renderer. Takes a `&mut dyn Write` and emits preamble, warnings, results, debug continuations, and end-of-results sentinels in a fixed order. The single-writer routing is what makes search-time output testable from byte buffers; see [search.md](../design/search.md) for the output-ordering rule.
 - `util.rs`: Formatting and display helpers: timestamps, durations, byte sizes, terminal sanitization for search output, chunk-selector parsing, and `format_source_pointer` for warning remediation strings.
 
@@ -222,5 +222,5 @@ Every `.md` file in the repo, with a one-line description. Add an entry when add
 - [`docs/design/search.md`](./search.md): Search-side behavior: retrieval methods, decision rules, RRF fusion, tokenizer, output format, debug-fts.
 - [`docs/design/chunker.md`](./chunker.md): Chunking algorithms: TypeScript AST partitioning (the "two worlds model"), markdown splitting, quality markers and scoring.
 - [`docs/design/concurrency.md`](./concurrency.md): Writer lock taxonomy (database, catalog, commit mutex), reader-lock-free contract, interaction with LanceDB MVCC and Tantivy's per-directory locks.
-- [`docs/design/monodex_files.md`](./monodex_files.md): Inventory of files monodex reads or writes: tool-home state, repo-local config files monodex reads from the indexed repo, editor-consumed schemas, init templates.
+- [`docs/design/monodex_files.md`](./monodex_files.md): Inventory of files monodex reads or writes: config-folder state, repo-local config files monodex reads from the indexed repo, editor-consumed schemas, init templates.
 - [`schemas/editing.md`](../../schemas/editing.md): Cross-reference back to the Rust structs that mirror these schemas, plus a policy reminder that these files are publicly published artifacts.

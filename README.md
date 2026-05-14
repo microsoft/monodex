@@ -17,7 +17,7 @@ Monodex is a standalone developer tool that provides smart, up-to-date codesearc
 
 ## Key features
 
-- **Simple to install:** Run `cargo install monodex`, then `monodex init-db` to create your `~/.monodex` folder, and you're ready to start crawling.
+- **Simple to install:** Run `cargo install monodex`, create a `~/.monodex/monodex-config.json` (see [Configuration](#configuration) below), then `monodex init-db` to create the database, and you're ready to start crawling.
 - **Designed for scale:** Incremental indexing means changes are picked up without re-crawling the whole repo. Ranked search surfaces the most relevant results, instead of dumping every match into your agent's context.
 - **Optimized for searching code:** AST-guided chunking and a hybrid of full-text and semantic search, battle-tested on large scale frontend monorepos. (TypeScript today; more languages to come.)
 - **Self-contained:** Runs entirely on your own hardware, with no LLM service, no Docker container, and no separate database process. The database can be moved between machines.
@@ -88,6 +88,8 @@ The intended integration today is via the CLI; agents shell out to `monodex sear
 
 - **Rust**: 1.93+ (for edition 2024)
 
+- **Git**: 2.35.0+ (required for working-directory crawls; the `git ls-files --format` flag was introduced in 2.35.0)
+
 - **Protocol Buffers compiler (`protoc`)**: Required at build time by LanceDB's transitive dependencies. Install via your platform package manager:
 
   | Platform      | Command                                  |
@@ -122,14 +124,14 @@ cargo build --release
 
 ## Configuration
 
-Create `~/.monodex/config.json`:
+Create `~/.monodex/monodex-config.json`:
 
 ```js
 {
-  // Database configuration (optional, defaults to ~/.monodex/default-db)
-  // "database": {
-  //   "path": "/absolute/path/to/your/db"
-  // },
+  // Database configuration (optional, defaults shown)
+  "database": {
+    "path": "~/.monodex/default-db"
+  },
 
   // Catalog definitions (required)
   "catalogs": {
@@ -141,13 +143,13 @@ Create `~/.monodex/config.json`:
       "type": "monorepo",
       "path": "/path/to/rushstack"
     }
-  }
+  },
 
   // Embedding model configuration (optional, defaults shown)
-  // "embeddingModel": {
-  //   "modelInstances": "auto",
-  //   "threadsPerInstance": "auto"
-  // }
+  "embeddingModel": {
+    "modelInstances": "auto",
+    "threadsPerInstance": "auto"
+  }
 }
 ```
 
@@ -193,8 +195,8 @@ This creates a local LanceDB database at `~/.monodex/default-db/`. No external s
 ### Global Options
 
 ```bash
-# Use a custom config file location
-monodex --config /path/to/config.json search --text "query"
+# Use a custom config folder location
+monodex --config-folder /path/to/config-folder search --text "query"
 
 # Enable verbose debug logging for storage operations
 monodex --debug crawl --catalog myrepo --label main --commit HEAD
@@ -247,7 +249,7 @@ monodex use --catalog sparo --label main
 monodex search --text "how to read JSON files"
 ```
 
-Default context is stored in `~/.monodex/context.json`. Explicit flags always override defaults.
+Default context is stored in `~/.monodex/monodex-state.json`. Explicit flags always override defaults.
 
 ### Index a Repository
 
@@ -458,14 +460,14 @@ RUST_LOG=debug ./target/release/monodex crawl --catalog sparo --label main --com
 
 The crawl behavior (which files to index and how to chunk them) can be customized via configuration files.
 
-For the full inventory of files Monodex reads or writes (tool-home state, the database directory layout, repo-local config files), see [docs/design/monodex_files.md](https://github.com/microsoft/monodex/blob/main/docs/design/monodex_files.md).
+For the full inventory of files Monodex reads or writes (config-folder state, the database directory layout, repo-local config files), see [docs/design/monodex_files.md](https://github.com/microsoft/monodex/blob/main/docs/design/monodex_files.md).
 
 ### Config Discovery
 
 Configs are loaded in this precedence order:
 
 1. `<repo-root>/monodex-crawl.json` (repo-local)
-2. `~/.monodex/crawl.json` (user-global)
+2. `~/.monodex/monodex-crawl-config.json` (user-global)
 3. Embedded default (compiled into binary)
 
 No merging occurs. Exactly one config is used.
@@ -474,11 +476,12 @@ No merging occurs. Exactly one config is used.
 
 JSON schemas are available in the `schemas/` directory for IDE autocomplete and validation. Reference the appropriate schema in your config file via the `$schema` field:
 
-| Config File          | Schema File                   |
-| -------------------- | ----------------------------- |
-| `config.json`        | `schemas/config.schema.json`  |
-| `monodex-crawl.json` | `schemas/crawl.schema.json`   |
-| `context.json`       | `schemas/context.schema.json` |
+| Config File               | Schema File                   |
+| ------------------------- | ----------------------------- |
+| `monodex-config.json`     | `schemas/config.schema.json`  |
+| `monodex-crawl.json`      | `schemas/crawl.schema.json`   |
+| `monodex-crawl-config.json` | `schemas/crawl.schema.json` |
+| `monodex-state.json`      | `schemas/context.schema.json` |
 
 Create a `monodex-crawl.json` file:
 

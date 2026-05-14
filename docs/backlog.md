@@ -44,7 +44,7 @@ For official feature requests, create a GitHub issue. If an issue needs higher p
 
 <a id="BL51"></a>
 
-**BL51 `monodex init` command, with `examples/` rename.** Generate `<tool-home>/config.json`, `<tool-home>/crawl.json`, and `<tool-home>/context.json` from the templates currently under `examples/`, with `$schema` URLs set to the published locations. Removes a setup step for new users. Implementation: `include_bytes!` to embed templates at compile time, plus a small command handler with the standard "file already exists" handling. Depends on the templates being embedded (trivial) and ideally on schema publication (otherwise `$schema` URLs are placeholders). The directory should be renamed from `examples/` to `config-templates/` as part of this work, since the current name is a misnomer.
+**BL51 `monodex init` command, with `examples/` rename.** Generate `<config-folder>/monodex-config.json`, `<config-folder>/monodex-crawl-config.json`, and `<config-folder>/monodex-state.json` from the templates currently under `examples/`, with `$schema` URLs set to the published locations. Removes a setup step for new users. Implementation: `include_bytes!` to embed templates at compile time, plus a small command handler with the standard "file already exists" handling. Depends on the templates being embedded (trivial) and ideally on schema publication (otherwise `$schema` URLs are placeholders). The directory should be renamed from `examples/` to `config-templates/` as part of this work, since the current name is a misnomer.
 
 (severity=feature, work=small)
 
@@ -72,7 +72,7 @@ Items with at least one non-obvious insight worth recording, but no commitment t
 
 <a id="BL47"></a>
 
-**BL47 Multi-database support.** Named-database registry in `config.json`, `--db <name>` on commands. Today exactly one database path is supported; the registry shape is a straightforward extension.
+**BL47 Multi-database support.** Named-database registry in `monodex-config.json`, `--db <name>` on commands. Today exactly one database path is supported; the registry shape is a straightforward extension.
 
 (severity=feature, work=medium)
 
@@ -126,13 +126,13 @@ Items with at least one non-obvious insight worth recording, but no commitment t
 
 <a id="BL67"></a>
 
-**BL67 `monodex upgrade-db` verb.** The forward story for schema changes. `monodex_schema_version` exists in `monodex-meta.json` but no migration verb does. Today's policy (refuse to open old DBs with a clear error, tell users to delete and re-crawl) is appropriate while no user has a database old enough that recrawl is non-trivial. Trigger: the first user with a database large enough that recrawl is painful. The schema-mismatch error message already names this verb.
+**BL67 `monodex upgrade-db` verb.** The forward story for schema changes. `monodex_schema_version` exists in `monodex-meta.json` but no migration verb does. Today's policy (refuse to open old DBs with a clear error, tell users to delete and re-crawl) is appropriate while no user has a database old enough that recrawl is non-trivial. Trigger: the first user with a database large enough that recrawl is painful. The schema-mismatch error message mentions this future verb parenthetically while directing users at the current `init-db --delete-everything` remedy.
 
 (severity=feature, work=large)
 
 <a id="BL68"></a>
 
-**BL68 Orphaned per-catalog lockfile cleanup command.** Per-catalog lockfiles get created lazily and never deleted; the lockfile directory grows monotonically as catalogs come and go. Bounded and tiny per the design's framing in `concurrency.md:134` and `:168`, but a real loose end with no current owner. A future maintenance command can sweep orphaned per-catalog lockfiles for catalogs no longer in `config.json`.
+**BL68 Orphaned per-catalog lockfile cleanup command.** Per-catalog lockfiles get created lazily and never deleted; the lockfile directory grows monotonically as catalogs come and go. Bounded and tiny per the design's framing in `concurrency.md:134` and `:168`, but a real loose end with no current owner. A future maintenance command can sweep orphaned per-catalog lockfiles for catalogs no longer in `monodex-config.json`.
 
 (severity=hygiene, work=small)
 

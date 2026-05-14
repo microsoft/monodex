@@ -252,7 +252,7 @@ fn test_working_dir_blob_id_matches_commit() {
     );
 }
 
-/// Regression test for BL16: Git-tracked files under hidden directories must be indexed.
+/// Git-tracked files under hidden directories must be indexed.
 /// Previously, working-directory crawls skipped files under .github/, .vscode/, etc.
 /// even when Git tracked them.
 #[test]
@@ -283,7 +283,7 @@ fn test_hidden_directory_files_are_indexed() {
     }
 }
 
-/// Regression test for BL16: repo whose basename starts with '.' must produce non-empty output.
+/// Repo whose basename starts with '.' must produce non-empty output.
 /// Previously, the root-handling logic diverged between enumerate_working_directory
 /// and build_package_index_for_working_dir, causing the latter to return nothing
 /// for repos like /tmp/.my-repo/.
@@ -438,5 +438,171 @@ fn test_package_json_exact_filename_matching() {
         package_index.package_name_by_dir.len(),
         2,
         "Only 2 package.json files should be indexed, not the *-package.json files"
+    );
+}
+
+/// Untracked non-ignored files must appear in working-directory enumeration.
+/// The working-tree view includes tracked files at their working-tree contents,
+/// plus untracked non-ignored files reported by `git status -u`.
+#[test]
+fn test_untracked_non_ignored_file_appears_in_working_dir_enumeration() {
+    use std::fs;
+    use tempfile::TempDir;
+
+    // Create a temporary directory
+    let temp_dir = TempDir::new().expect("Failed to create temp dir");
+    let repo_path = temp_dir.path();
+
+    // Initialize a minimal Git repo
+    let git_init = Command::new("git")
+        .args(["init"])
+        .current_dir(repo_path)
+        .output()
+        .expect("Failed to run git init");
+    assert!(git_init.status.success(), "git init failed");
+
+    // Configure local user for this repo
+    Command::new("git")
+        .args(["config", "user.name", "Test User"])
+        .current_dir(repo_path)
+        .output()
+        .expect("Failed to set user.name");
+    Command::new("git")
+        .args(["config", "user.email", "test@example.com"])
+        .current_dir(repo_path)
+        .output()
+        .expect("Failed to set user.email");
+
+    // Create and commit a tracked file
+    let tracked_file = repo_path.join("tracked.txt");
+    fs::write(&tracked_file, "I am tracked\n").expect("Failed to write tracked file");
+
+    Command::new("git")
+        .args(["add", "tracked.txt"])
+        .current_dir(repo_path)
+        .output()
+        .expect("Failed to run git add");
+
+    let git_commit = Command::new("git")
+        .args(["commit", "-m", "Initial commit"])
+        .current_dir(repo_path)
+        .output()
+        .expect("Failed to run git commit");
+    assert!(git_commit.status.success(), "git commit failed");
+
+    // Create an untracked non-ignored file (no .gitignore, so it won't be ignored)
+    let untracked_file = repo_path.join("untracked.txt");
+    fs::write(&untracked_file, "I am untracked\n").expect("Failed to write untracked file");
+
+    // Enumerate working directory
+    let entries =
+        enumerate_working_directory(repo_path).expect("Failed to enumerate working directory");
+
+    // Both files must appear
+    let tracked_entry = entries
+        .iter()
+        .find(|e| e.relative_path == "tracked.txt")
+        .expect("tracked.txt should appear in working directory enumeration");
+
+    let untracked_entry = entries
+        .iter()
+        .find(|e| e.relative_path == "untracked.txt")
+        .expect("untracked.txt should appear in working directory enumeration");
+
+    // Both must have valid blob IDs
+    assert_eq!(
+        tracked_entry.blob_id.len(),
+        40,
+        "tracked file blob_id should be 40 chars"
+    );
+    assert_eq!(
+        untracked_entry.blob_id.len(),
+        40,
+        "untracked file blob_id should be 40 chars"
+    );
+}
+
+/// Package index for working directory must resolve packages from untracked package.json files.
+/// This verifies that `build_package_index_for_working_dir` reads untracked non-ignored
+/// package.json files and resolves files under those packages correctly.
+#[test]
+fn test_untracked_package_json_resolved_in_working_dir_package_index() {
+    use std::fs;
+    use tempfile::TempDir;
+
+    // Create a temporary directory
+    let temp_dir = TempDir::new().expect("Failed to create temp dir");
+    let repo_path = temp_dir.path();
+
+    // Initialize a minimal Git repo
+    let git_init = Command::new("git")
+        .args(["init"])
+        .current_dir(repo_path)
+        .output()
+        .expect("Failed to run git init");
+    assert!(git_init.status.success(), "git init failed");
+
+    // Configure local user for this repo
+    Command::new("git")
+        .args(["config", "user.name", "Test User"])
+        .current_dir(repo_path)
+        .output()
+        .expect("Failed to set user.name");
+    Command::new("git")
+        .args(["config", "user.email", "test@example.com"])
+        .current_dir(repo_path)
+        .output()
+        .expect("Failed to set user.email");
+
+    // Create and commit a tracked package with a source file
+    let tracked_pkg_dir = repo_path.join("tracked-pkg");
+    fs::create_dir_all(&tracked_pkg_dir).expect("Failed to create tracked-pkg dir");
+    fs::write(
+        tracked_pkg_dir.join("package.json"),
+        r#"{"name": "tracked-package"}"#,
+    )
+    .expect("Failed to write tracked package.json");
+    fs::write(tracked_pkg_dir.join("index.ts"), "// tracked\n").expect("Failed to write index.ts");
+
+    Command::new("git")
+        .args(["add", "."])
+        .current_dir(repo_path)
+        .output()
+        .expect("Failed to run git add");
+
+    let git_commit = Command::new("git")
+        .args(["commit", "-m", "Initial commit"])
+        .current_dir(repo_path)
+        .output()
+        .expect("Failed to run git commit");
+    assert!(git_commit.status.success(), "git commit failed");
+
+    // Create an untracked package directory with its own package.json and source file
+    let untracked_pkg_dir = repo_path.join("untracked-pkg");
+    fs::create_dir_all(&untracked_pkg_dir).expect("Failed to create untracked-pkg dir");
+    fs::write(
+        untracked_pkg_dir.join("package.json"),
+        r#"{"name": "untracked-package"}"#,
+    )
+    .expect("Failed to write untracked package.json");
+    fs::write(untracked_pkg_dir.join("index.ts"), "// untracked\n")
+        .expect("Failed to write untracked index.ts");
+
+    // Build the package index for working directory
+    let package_index =
+        build_package_index_for_working_dir(repo_path).expect("Failed to build package index");
+
+    // The untracked package must be resolved
+    assert_eq!(
+        package_index.package_name_by_dir.get("untracked-pkg"),
+        Some(&"untracked-package".to_string()),
+        "untracked-pkg/package.json should be indexed with its correct name"
+    );
+
+    // The tracked package must also be present (sanity check)
+    assert_eq!(
+        package_index.package_name_by_dir.get("tracked-pkg"),
+        Some(&"tracked-package".to_string()),
+        "tracked-pkg/package.json should be indexed"
     );
 }

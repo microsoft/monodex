@@ -723,7 +723,9 @@ impl ChunkStorage {
     ///
     /// Vectors are preserved to avoid clobbering peer labels that share the same
     /// blob. The invariant that all chunks of a file have consistent vector presence
-    /// is maintained by BL103's structural separation (postrelease).
+    /// will be maintained by structural separation in a future release: a vector
+    /// crawl will process all chunks of a file atomically, and an FTS-only crawl
+    /// does not touch vectors.
     ///
     /// Both phases run under a single commit mutex acquisition, which is
     /// correct because FTS-only crawls hold the per-catalog writer lock and

@@ -115,7 +115,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
 
         // Create config but no database
-        let config_path = temp_dir.path().join("config.json");
+        let config_path = temp_dir.path().join("monodex-config.json");
         write_minimal_config(&config_path);
 
         let paths = Paths::for_test(temp_dir.path().into());
@@ -140,7 +140,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
 
         // Create config
-        let config_path = temp_dir.path().join("config.json");
+        let config_path = temp_dir.path().join("monodex-config.json");
         write_minimal_config(&config_path);
 
         // Create database
@@ -167,7 +167,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
 
         // Create config
-        let config_path = temp_dir.path().join("config.json");
+        let config_path = temp_dir.path().join("monodex-config.json");
         write_minimal_config(&config_path);
 
         // Create database with chunks and labels
@@ -223,7 +223,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
 
         // Create config
-        let config_path = temp_dir.path().join("config.json");
+        let config_path = temp_dir.path().join("monodex-config.json");
         write_minimal_config(&config_path);
 
         // Create database with chunks from multiple catalogs
@@ -274,7 +274,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
 
         // Create config
-        let config_path = temp_dir.path().join("config.json");
+        let config_path = temp_dir.path().join("monodex-config.json");
         write_minimal_config(&config_path);
 
         // Create database with chunks

@@ -118,7 +118,7 @@ This is a test project for Monodex FTS integration testing.
 
 /// Create a test config with a catalog pointing to the given repo path.
 fn create_test_config(monodex_home: &Path, catalog_name: &str, repo_path: &Path) -> Config {
-    let config_path = monodex_home.join("config.json");
+    let config_path = monodex_home.join("monodex-config.json");
     fs::create_dir_all(monodex_home).unwrap();
 
     let config_content = format!(
@@ -905,8 +905,7 @@ fn test_multi_method_search_shows_preamble__quick_excluded() {
                 "--retrieval",
                 "vector",
             ])
-            .env("MONODEX_HOME", monodex_home.path())
-            .env_remove("MONODEX_CONFIG")
+            .env("MONODEX_CONFIG_FOLDER", monodex_home.path())
             .output()
             .expect("failed to execute monodex search");
 
@@ -1605,7 +1604,7 @@ fn test_first_time_crawl_vector_only__quick_excluded() {
 
 /// Test that non-UTF-8 files emit a warning and are skipped during crawl.
 ///
-/// BL17: Files whose bytes are not valid UTF-8 should emit a FileReadFailed warning
+/// Files whose bytes are not valid UTF-8 should emit a FileReadFailed warning
 /// with error string "non-UTF-8 file contents" and be skipped, not crash the crawl.
 #[test]
 #[allow(non_snake_case)]
@@ -1739,7 +1738,7 @@ fn test_non_utf8_file_emits_warning__quick_excluded() {
 }
 
 // =============================================================================
-// BL12a: FTS stale state integration tests
+// FTS stale state integration tests
 // =============================================================================
 
 /// Test: Hybrid search degrades to vector with stale warning when FTS is stale.

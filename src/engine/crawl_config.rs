@@ -32,6 +32,10 @@ use std::path::Path;
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CrawlConfig {
+    /// Schema URL for editor validation (ignored at runtime)
+    #[serde(default, rename = "$schema", skip_serializing_if = "Option::is_none")]
+    pub schema: Option<String>,
+
     /// Config schema version (must be 1)
     pub version: u32,
 
@@ -307,7 +311,7 @@ const DEFAULT_CRAWL_CONFIG_JSON: &str = r#"{
 ///
 /// Precedence order (first found wins):
 /// 1. `<repo-root>/monodex-crawl.json` (repo-local)
-/// 2. `~/.monodex/crawl.json` (user-global)
+/// 2. `~/.monodex/monodex-crawl-config.json` (user-global)
 /// 3. Embedded default (compiled into binary)
 ///
 /// No merging is performed - exactly one config is used.
@@ -612,7 +616,24 @@ mod tests {
     }
 
     #[test]
-    fn test_example_crawl_config_validates_against_schema() {
+    fn test_crawl_config_accepts_schema_field() {
+        let result = CrawlConfig::from_json(
+            r#"{
+                "$schema": "https://example.com/schemas/monodex-crawl.json",
+                "version": 1,
+                "fileTypes": {".ts": "typescript"},
+                "patternsToExclude": [],
+                "patternsToKeep": []
+            }"#,
+        );
+        assert!(
+            result.is_ok(),
+            "CrawlConfig with $schema field should be accepted"
+        );
+    }
+
+    #[test]
+    fn test_example_crawl_config_user_global_validates_against_schema() {
         use jsonschema::Validator;
         use std::fs;
 
@@ -626,16 +647,16 @@ mod tests {
         // Compile the schema
         let validator = Validator::new(&schema).expect("Failed to compile JSON schema");
 
-        // Load and validate the example crawl config
-        let example_path = "examples/monodex-crawl.json";
+        // Load and validate the user-global crawl config example
+        let example_path = "examples/monodex-crawl-config.json";
         let example_str = fs::read_to_string(example_path)
-            .expect("Failed to read monodex-crawl.json - run from project root");
-        let example: serde_json::Value =
-            serde_json::from_str(&example_str).expect("Failed to parse monodex-crawl.json as JSON");
+            .expect("Failed to read monodex-crawl-config.json - run from project root");
+        let example: serde_json::Value = serde_json::from_str(&example_str)
+            .expect("Failed to parse monodex-crawl-config.json as JSON");
 
         assert!(
             validator.is_valid(&example),
-            "Example monodex-crawl.json does not validate against schema"
+            "Example monodex-crawl-config.json does not validate against schema"
         );
     }
 }
