@@ -13,17 +13,13 @@ pub fn partition_markdown(
     catalog: &str,
 ) -> Result<Vec<super::partitioner::PartitionedChunk>, super::partitioner::PartitionError> {
     use super::partitioner::PartitionedChunk;
-    use sha2::{Digest, Sha256};
+    use super::util::compute_hash;
 
     let lines: Vec<&str> = source.lines().collect();
     let mut chunks = Vec::new();
 
     // Compute content hash
-    let content_hash = {
-        let mut hasher = Sha256::new();
-        hasher.update(source.as_bytes());
-        format!("sha256:{}", hex::encode(hasher.finalize()))
-    };
+    let content_hash = compute_hash(source);
 
     // Build breadcrumb prefix with encoded components
     let encoded_package = encode_path_component(&config.package_name);

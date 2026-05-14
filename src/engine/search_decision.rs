@@ -20,7 +20,7 @@
 use std::collections::BTreeSet;
 
 use crate::engine::retrieval::RetrievalMethod;
-use crate::engine::storage::LabelMetadataRow;
+use crate::engine::storage::{read_selection, LabelMetadataRow};
 use crate::engine::warning::DecisionWarning;
 
 /// The decision outcome from evaluating label metadata and requested methods.
@@ -86,13 +86,7 @@ pub fn decide(
     requested: Option<BTreeSet<RetrievalMethod>>,
 ) -> Decision {
     // Step 1: Compute the persistent selection (methods with non-NULL source)
-    let mut persistent_selection: BTreeSet<RetrievalMethod> = BTreeSet::new();
-    if metadata.vector_source.is_some() {
-        persistent_selection.insert(RetrievalMethod::Vector);
-    }
-    if metadata.fts_source.is_some() {
-        persistent_selection.insert(RetrievalMethod::Fts);
-    }
+    let persistent_selection = read_selection(metadata);
 
     // Step 2: Apply explicit --retrieval filter if provided
     let candidate_subset = if let Some(ref requested_set) = requested {

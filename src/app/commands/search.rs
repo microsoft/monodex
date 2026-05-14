@@ -9,6 +9,7 @@ use crate::app::{
     search::{self, EndMarker, Preamble, SearchRenderModel, SearchWarning},
 };
 use crate::engine::storage::ChunkRow;
+use crate::engine::identifier::LabelId;
 use crate::engine::{
     ParallelConfig, ParallelEmbedder, RetrievalMethod,
     fts::{FtsSearchOutcome, fts_search},
@@ -309,7 +310,7 @@ async fn run_single_method_search<W: Write>(
     text: &str,
     limit: usize,
     candidate_limit: usize,
-    label_id: &str,
+    label_id: &LabelId,
     label_metadata: &crate::engine::storage::LabelMetadataRow,
     method: RetrievalMethod,
     preamble: Preamble,
@@ -340,14 +341,7 @@ async fn run_single_method_search<W: Write>(
             collect_vector(results, candidate_limit)
         }
         RetrievalMethod::Fts => {
-            // Parse label_id into LabelId
-            let parts: Vec<&str> = label_id.splitn(2, ':').collect();
-            if parts.len() != 2 {
-                return Err(anyhow!("Invalid label_id format: {}", label_id));
-            }
-            let label_id_struct = crate::engine::identifier::LabelId::new(parts[0], parts[1])?;
-
-            let outcome = collect_fts(db_path, &label_id_struct, text, candidate_limit).await?;
+            let outcome = collect_fts(db_path, label_id, text, candidate_limit).await?;
 
             match outcome {
                 FtsCollectOutcome::Collected(collected) => collected,
@@ -489,7 +483,7 @@ async fn run_hybrid_search<W: Write>(
     text: &str,
     limit: usize,
     candidate_limit: usize,
-    label_id: &str,
+    label_id: &LabelId,
     label_metadata: &crate::engine::storage::LabelMetadataRow,
     methods: BTreeSet<RetrievalMethod>,
     preamble: Preamble,
@@ -504,14 +498,7 @@ async fn run_hybrid_search<W: Write>(
     let mut saturations: Vec<bool> = Vec::new();
 
     if methods.contains(&RetrievalMethod::Fts) {
-        // Parse label_id into LabelId
-        let parts: Vec<&str> = label_id.splitn(2, ':').collect();
-        if parts.len() != 2 {
-            return Err(anyhow!("Invalid label_id format: {}", label_id));
-        }
-        let label_id_struct = crate::engine::identifier::LabelId::new(parts[0], parts[1])?;
-
-        let outcome = collect_fts(db_path, &label_id_struct, text, candidate_limit).await?;
+        let outcome = collect_fts(db_path, label_id, text, candidate_limit).await?;
 
         match outcome {
             FtsCollectOutcome::Collected(collected) => {
