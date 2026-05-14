@@ -126,7 +126,7 @@ Items with at least one non-obvious insight worth recording, but no commitment t
 
 <a id="BL67"></a>
 
-**BL67 `monodex upgrade-db` verb.** The forward story for schema changes. `monodex_schema_version` exists in `monodex-meta.json` but no migration verb does. Today's policy (refuse to open old DBs with a clear error, tell users to delete and re-crawl) is appropriate while no user has a database old enough that recrawl is non-trivial. Trigger: the first user with a database large enough that recrawl is painful. The schema-mismatch error message already names this verb.
+**BL67 `monodex upgrade-db` verb.** The forward story for schema changes. `monodex_schema_version` exists in `monodex-meta.json` but no migration verb does. Today's policy (refuse to open old DBs with a clear error, tell users to delete and re-crawl) is appropriate while no user has a database old enough that recrawl is non-trivial. Trigger: the first user with a database large enough that recrawl is painful. The schema-mismatch error message mentions this future verb parenthetically while directing users at the current `init-db --delete-everything` remedy.
 
 (severity=feature, work=large)
 

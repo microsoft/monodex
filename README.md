@@ -17,7 +17,7 @@ Monodex is a standalone developer tool that provides smart, up-to-date codesearc
 
 ## Key features
 
-- **Simple to install:** Run `cargo install monodex`, then `monodex init-db` to create your `~/.monodex` folder, and you're ready to start crawling.
+- **Simple to install:** Run `cargo install monodex`, create a `~/.monodex/monodex-config.json` (see [Configuration](#configuration) below), then `monodex init-db` to create the database, and you're ready to start crawling.
 - **Designed for scale:** Incremental indexing means changes are picked up without re-crawling the whole repo. Ranked search surfaces the most relevant results, instead of dumping every match into your agent's context.
 - **Optimized for searching code:** AST-guided chunking and a hybrid of full-text and semantic search, battle-tested on large scale frontend monorepos. (TypeScript today; more languages to come.)
 - **Self-contained:** Runs entirely on your own hardware, with no LLM service, no Docker container, and no separate database process. The database can be moved between machines.
@@ -87,6 +87,8 @@ The intended integration today is via the CLI; agents shell out to `monodex sear
 ## Prerequisites
 
 - **Rust**: 1.93+ (for edition 2024)
+
+- **Git**: 2.35.0+ (required for working-directory crawls; the `git ls-files --format` flag was introduced in 2.35.0)
 
 - **Protocol Buffers compiler (`protoc`)**: Required at build time by LanceDB's transitive dependencies. Install via your platform package manager:
 
