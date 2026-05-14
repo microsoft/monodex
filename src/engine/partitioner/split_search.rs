@@ -7,6 +7,22 @@ use super::node_analysis::get_meaningful_children;
 use super::types::SplitResult;
 use tree_sitter::Node;
 
+/// Estimate sizes of the two chunks that would result from splitting at a given line.
+///
+/// Uses line counts to proportionally divide the character budget.
+fn estimate_split_sizes(
+    chunk_size: usize,
+    start_line: usize,
+    split_line: usize,
+    end_line: usize,
+) -> (usize, usize) {
+    let lines_before = split_line - start_line + 1;
+    let total_lines = end_line - start_line + 1;
+    let estimated_first_size = (chunk_size * lines_before) / total_lines;
+    let estimated_second_size = chunk_size - estimated_first_size;
+    (estimated_first_size, estimated_second_size)
+}
+
 /// Check if a node is a split scope - direct children define split boundaries.
 pub(crate) fn is_split_scope(kind: &str) -> bool {
     matches!(
@@ -109,10 +125,8 @@ pub(crate) fn find_best_split(
             // No usable partition - record the least-bad split from this scope
             // But only if it respects min_chunk_size (don't record tiny splits)
             for &split_line in &candidates {
-                let lines_before = split_line - start_line + 1;
-                let total_lines = end_line - start_line + 1;
-                let estimated_first_size = (chunk_size * lines_before) / total_lines;
-                let estimated_second_size = chunk_size - estimated_first_size;
+                let (estimated_first_size, estimated_second_size) =
+                    estimate_split_sizes(chunk_size, start_line, split_line, end_line);
 
                 // Compute badness for this split
                 // Note: We include ALL candidates, even those that create tiny chunks.
@@ -163,10 +177,8 @@ pub(crate) fn find_best_split(
     // but it is still a quality failure distinct from a successful AST split.
     if let Some((split_line, badness)) = least_bad_split {
         // Check if this is a degraded split (creates tiny chunks)
-        let lines_before = split_line - start_line + 1;
-        let total_lines = end_line - start_line + 1;
-        let estimated_first_size = (chunk_size * lines_before) / total_lines;
-        let estimated_second_size = chunk_size - estimated_first_size;
+        let (estimated_first_size, estimated_second_size) =
+            estimate_split_sizes(chunk_size, start_line, split_line, end_line);
 
         if estimated_first_size < min_chunk_size || estimated_second_size < min_chunk_size {
             debug.log_split_decision(
@@ -361,11 +373,8 @@ pub(crate) fn find_deepest_split_scope<'a>(
 
             // Check if any candidate produces chunks that meet min_chunk_size
             let has_viable_candidate = candidates.iter().any(|&split_line| {
-                let lines_before = split_line - start_line + 1;
-                let total_lines = end_line - start_line + 1;
-                let estimated_first_size = (chunk_size * lines_before) / total_lines;
-                let estimated_second_size = chunk_size - estimated_first_size;
-
+                let (estimated_first_size, estimated_second_size) =
+                    estimate_split_sizes(chunk_size, start_line, split_line, end_line);
                 estimated_first_size >= min_chunk_size && estimated_second_size >= min_chunk_size
             });
 
@@ -469,10 +478,8 @@ pub(crate) fn find_usable_split(
     let mut best_distance = usize::MAX;
 
     for &split_line in candidates {
-        let lines_before = split_line - start_line + 1;
-        let total_lines = end_line - start_line + 1;
-        let estimated_first_size = (chunk_size * lines_before) / total_lines;
-        let estimated_second_size = chunk_size - estimated_first_size;
+        let (estimated_first_size, estimated_second_size) =
+            estimate_split_sizes(chunk_size, start_line, split_line, end_line);
 
         // Skip splits that create tiny chunks (below minimum size)
         // Note: We don't require chunks to be below target_size here,
@@ -500,14 +507,12 @@ pub(crate) fn compute_split_badness(
     chunk_size: usize,
     ideal_first_size: usize,
 ) -> usize {
-    let lines_before = split_line - start_line + 1;
-    let total_lines = end_line - start_line + 1;
-    let estimated_first_size = (chunk_size * lines_before) / total_lines;
+    let (estimated_first_size, estimated_second_size) =
+        estimate_split_sizes(chunk_size, start_line, split_line, end_line);
 
     let distance = estimated_first_size.abs_diff(ideal_first_size);
 
     // Add penalty for small chunks
-    let estimated_second_size = chunk_size - estimated_first_size;
     let tiny_penalty = if estimated_first_size < 500 || estimated_second_size < 500 {
         10000
     } else if estimated_first_size < 1000 || estimated_second_size < 1000 {
