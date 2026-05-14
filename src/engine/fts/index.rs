@@ -49,8 +49,7 @@ pub enum FtsStaleReason {
 
 /// The outcome of opening an existing FTS index.
 ///
-/// Replaces the previous `Result<Option<FtsIndex>>` with a typed enum that
-/// distinguishes between "no index" and "stale index" states.
+/// Distinguishes between "no index" and "stale index" states.
 #[derive(Debug)]
 pub enum FtsOpenExistingOutcome {
     /// Index exists, manifest is valid, and IDs match.

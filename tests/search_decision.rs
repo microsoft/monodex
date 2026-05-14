@@ -142,7 +142,7 @@ fn setup_test_db(monodex_home: &Path) -> (tempfile::TempDir, ChunkStorage, Label
 /// Test that search with both methods in selection succeeds with hybrid search.
 ///
 /// This verifies the decision table: when active subset has 2+ methods with equal sources,
-/// PR2 hybrid search should succeed.
+/// Hybrid search should succeed.
 #[test]
 fn test_search_both_methods_hybrid() {
     let monodex_home = tempfile::TempDir::new().unwrap();
@@ -517,8 +517,7 @@ fn test_search_incomplete_method_warning() {
     };
 
     // Run search with explicit --retrieval fts (incomplete method)
-    // This is the key test: pre-fix, this would hard-error
-    // Post-fix, it should warn and proceed
+    // Explicit --retrieval on an incomplete method warns and proceeds rather than hard-erroring.
     let retrieval: Option<BTreeSet<RetrievalMethod>> =
         Some([RetrievalMethod::Fts].into_iter().collect());
     let mut output = Vec::new();
@@ -533,7 +532,7 @@ fn test_search_incomplete_method_warning() {
         false,
     );
 
-    // Post-fix: should succeed (warns on stdout, returns Ok)
+    // Should succeed (writes warning to provided writer, returns Ok)
     assert!(
         result.is_ok(),
         "Search with explicit --retrieval on incomplete method should succeed, got error: {:?}",

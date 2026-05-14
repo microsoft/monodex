@@ -790,7 +790,7 @@ fn test_fts_query_parse_error__quick_excluded() {
 // Test 8: Multi-method explicit search
 // =============================================================================
 
-/// Test multi-method explicit search (PR2 hybrid search):
+/// Test multi-method explicit search:
 /// - After a --retrieval-less crawl (selection={fts, vector})
 /// - Run `monodex search --retrieval fts --retrieval vector`
 /// - Confirm the hybrid search succeeds
@@ -840,7 +840,7 @@ fn test_multi_method_explicit_search__quick_excluded() {
             false,
         );
 
-        // Should succeed with hybrid search (PR2)
+        // Should succeed with hybrid search
         assert!(
             search_result.is_ok(),
             "Hybrid search should succeed, got error: {:?}",
@@ -912,7 +912,7 @@ fn test_multi_method_search_shows_preamble__quick_excluded() {
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
 
-        // The command should succeed with hybrid search (PR2)
+        // The command should succeed with hybrid search
         assert!(
             output.status.success(),
             "Hybrid search should succeed, got stdout: {:?}, stderr: {:?}",
@@ -1005,7 +1005,6 @@ fn test_cross_label_active_labels_preserved__quick_excluded() {
             false,
         )
         .expect("search label-a failed");
-        // run_search returns Ok(()) on success; result count is printed to stdout
 
         // Step 4: Search under label B should find the chunk (FTS)
         let mut output = Vec::new();
@@ -1020,7 +1019,6 @@ fn test_cross_label_active_labels_preserved__quick_excluded() {
             false,
         )
         .expect("search label-b failed");
-        // run_search returns Ok(()) on success; result count is printed to stdout
 
         // Also verify vector search works for label B (which has vectors)
         let vector_only: Option<BTreeSet<RetrievalMethod>> =
@@ -1037,7 +1035,6 @@ fn test_cross_label_active_labels_preserved__quick_excluded() {
             false,
         )
         .expect("vector search label-b failed");
-        // run_search returns Ok(()) on success; result count is printed to stdout
 
         (monodex_home, repo_dir)
     };

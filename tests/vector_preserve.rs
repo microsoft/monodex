@@ -69,7 +69,7 @@ async fn create_test_storage() -> (tempfile::TempDir, ChunkStorage) {
 
 /// Test that upsert_without_vectors preserves existing vectors.
 ///
-/// This verifies the vector-preservation invariant from Cluster 6b:
+/// This verifies the vector-preservation invariant:
 /// when we upsert a chunk without a vector (FTS-only path), any existing
 /// vector on that row must be preserved, not overwritten with NULL.
 ///

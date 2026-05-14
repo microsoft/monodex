@@ -176,7 +176,7 @@ pub fn reconcile_from_index(
             let doc: TantivyDocument = match store_reader.get(doc_id) {
                 Ok(d) => d,
                 Err(e) => {
-                    // Use typed error discrimination per feedback1 #3 contract
+                    // Use typed error discrimination for NotFound via engine::fts::error helpers
                     if is_not_found_error(&e) {
                         return Ok(row_ids);
                     }
