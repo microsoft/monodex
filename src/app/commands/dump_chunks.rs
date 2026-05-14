@@ -108,7 +108,7 @@ pub fn run_dump_chunks(
 
             if text_size > target_size {
                 oversized += 1;
-            } else if text_size < 200 {
+            } else if text_size < SMALL_CHUNK_CHARS {
                 undersized += 1;
             }
 
@@ -130,7 +130,7 @@ pub fn run_dump_chunks(
                     "⚠️  OVERSIZED (target: {}, actual: {})",
                     target_size, text_size
                 );
-            } else if text_size < 200 {
+            } else if text_size < SMALL_CHUNK_CHARS {
                 println!("⚡ Small chunk");
             }
             println!();
@@ -147,12 +147,16 @@ pub fn run_dump_chunks(
         println!("━━━━━ Summary ━━━━━");
         println!("Total chunks: {}", format_count(chunks.len() as u64));
         println!("Total chars: {}", total_chars);
-        println!(
-            "Average size: {:.0} chars",
-            total_chars as f64 / chunks.len() as f64
-        );
+        if chunks.is_empty() {
+            println!("Average size: (no chunks)");
+        } else {
+            println!(
+                "Average size: {:.0} chars",
+                total_chars as f64 / chunks.len() as f64
+            );
+        }
         println!("Oversized chunks (>{}): {}", target_size, oversized);
-        println!("Small chunks (<200): {}", undersized);
+        println!("Small chunks (<{}): {}", SMALL_CHUNK_CHARS, undersized);
         println!("Quality score: {:.1}%", report.score);
         println!(
             "  Small chunks (<{} chars): {}",
