@@ -270,7 +270,7 @@ fn explain_query(
 
     if doc_addresses.is_empty() {
         println!(
-            "Chunk is in LanceDB but not in the FTS index (possibly skipped during indexing for tokenizer reasons, or stale FTS state)."
+            "Chunk is in LanceDB but not in the FTS index (possibly skipped during indexing because the chunk produced zero searchable tokens, or stale FTS state)."
         );
         return Ok(());
     }

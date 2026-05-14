@@ -538,7 +538,7 @@ async fn test_vector_search_correctness() {
 }
 
 // =============================================================================
-// Cluster 6b tests: upsert_without_vectors and preservation invariants
+// upsert_without_vectors and preservation invariants
 // =============================================================================
 
 /// Test that upsert_without_vectors creates rows with NULL vectors.

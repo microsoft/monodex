@@ -1,7 +1,7 @@
 //! Retrieval method types.
 //!
 //! Purpose: Define the set of retrieval methods Monodex supports.
-//! Edit here when: Adding new retrieval methods (e.g., plugin retrievers).
+//! Edit here when: Adding new retrieval methods.
 //! Do not edit here for: CLI flag parsing (see app/cli.rs), search dispatch (see commands/search.rs).
 
 use std::fmt;
