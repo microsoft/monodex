@@ -2,8 +2,6 @@
 //! Edit here when: Changing markdown split boundaries (headings, fenced code blocks, block quotes, paragraphs) or heading-slug behavior.
 //! Do not edit here for: TypeScript chunking (see `partitioner/`), breadcrumb-encoding primitives (see `breadcrumb.rs`), strategy dispatch (see `chunker.rs`).
 
-#![allow(dead_code)]
-
 use super::breadcrumb::{encode_path_component, slugify_heading};
 use github_slugger::Slugger;
 
