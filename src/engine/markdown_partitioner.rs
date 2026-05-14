@@ -2,8 +2,6 @@
 //! Edit here when: Changing markdown split boundaries (headings, fenced code blocks, block quotes, paragraphs) or heading-slug behavior.
 //! Do not edit here for: TypeScript chunking (see `partitioner/`), breadcrumb-encoding primitives (see `breadcrumb.rs`), strategy dispatch (see `chunker.rs`).
 
-#![allow(dead_code)]
-
 use super::breadcrumb::{encode_path_component, slugify_heading};
 use github_slugger::Slugger;
 
@@ -75,7 +73,7 @@ pub fn partition_markdown(
                 text,
                 start_line: 1,
                 end_line: lines.len(),
-                chunk_type: "markdown".to_string(),
+                chunk_type: "markdown-section".to_string(),
                 chunk_kind: "content".to_string(),
                 symbol_name: None,
                 split_part_ordinal: None,
@@ -132,7 +130,7 @@ pub fn partition_markdown(
                 text: section_text,
                 start_line: start_idx + 1, // 1-indexed
                 end_line: end_idx,
-                chunk_type: "section".to_string(),
+                chunk_type: "markdown-section".to_string(),
                 chunk_kind: "content".to_string(),
                 symbol_name: heading,
                 split_part_ordinal: None,
@@ -294,7 +292,7 @@ fn split_oversized_section(
             text: chunk_text,
             start_line: start_line + start_idx,
             end_line: start_line + end_idx - 1,
-            chunk_type: "section".to_string(),
+            chunk_type: "markdown-section".to_string(),
             chunk_kind: "content".to_string(),
             symbol_name: None,
             split_part_ordinal: Some(i + 1),
@@ -357,7 +355,7 @@ fn split_by_lines_fallback(
             text: chunk_text,
             start_line: start_line + start_idx,
             end_line: start_line + end_idx - 1,
-            chunk_type: "markdown".to_string(),
+            chunk_type: "markdown-section".to_string(),
             chunk_kind: "content".to_string(),
             symbol_name: None,
             split_part_ordinal: Some(i + 1),

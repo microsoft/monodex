@@ -4,7 +4,7 @@ expression: format_chunks(&chunks)
 ---
 === CHUNK 1 ===
 Breadcrumb: monodex:API.md:sample-documentation
-Type: section
+Type: markdown-section
 Lines: 1-4
 Size: 90 chars
 Preview:
@@ -14,7 +14,7 @@ This document demonstrates various markdown features for testing.
 
 === CHUNK 2 ===
 Breadcrumb: monodex:API.md:installation
-Type: section
+Type: markdown-section
 Lines: 5-14
 Size: 155 chars
 Preview:
@@ -27,7 +27,7 @@ cargo install example-tool
 
 === CHUNK 3 ===
 Breadcrumb: monodex:API.md:configuration
-Type: section
+Type: markdown-section
 Lines: 15-29
 Size: 206 chars
 Preview:
@@ -40,7 +40,7 @@ Create a configuration file at `~/.config/example/config.json`:
 
 === CHUNK 4 ===
 Breadcrumb: monodex:API.md:usage
-Type: section
+Type: markdown-section
 Lines: 30-31
 Size: 9 chars
 Preview:
@@ -48,7 +48,7 @@ Preview:
 
 === CHUNK 5 ===
 Breadcrumb: monodex:API.md:basic-commands
-Type: section
+Type: markdown-section
 Lines: 32-45
 Size: 188 chars
 Preview:
@@ -61,7 +61,7 @@ example-tool init
 
 === CHUNK 6 ===
 Breadcrumb: monodex:API.md:advanced-options
-Type: section
+Type: markdown-section
 Lines: 46-53
 Size: 85 chars
 Preview:
@@ -74,7 +74,7 @@ example-tool run --verbose
 
 === CHUNK 7 ===
 Breadcrumb: monodex:API.md:troubleshooting
-Type: section
+Type: markdown-section
 Lines: 54-62
 Size: 222 chars
 Preview:

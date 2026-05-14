@@ -4,7 +4,7 @@ expression: format_chunks(&chunks)
 ---
 === CHUNK 1 ===
 Breadcrumb: %40test/docs:test.md:main-title
-Type: section
+Type: markdown-section
 Lines: 1-4
 Size: 39 chars
 Preview:
@@ -14,7 +14,7 @@ This is intro paragraph.
 
 === CHUNK 2 ===
 Breadcrumb: %40test/docs:test.md:section-1
-Type: section
+Type: markdown-section
 Lines: 5-8
 Size: 30 chars
 Preview:
@@ -24,7 +24,7 @@ Some text here.
 
 === CHUNK 3 ===
 Breadcrumb: %40test/docs:test.md:subsection
-Type: section
+Type: markdown-section
 Lines: 9-12
 Size: 30 chars
 Preview:
@@ -34,7 +34,7 @@ More content.
 
 === CHUNK 4 ===
 Breadcrumb: %40test/docs:test.md:section-2
-Type: section
+Type: markdown-section
 Lines: 13-15
 Size: 30 chars
 Preview:

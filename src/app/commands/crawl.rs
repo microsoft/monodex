@@ -250,7 +250,7 @@ async fn run_crawl_async(
     .await?;
 
     // Print narrowing announcement if this crawl narrows the selection
-    print_narrowing_announcement(&previous_selection, &selection);
+    print_narrowing_announcement(&mut std::io::stdout(), &previous_selection, &selection);
 
     // Determine retrieval method presence early (used for fast-path predicate)
     let vector_in_selection = selection.contains(&RetrievalMethod::Vector);
@@ -299,7 +299,7 @@ async fn run_crawl_async(
     let mut phase_results = PhaseResults::new(&selection);
 
     // Track phase errors for proper error propagation (vector > reassignment > fts priority)
-    let mut vector_phase_error: Option<anyhow::Error> = None;
+    let mut chunk_write_error: Option<anyhow::Error> = None;
     let mut label_reassignment_error: Option<anyhow::Error> = None;
     let mut fts_phase_error: Option<anyhow::Error> = None;
 
@@ -317,7 +317,7 @@ async fn run_crawl_async(
             Err(e) => {
                 eprintln!("  ❌ Vector phase failed: {}", e);
                 phase_results.vector_succeeded = Some(false);
-                vector_phase_error = Some(e);
+                chunk_write_error = Some(e);
                 (HashSet::new(), crate::app::CrawlFailures::default())
             }
         }
@@ -328,7 +328,7 @@ async fn run_crawl_async(
             Err(e) => {
                 eprintln!("  ❌ Upsert phase failed: {}", e);
                 phase_results.vector_succeeded = Some(false);
-                vector_phase_error = Some(e);
+                chunk_write_error = Some(e);
                 (HashSet::new(), crate::app::CrawlFailures::default())
             }
         }
@@ -338,9 +338,9 @@ async fn run_crawl_async(
     };
 
     // Mark vector phase as succeeded if it was in selection and no error was captured
-    if vector_in_selection && vector_phase_error.is_none() {
+    if vector_in_selection && chunk_write_error.is_none() {
         phase_results.vector_succeeded = Some(!pipeline_failures.has_failures());
-    } else if fts_in_selection && vector_phase_error.is_none() {
+    } else if fts_in_selection && chunk_write_error.is_none() {
         // FTS-only path: no vector phase, mark as succeeded (no failures possible)
         phase_results.vector_succeeded = None;
     }
@@ -358,7 +358,7 @@ async fn run_crawl_async(
     if should_skip_label_cleanup(
         has_existing_file_failures,
         had_embed_failures,
-        vector_phase_error.is_some(),
+        chunk_write_error.is_some(),
     ) {
         println!("🔶 SKIPPING label reassignment cleanup (crawl had failures)");
         println!("  This is intentional - cleanup should only run after successful crawls.");
@@ -414,7 +414,7 @@ async fn run_crawl_async(
         || phase_results.fts_succeeded == Some(false);
 
     // Determine phase failure states for summary
-    let vector_phase_failed = vector_phase_error.is_some();
+    let vector_phase_failed = chunk_write_error.is_some();
     let fts_phase_failed = fts_phase_error.is_some();
 
     print_summary(
@@ -436,7 +436,7 @@ async fn run_crawl_async(
     // Return the most-specific captured error (vector > reassignment > fts priority)
     // An earlier-phase error is the root cause of any subsequent skipped work.
     // When returning a phase error, log any post-finalize errors to stderr.
-    if let Some(e) = vector_phase_error {
+    if let Some(e) = chunk_write_error {
         if let Err(ref me) = final_metadata_result {
             eprintln!("  Warning: Failed to update label metadata: {}", me);
         }
@@ -479,16 +479,16 @@ async fn run_crawl_async(
 /// # Arguments
 /// * `has_existing_file_failures` - True if any existing-file label-add failed
 /// * `had_embed_failures` - True if any per-chunk embedding failed
-/// * `vector_phase_error_present` - True if a structural error occurred during embed-and-upsert
+/// * `chunk_write_error_present` - True if a structural error occurred during embed-and-upsert
 ///
 /// # Returns
 /// `true` if cleanup should be skipped, `false` if it should proceed.
 fn should_skip_label_cleanup(
     has_existing_file_failures: bool,
     had_embed_failures: bool,
-    vector_phase_error_present: bool,
+    chunk_write_error_present: bool,
 ) -> bool {
-    has_existing_file_failures || had_embed_failures || vector_phase_error_present
+    has_existing_file_failures || had_embed_failures || chunk_write_error_present
 }
 
 #[cfg(test)]
@@ -515,7 +515,7 @@ mod tests {
 
     #[test]
     fn test_should_skip_label_cleanup_structural_error() {
-        // Structural vector_phase_error present: skip cleanup
+        // Structural chunk_write_error present: skip cleanup
         assert!(should_skip_label_cleanup(false, false, true));
     }
 

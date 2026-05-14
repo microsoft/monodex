@@ -77,7 +77,7 @@ pub async fn collect_fts(
     query: &str,
     limit: usize,
 ) -> anyhow::Result<FtsCollectOutcome> {
-    let outcome = fts_search(db_path, label_id, query, limit).await?;
+    let outcome = fts_search(db_path, label_id, query, limit)?;
     match outcome {
         FtsSearchOutcome::Found(hits) => {
             let saturated = hits.len() >= limit;
