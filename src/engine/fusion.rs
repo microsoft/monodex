@@ -312,20 +312,9 @@ mod tests {
     }
 
     #[test]
-    fn test_tiebreak_level_4_lexicographic() {
-        // Level 4 tiebreak: row_id lexicographic ascending.
-        // This is hard to trigger naturally because Fts and Vector produce different RRF contributions.
-        // For a true level-4 case, we need two row_ids with:
-        // - Equal RRF scores
-        // - Equal best ranks
-        // - Best-rank methods that are equal (or we use single-method)
-        //
-        // Single-method case: two rows with same rank have equal RRF score.
-        // Since they come from the same method, level-3 is a tie, so level-4 applies.
-        // But wait - they can't have the same rank in a single list.
-        //
-        // The realistic case: this is extremely rare. The test just verifies the final
-        // fallback produces stable ordering.
+    fn test_single_method_two_hits_ordered_by_rank() {
+        // Single-method case: two hits ordered by their input rank.
+        // Verifies that rank-1 comes before rank-2.
         let hits = vec![hit("zebra", None), hit("apple", None)];
         let result = fuse(vec![(RetrievalMethod::Fts, hits)], 10);
 

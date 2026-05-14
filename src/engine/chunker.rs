@@ -14,10 +14,10 @@ pub struct Chunk {
     /// The text content of the chunk
     pub text: String,
 
-    /// Source URI (full file path, issue reference, etc.)
+    /// Source URI (full file path)
     pub source_uri: String,
 
-    /// Catalog name (for multi-source partitioning)
+    /// Catalog name
     pub catalog: String,
 
     /// Content hash (SHA256) for incremental sync
@@ -32,7 +32,7 @@ pub struct Chunk {
     /// Optional symbol name (for functions, classes, etc.)
     pub symbol_name: Option<String>,
 
-    /// Chunk type (e.g., "function", "class", "markdown-section", "issue-comment")
+    /// Chunk type (e.g., "function", "class", "markdown-section")
     pub chunk_type: String,
 
     /// Chunk kind (content, imports, changelog, config)

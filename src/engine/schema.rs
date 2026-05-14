@@ -7,7 +7,9 @@
 //! ## Schema version
 //!
 //! The `MONODEX_SCHEMA_VERSION` constant tracks breaking schema changes. See
-//! docs/design/monodex_files.md for the rationale and the migration procedure.
+//! docs/design/monodex_files.md for the rationale; when the version mismatches,
+//! the remedy is `monodex init-db --delete-everything` followed by a recrawl.
+//! A future `upgrade-db` verb is planned but not yet implemented.
 //!
 //! ## Vector dimension
 //!
@@ -15,7 +17,7 @@
 //! of the current embedding model (jina-embeddings-v2-base-code). Changing this
 //! dimension requires:
 //! 1. Incrementing `MONODEX_SCHEMA_VERSION`
-//! 2. Implementing migration in `upgrade-db`
+//! 2. Running `monodex init-db --delete-everything` (a future `upgrade-db` verb will handle in-place migration)
 //! 3. Updating the embedder configuration
 //!
 //! Do NOT make this runtime-configurable. The dimension is part of the schema contract.

@@ -65,10 +65,10 @@ impl Default for PartitionConfig {
 /// A chunk of code with breadcrumb context
 #[derive(Debug, Clone)]
 pub struct PartitionedChunk {
-    /// Source URI (file path, issue reference, etc.)
+    /// Source URI (file path)
     pub source_uri: String,
 
-    /// Catalog name (for multi-source partitioning)
+    /// Catalog name
     pub catalog: String,
 
     /// Content hash (SHA256) for incremental sync

@@ -884,7 +884,7 @@ fn test_multi_method_search_shows_preamble__quick_excluded() {
         .expect("crawl failed");
 
         // Run monodex search as a subprocess to capture stdout
-        // We use the binary directly since run_search uses println! directly
+        // Using the binary directly exercises end-to-end argv parsing and process behavior
         // current_exe() gives us the test binary path; the main binary is in the same parent directory
         let exe_path = std::env::current_exe().expect("failed to get current exe path");
         let deps_dir = exe_path.parent().expect("failed to get deps dir");
