@@ -56,7 +56,7 @@ A crawl run, end to end:
 
 1. **Label upsert**: Resolve `--commit` to a full SHA (or note that this is a `--working-dir` run); update the label's retrieval selection from `--retrieval` (set per-method `source` columns to the resolved commit, NULL out methods being dropped) and mark each in-selection method's `complete` flag false.
 2. **Tree visitor**: Enumerate files from the commit tree or from the working-directory blob map (`git ls-files` + `git status`).
-3. **Package indexing**: Build the package index, a map from directory paths to package names, by reading every Git-tracked `package.json` in the source.
+3. **Package indexing**: Build the package index, a map from directory paths to package names, by reading every `package.json` in the source (for commit mode, all `package.json` files in the commit tree; for working-directory mode, all `package.json` files in Git's working-tree view).
 4. **File processing**: For each file: compute `file_id`, check the sentinel, and either skip-with-label-add or read-chunk-embed-upsert.
 5. **Label reassignment**: After all files succeed, scan chunks tagged with this label, drop the label from any whose `file_id` wasn't touched, and delete chunks whose `active_label_ids` becomes empty.
 6. **FTS phase**: If `fts` is in the new retrieval selection, batch-reconcile the per-label Tantivy index against the label's current chunks. Derive the currently indexed set from Tantivy's term dictionary, apply additions and removals, commit once. Schema/tokenizer ID mismatch on existing FTS state triggers a per-label rebuild.
