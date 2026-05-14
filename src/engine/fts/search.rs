@@ -66,7 +66,7 @@ pub enum FtsSearchOutcome {
 /// - `Found(hits)`: Search succeeded, hits are in BM25 score-descending order
 /// - `NoIndex`: FTS index doesn't exist for this label
 /// - `ParseError(msg)`: Query string couldn't be parsed
-pub async fn fts_search(
+pub fn fts_search(
     db_path: &Path,
     label_id: &LabelId,
     query_text: &str,
@@ -159,10 +159,7 @@ mod tests {
         let db_path = temp_dir.path();
         let label_id = make_label_id("test-catalog", "missing-label");
 
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        let result = rt
-            .block_on(fts_search(db_path, &label_id, "test query", 10))
-            .unwrap();
+        let result = fts_search(db_path, &label_id, "test query", 10).unwrap();
 
         match result {
             FtsSearchOutcome::NoIndex => {}
