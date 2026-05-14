@@ -5,8 +5,11 @@ CHANGELOG GUIDANCE:
 
 - When starting new work after publishing, add an `## Unreleased` section
 - `###` headings must be one of: Added, Changed, Fixed, Deprecated, Removed, Security
+- Each `###` heading appears at most once per version section; group bullets under it rather than repeating the heading
 - CHANGELOG.md is for user-facing changes only (implementation details go in your Git commit description)
+- If a PR has no user-facing changes, do not touch CHANGELOG.md; do not manufacture bullets out of internal cleanup
 - Focus on user experience ("Fixed a problem where the crawler sometimes would report X") not implementation ("Added stricter validation in the f() function")
+- Do not name internal code identifiers (struct names, function names, module paths) in bullets; users don't have that context
 - Avoid jargon and complex sentences; assume your audience is a professional engineer with only superficial knowledge about Monodex
 
 PUBLISHING PROCEDURE:
@@ -25,19 +28,12 @@ PUBLISHING PROCEDURE:
 
 ### Changed
 
-- **Performance: commit-mode crawls now reuse the gix repository handle.** Previously, each file operation during a commit-mode crawl opened the repository independently, adding unnecessary overhead. The repository handle is now cached in the `CommitBlobSource` struct and reused across all file reads.
+- **Commit-mode crawls now open the repository once per crawl** instead of once per file operation, following the gix library's recommended usage pattern.
+- **Markdown chunks now report a consistent `chunk_type` of `"markdown-section"`.** Previously the value alternated between `"markdown"` and `"section"` for the same kind of chunk.
 
 ### Fixed
 
-- **Consolidated duplicate test helper functions.** The `create_test_storage` function was duplicated across three integration test files. It now lives in a shared `tests/common/mod.rs` module, reducing code duplication and maintenance burden.
-
-### Removed
-
-- **Dead code and redundant patterns cleaned up.** Several unused parameters, redundant function wrappers, duplicate match arms, and misleading docstrings were removed. Internal cleanup with no user-visible behavior change.
-
-### Changed
-
-- **Internal code cleanup: cosmetic improvements.** Simplified `Arc<Mutex<Instant>>` patterns to plain `Instant` variables, combined redundant match arms, added explanatory comments for hand-maintained constants. No behavior change.
+- `dump-chunks` "small chunk" counts no longer disagree, and handle empty input.
 
 ## 0.6.0 (2026-05-13)
 
