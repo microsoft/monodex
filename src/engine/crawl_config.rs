@@ -32,6 +32,10 @@ use std::path::Path;
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CrawlConfig {
+    /// Schema URL for editor validation (ignored at runtime)
+    #[serde(default, rename = "$schema", skip_serializing_if = "Option::is_none")]
+    pub schema: Option<String>,
+
     /// Config schema version (must be 1)
     pub version: u32,
 
@@ -609,6 +613,23 @@ mod tests {
         let compiled = load_compiled_crawl_config(&paths, None).unwrap();
         assert!(compiled.should_crawl("src/index.ts"));
         assert!(!compiled.should_crawl("node_modules/example.ts"));
+    }
+
+    #[test]
+    fn test_crawl_config_accepts_schema_field() {
+        let result = CrawlConfig::from_json(
+            r#"{
+                "$schema": "https://example.com/schemas/monodex-crawl.json",
+                "version": 1,
+                "fileTypes": {".ts": "typescript"},
+                "patternsToExclude": [],
+                "patternsToKeep": []
+            }"#,
+        );
+        assert!(
+            result.is_ok(),
+            "CrawlConfig with $schema field should be accepted"
+        );
     }
 
     #[test]

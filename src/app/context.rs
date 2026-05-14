@@ -195,6 +195,34 @@ mod tests {
     }
 
     #[test]
+    fn test_context_schema_accepts_schema_field() {
+        use jsonschema::Validator;
+
+        // Load the schema
+        let schema_path = "schemas/context.schema.json";
+        let schema_str = std::fs::read_to_string(schema_path)
+            .expect("Failed to read context.schema.json - run from project root");
+        let schema: serde_json::Value =
+            serde_json::from_str(&schema_str).expect("Failed to parse context.schema.json as JSON");
+
+        // Compile the schema
+        let validator = Validator::new(&schema).expect("Failed to compile JSON schema");
+
+        // Test that a $schema field is accepted
+        let context_with_schema = serde_json::json!({
+            "$schema": "https://example.com/schemas/monodex-state.json",
+            "catalog": "my-repo",
+            "label": "main",
+            "set_at": "2024-01-15T10:30:00Z"
+        });
+
+        assert!(
+            validator.is_valid(&context_with_schema),
+            "Schema should accept $schema field in monodex-state.json"
+        );
+    }
+
+    #[test]
     fn test_context_schema_rejects_invalid_timestamp() {
         use jsonschema::Validator;
 

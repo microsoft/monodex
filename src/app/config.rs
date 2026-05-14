@@ -180,6 +180,10 @@ impl<'de> serde::Deserialize<'de> for EmbeddingSizeValue {
 #[derive(Debug, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ConfigFile {
+    /// Schema URL for editor validation (ignored at runtime)
+    #[serde(default, rename = "$schema", skip_serializing_if = "Option::is_none")]
+    #[allow(dead_code)]
+    pub schema: Option<String>,
     pub catalogs: HashMap<String, CatalogConfig>,
     #[serde(rename = "embeddingModel", default)]
     pub embedding_model: EmbeddingModelConfig,
@@ -878,6 +882,35 @@ mod tests {
         assert!(
             validator.is_valid(&example),
             "examples/monodex-config.json does not validate against schema"
+        );
+    }
+
+    #[test]
+    fn test_config_accepts_schema_field() {
+        let dir = tempdir().unwrap();
+        let config_path = dir.path().join("monodex-config.json");
+        let mut file = std::fs::File::create(&config_path).unwrap();
+
+        // Config with a $schema field should be accepted
+        writeln!(
+            file,
+            r#"{{
+                "$schema": "https://example.com/schemas/monodex-config.json",
+                "catalogs": {{
+                    "my-repo": {{
+                        "type": "monorepo",
+                        "path": "/path/to/repo"
+                    }}
+                }}
+            }}"#
+        )
+        .unwrap();
+
+        let paths = Paths::for_test(dir.path().into());
+        let result = load_config(paths);
+        assert!(
+            result.is_ok(),
+            "Config with $schema field should be accepted"
         );
     }
 }
