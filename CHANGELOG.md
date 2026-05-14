@@ -27,6 +27,10 @@ PUBLISHING PROCEDURE:
 
 - **Performance: commit-mode crawls now reuse the gix repository handle.** Previously, each file operation during a commit-mode crawl opened the repository independently, adding unnecessary overhead. The repository handle is now cached in the `CommitBlobSource` struct and reused across all file reads.
 
+### Fixed
+
+- **Consolidated duplicate test helper functions.** The `create_test_storage` function was duplicated across three integration test files. It now lives in a shared `tests/common/mod.rs` module, reducing code duplication and maintenance burden.
+
 ## 0.6.0 (2026-05-13)
 
 ### Added

@@ -2,16 +2,9 @@
 //! Edit here when: Adding or modifying tests for the vector-preservation invariant.
 //! Do not edit here for: Production storage code (see `engine/storage/chunks/`); other storage tests (see `tests/label_add.rs`).
 
-use std::sync::Arc;
+mod common;
 
-use lancedb::connect;
-
-use monodex::engine::{
-    Chunk,
-    identifier::LabelId,
-    schema::chunks_schema,
-    storage::{ChunkRow, ChunkStorage},
-};
+use monodex::engine::{Chunk, identifier::LabelId, storage::ChunkRow};
 
 fn test_chunk(
     path: &str,
@@ -47,26 +40,6 @@ fn test_chunk(
     }
 }
 
-async fn create_test_storage() -> (tempfile::TempDir, ChunkStorage) {
-    let tmp_dir = tempfile::TempDir::new().unwrap();
-    let db_path = tmp_dir.path().join("test_db");
-
-    let db = connect(db_path.to_str().unwrap())
-        .execute()
-        .await
-        .expect("Failed to create database");
-
-    let schema = chunks_schema();
-    let table = db
-        .create_empty_table("chunks", schema)
-        .execute()
-        .await
-        .expect("Failed to create table");
-
-    // Pass db_path for commit mutex acquisition in write methods
-    (tmp_dir, ChunkStorage::new(Arc::new(table), db_path))
-}
-
 /// Test that upsert_without_vectors preserves existing vectors.
 ///
 /// This verifies the vector-preservation invariant:
@@ -80,7 +53,7 @@ async fn create_test_storage() -> (tempfile::TempDir, ChunkStorage) {
 #[tokio::test]
 async fn test_upsert_without_vectors_preserves_vector() {
     // Create test storage
-    let (_db_dir, chunk_storage) = create_test_storage().await;
+    let (_db_dir, chunk_storage) = common::create_test_storage().await;
 
     let catalog = "test-catalog";
     let label = "test-label";
@@ -185,7 +158,7 @@ async fn test_upsert_without_vectors_preserves_vector() {
 #[tokio::test]
 async fn test_fts_only_clears_partial_vectors() {
     // Create test storage
-    let (_db_dir, chunk_storage) = create_test_storage().await;
+    let (_db_dir, chunk_storage) = common::create_test_storage().await;
 
     let catalog = "test-catalog";
     let label = "test-label";

@@ -2,17 +2,11 @@
 //! Edit here when: Adding or modifying end-to-end multi-label crawl tests.
 //! Do not edit here for: Production crawl code (see `app/commands/crawl.rs`, `app/crawl/`, `engine/git_ops/`); per-module unit tests (see the relevant module's `tests.rs` or inline `#[cfg(test)]` block).
 
+mod common;
+
 use std::collections::HashSet;
-use std::sync::Arc;
 
-use lancedb::connect;
-
-use monodex::engine::{
-    Chunk,
-    identifier::LabelId,
-    schema::chunks_schema,
-    storage::{ChunkRow, ChunkStorage},
-};
+use monodex::engine::{Chunk, identifier::LabelId, storage::ChunkRow};
 
 fn test_chunk(
     path: &str,
@@ -48,26 +42,6 @@ fn test_chunk(
     }
 }
 
-async fn create_test_storage() -> (tempfile::TempDir, ChunkStorage) {
-    let tmp_dir = tempfile::TempDir::new().unwrap();
-    let db_path = tmp_dir.path().join("test_db");
-
-    let db = connect(db_path.to_str().unwrap())
-        .execute()
-        .await
-        .expect("Failed to create database");
-
-    let schema = chunks_schema();
-    let table = db
-        .create_empty_table("chunks", schema)
-        .execute()
-        .await
-        .expect("Failed to create table");
-
-    // Pass db_path for commit mutex acquisition in write methods
-    (tmp_dir, ChunkStorage::new(Arc::new(table), db_path))
-}
-
 /// Test that crawling the same content under a second label makes it searchable
 /// under that label.
 ///
@@ -77,7 +51,7 @@ async fn create_test_storage() -> (tempfile::TempDir, ChunkStorage) {
 #[tokio::test]
 async fn test_label_add_makes_chunks_searchable() {
     // Create test storage
-    let (_db_dir, chunk_storage) = create_test_storage().await;
+    let (_db_dir, chunk_storage) = common::create_test_storage().await;
 
     // Create test chunks with known vectors
     let catalog = "test-catalog";
@@ -188,7 +162,7 @@ async fn test_label_add_makes_chunks_searchable() {
 #[tokio::test]
 async fn test_incomplete_file_is_recrawled() {
     // Create test storage
-    let (_db_dir, chunk_storage) = create_test_storage().await;
+    let (_db_dir, chunk_storage) = common::create_test_storage().await;
 
     let catalog = "test-catalog";
     let label = "main";
