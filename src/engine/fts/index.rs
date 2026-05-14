@@ -430,7 +430,7 @@ mod tests {
     }
 
     // =========================================================================
-    // BL12a: Stale state detection tests
+    // Stale state detection tests
     // =========================================================================
 
     /// Test: open_existing returns Stale on IdMismatch
@@ -557,7 +557,7 @@ mod tests {
         );
     }
 
-    /// Test: open_or_create rebuilds on Missing-with-state (new case from BL12a)
+    /// Test: open_or_create rebuilds on Missing-with-state (manifest deleted but Tantivy state exists)
     #[test]
     fn test_open_or_create_rebuilds_on_missing_manifest_with_state() {
         use crate::engine::fts::manifest::read_manifest;
@@ -590,7 +590,7 @@ mod tests {
         }
     }
 
-    /// Test: open_or_create writes manifest after IdMismatch rebuild (BL12a fixup)
+    /// Test: open_or_create writes manifest after IdMismatch rebuild
     #[test]
     fn test_open_or_create_writes_manifest_after_id_mismatch_rebuild() {
         use crate::engine::fts::manifest::read_manifest;

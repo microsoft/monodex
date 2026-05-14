@@ -252,7 +252,7 @@ fn test_working_dir_blob_id_matches_commit() {
     );
 }
 
-/// Regression test for BL16: Git-tracked files under hidden directories must be indexed.
+/// Git-tracked files under hidden directories must be indexed.
 /// Previously, working-directory crawls skipped files under .github/, .vscode/, etc.
 /// even when Git tracked them.
 #[test]
@@ -283,7 +283,7 @@ fn test_hidden_directory_files_are_indexed() {
     }
 }
 
-/// Regression test for BL16: repo whose basename starts with '.' must produce non-empty output.
+/// Repo whose basename starts with '.' must produce non-empty output.
 /// Previously, the root-handling logic diverged between enumerate_working_directory
 /// and build_package_index_for_working_dir, causing the latter to return nothing
 /// for repos like /tmp/.my-repo/.

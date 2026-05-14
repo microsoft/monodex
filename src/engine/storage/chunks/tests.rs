@@ -1143,9 +1143,9 @@ async fn test_upsert_without_vectors_with_progress_correctness() {
 
 /// Test that upsert_without_vectors_with_progress preserves vectors from peer labels.
 ///
-/// Regression test for BL10: Two labels share a row_id (same blob). Label A has
-/// vectors with vector_complete=true. An FTS-only crawl via label B re-touches
-/// the row. Label A's vectors must still be present after the crawl.
+/// When two labels share a row_id (same blob), and label A has vectors with
+/// vector_complete=true, an FTS-only crawl via label B re-touches the row.
+/// Label A's vectors must still be present after the crawl.
 #[tokio::test]
 async fn test_upsert_without_vectors_preserves_peer_label_vectors() {
     let (_tmp_dir, storage) = create_test_storage().await;
@@ -1225,7 +1225,7 @@ async fn test_upsert_without_vectors_preserves_peer_label_vectors() {
         .unwrap();
     assert!(
         status_after.has_vector,
-        "Vectors should be preserved after FTS-only crawl via label B (BL10 regression)"
+        "Vectors should be preserved after FTS-only crawl via label B"
     );
     assert!(
         status_after.row.file_complete,

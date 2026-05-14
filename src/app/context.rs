@@ -208,7 +208,7 @@ mod tests {
         // Compile the schema
         let validator = Validator::new(&schema).expect("Failed to compile JSON schema");
 
-        // Test that an HH:MM:SS timestamp (like the old BL14 bug) is rejected
+        // Test that an HH:MM:SS timestamp is rejected (the format lacks date/timezone)
         let bad_context = serde_json::json!({
             "catalog": "my-repo",
             "label": "main",

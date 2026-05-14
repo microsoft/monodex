@@ -1604,7 +1604,7 @@ fn test_first_time_crawl_vector_only__quick_excluded() {
 
 /// Test that non-UTF-8 files emit a warning and are skipped during crawl.
 ///
-/// BL17: Files whose bytes are not valid UTF-8 should emit a FileReadFailed warning
+/// Files whose bytes are not valid UTF-8 should emit a FileReadFailed warning
 /// with error string "non-UTF-8 file contents" and be skipped, not crash the crawl.
 #[test]
 #[allow(non_snake_case)]
@@ -1738,7 +1738,7 @@ fn test_non_utf8_file_emits_warning__quick_excluded() {
 }
 
 // =============================================================================
-// BL12a: FTS stale state integration tests
+// FTS stale state integration tests
 // =============================================================================
 
 /// Test: Hybrid search degrades to vector with stale warning when FTS is stale.
