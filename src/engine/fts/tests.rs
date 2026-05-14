@@ -172,7 +172,7 @@ async fn test_fts_index_with_chunks_ranked_results() -> Result<()> {
     fts_index.write_manifest(&manifest)?;
 
     // Search for "profile" - should match file1:1 and file2:1
-    let result = fts_search(db_path, &label_id, "profile", 10).await?;
+    let result = fts_search(db_path, &label_id, "profile", 10)?;
 
     match result {
         FtsSearchOutcome::Found(hits) => {
@@ -441,7 +441,7 @@ async fn test_fts_search_parse_error() -> Result<()> {
     // a query that is definitively malformed.
     // The query `nonexistent_field:` (field with empty value after colon) produces
     // a ParseError because there's no term to search for after the field specifier.
-    let result = fts_search(db_path, &label_id, "nonexistent_field:", 10).await?;
+    let result = fts_search(db_path, &label_id, "nonexistent_field:", 10)?;
 
     match result {
         FtsSearchOutcome::ParseError(msg) => {

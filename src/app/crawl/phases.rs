@@ -766,17 +766,30 @@ pub fn print_narrowing_announcement(
         match (has_fts, has_vector) {
             (true, false) => {
                 writeln!(writer).unwrap();
-                writeln!(writer, "👉 This crawl narrows retrieval selection to fts only, no vector.").unwrap();
+                writeln!(
+                    writer,
+                    "👉 This crawl narrows retrieval selection to fts only, no vector."
+                )
+                .unwrap();
                 writeln!(
                     writer,
                     "   Any vector data from a previous crawl is preserved and will be reused"
-                ).unwrap();
+                )
+                .unwrap();
                 writeln!(writer, "   if you re-add vector to the selection.").unwrap();
             }
             (false, true) => {
                 writeln!(writer).unwrap();
-                writeln!(writer, "👉 This crawl narrows retrieval selection to vector only, no fts.").unwrap();
-                writeln!(writer, "   Any fts data from a previous crawl is preserved and will be reused").unwrap();
+                writeln!(
+                    writer,
+                    "👉 This crawl narrows retrieval selection to vector only, no fts."
+                )
+                .unwrap();
+                writeln!(
+                    writer,
+                    "   Any fts data from a previous crawl is preserved and will be reused"
+                )
+                .unwrap();
                 writeln!(writer, "   if you re-add fts to the selection.").unwrap();
             }
             // Empty selection or other narrowing combinations are not expected in practice,
