@@ -8,11 +8,9 @@
 //!
 //! Validation contract: Callers must pass already-validated values. Catalog names
 //! are validated by `validate_catalog`, label IDs by `LabelId::parse`, and
-//! `row_id`/`file_id` are derived from internal computation. The functions here
-//! add a single defense-in-depth check: `debug_assert!` that values contain no
-//! single quote (`'`). The `col` argument is trusted-by-construction (all call
-//! sites pass hard-coded literals); this expectation is named here, so the assertion
-//! only checks values.
+//! `row_id`/`file_id` are derived from internal computation. The `debug_assert!`
+//! checks here are developer-time invariant checks that catch contract violations
+//! during testing. They do not run in release builds.
 
 /// Construct an equality predicate for a string column: `<col> = '<val>'`.
 ///
