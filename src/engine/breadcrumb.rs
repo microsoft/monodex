@@ -19,14 +19,11 @@ pub fn encode_path_component(s: &str) -> String {
     let mut result = String::with_capacity(s.len());
     for c in s.chars() {
         match c {
-            // Grammar-reserved characters
-            ':' | '@' | '=' | '+' | '#' | '%' => {
-                for byte in c.to_string().as_bytes() {
-                    result.push_str(&format!("%{:02X}", byte));
-                }
-            }
-            // Whitespace and control characters
-            c if c.is_control() || c.is_whitespace() => {
+            // Grammar-reserved characters, whitespace, and control characters
+            c if matches!(c, ':' | '@' | '=' | '+' | '#' | '%')
+                || c.is_control()
+                || c.is_whitespace() =>
+            {
                 for byte in c.to_string().as_bytes() {
                     result.push_str(&format!("%{:02X}", byte));
                 }

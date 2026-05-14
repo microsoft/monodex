@@ -30,4 +30,8 @@ pub use rows::{
 };
 
 /// LanceDB crate version. Keep in sync with Cargo.toml `lancedb` dependency.
+///
+/// Hand-maintained because Cargo doesn't expose the resolved transitive version of `lancedb`
+/// at compile time in a usable form. Investigated; left as the least-bad option.
+/// Update in lockstep with `Cargo.toml`.
 pub const LANCEDB_CRATE_VERSION: &str = "0.27";

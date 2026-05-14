@@ -76,19 +76,17 @@ pub async fn run_embed_upload_pipeline(
     let (embed_tx, embed_rx): EmbedChannel = unbounded();
     let processed = Arc::new(AtomicUsize::new(0));
     let stop_flag = Arc::new(AtomicBool::new(false));
-    let last_upload_time = Arc::new(tokio::sync::Mutex::new(std::time::Instant::now()));
 
     // Progress reporter thread
     let processed_clone = Arc::clone(&processed);
     let stop_clone = Arc::clone(&stop_flag);
-    let last_print_time = Arc::new(std::sync::Mutex::new(std::time::Instant::now()));
     let embed_start_for_thread = std::time::Instant::now();
 
     let progress_thread = std::thread::spawn(move || {
+        let mut last_print_time = std::time::Instant::now();
         while !stop_clone.load(Ordering::Relaxed) {
             std::thread::sleep(std::time::Duration::from_secs(5));
-            let mut last = last_print_time.lock().unwrap();
-            if last.elapsed() >= std::time::Duration::from_secs(30) {
+            if last_print_time.elapsed() >= std::time::Duration::from_secs(30) {
                 let current = processed_clone.load(Ordering::Relaxed);
                 let elapsed = embed_start_for_thread.elapsed();
                 let rate = current as f64 / elapsed.as_secs_f64().max(0.001);
@@ -103,7 +101,7 @@ pub async fn run_embed_upload_pipeline(
                     rate,
                     eta
                 );
-                *last = std::time::Instant::now();
+                last_print_time = std::time::Instant::now();
             }
         }
     });
@@ -114,10 +112,10 @@ pub async fn run_embed_upload_pipeline(
 
     // Storage writer task (async)
     let stop_writer = Arc::clone(&stop_flag);
-    let last_upload_time_clone = Arc::clone(&last_upload_time);
     let chunk_storage_clone = Arc::clone(&chunk_storage);
 
     let writer_task = tokio::spawn(async move {
+        let mut last_upload_time = std::time::Instant::now();
         let mut accumulated: Vec<(Chunk, Vec<f32>)> = Vec::new();
         let mut expected_count: std::collections::HashMap<String, usize> =
             std::collections::HashMap::new();
@@ -126,9 +124,8 @@ pub async fn run_embed_upload_pipeline(
 
         loop {
             let should_upload = {
-                let mut last = last_upload_time_clone.lock().await;
-                if last.elapsed() >= std::time::Duration::from_secs(60) {
-                    *last = std::time::Instant::now();
+                if last_upload_time.elapsed() >= std::time::Duration::from_secs(60) {
+                    last_upload_time = std::time::Instant::now();
                     true
                 } else {
                     false

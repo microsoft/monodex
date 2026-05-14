@@ -19,10 +19,8 @@ pub fn make_working_dir_source_sentinel() -> String {
         .map(|d| d.as_secs())
         .unwrap_or(0);
 
-    // Generate 8 hex characters of randomness
-    let random_hex: String = (0..8)
-        .map(|_| format!("{:x}", rand::random::<u8>() % 16))
-        .collect();
+    // Generate 8 hex characters of randomness from a single u32
+    let random_hex = format!("{:08x}", rand::random::<u32>());
 
     format!("working-dir:{}:{}", unix_secs, random_hex)
 }
@@ -44,7 +42,7 @@ mod tests {
     }
 
     #[test]
-    fn test_sentinals_are_unique() {
+    fn test_sentinels_are_unique() {
         let s1 = make_working_dir_source_sentinel();
         let s2 = make_working_dir_source_sentinel();
         // Extremely unlikely to be equal even if called rapidly

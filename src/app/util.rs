@@ -91,6 +91,9 @@ pub fn format_eta(secs: f64) -> String {
 ///
 /// Used for counts of things the user is processing (chunks, files, tokens, labels, warnings).
 /// Not for identifiers, ordinals, fixed parameters, or values that are always small.
+///
+/// Std doesn't provide a thousands-separator formatter for integers in stable;
+/// this is the local equivalent.
 pub fn format_count(n: u64) -> String {
     if n < 1000 {
         return n.to_string();

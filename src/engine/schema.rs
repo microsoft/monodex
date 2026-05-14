@@ -175,7 +175,7 @@ mod tests {
     fn test_label_metadata_schema_constructible() {
         let schema = label_metadata_schema();
 
-        // Verify expected column count (8 columns: label_id, catalog, label, source_kind,
+        // Verify expected column count (9 columns: label_id, catalog, label, source_kind,
         // vector_source, vector_complete, fts_source, fts_complete, updated_at_unix_secs)
         assert_eq!(
             schema.fields().len(),

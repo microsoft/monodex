@@ -35,6 +35,10 @@ PUBLISHING PROCEDURE:
 
 - **Dead code and redundant patterns cleaned up.** Several unused parameters, redundant function wrappers, duplicate match arms, and misleading docstrings were removed. Internal cleanup with no user-visible behavior change.
 
+### Changed
+
+- **Internal code cleanup: cosmetic improvements.** Simplified `Arc<Mutex<Instant>>` patterns to plain `Instant` variables, combined redundant match arms, added explanatory comments for hand-maintained constants. No behavior change.
+
 ## 0.6.0 (2026-05-13)
 
 ### Added
