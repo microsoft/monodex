@@ -20,7 +20,7 @@
 use std::collections::BTreeSet;
 
 use crate::engine::retrieval::RetrievalMethod;
-use crate::engine::storage::{read_selection, LabelMetadataRow};
+use crate::engine::storage::{LabelMetadataRow, read_selection};
 use crate::engine::warning::DecisionWarning;
 
 /// The decision outcome from evaluating label metadata and requested methods.

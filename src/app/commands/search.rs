@@ -8,8 +8,8 @@ use crate::app::{
     Config, format_source_pointer, resolve_database_path, resolve_label_context,
     search::{self, EndMarker, Preamble, SearchRenderModel, SearchWarning},
 };
-use crate::engine::storage::ChunkRow;
 use crate::engine::identifier::LabelId;
+use crate::engine::storage::ChunkRow;
 use crate::engine::{
     ParallelConfig, ParallelEmbedder, RetrievalMethod,
     fts::{FtsSearchOutcome, fts_search},
