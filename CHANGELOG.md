@@ -5,8 +5,11 @@ CHANGELOG GUIDANCE:
 
 - When starting new work after publishing, add an `## Unreleased` section
 - `###` headings must be one of: Added, Changed, Fixed, Deprecated, Removed, Security
+- Each `###` heading appears at most once per version section; group bullets under it rather than repeating the heading
 - CHANGELOG.md is for user-facing changes only (implementation details go in your Git commit description)
+- If a PR has no user-facing changes, do not touch CHANGELOG.md; do not manufacture bullets out of internal cleanup
 - Focus on user experience ("Fixed a problem where the crawler sometimes would report X") not implementation ("Added stricter validation in the f() function")
+- Do not name internal code identifiers (struct names, function names, module paths) in bullets; users don't have that context
 - Avoid jargon and complex sentences; assume your audience is a professional engineer with only superficial knowledge about Monodex
 
 PUBLISHING PROCEDURE:
@@ -20,6 +23,17 @@ PUBLISHING PROCEDURE:
 4. Rename "## Unreleased" to "## X.Y.Z" and add the date from step 3
 5. After publishing, the next PR author will add a new "## Unreleased" section
 -->
+
+## Unreleased
+
+### Changed
+
+- **Commit-mode crawls now open the repository once per crawl** instead of once per file operation, following the gix library's recommended usage pattern.
+- **Markdown chunks now report a consistent `chunk_type` of `"markdown-section"`.** Previously the value alternated between `"markdown"` and `"section"` for the same kind of chunk.
+
+### Fixed
+
+- `dump-chunks` "small chunk" counts no longer disagree, and handle empty input.
 
 ## 0.6.0 (2026-05-13)
 

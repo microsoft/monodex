@@ -129,10 +129,6 @@ pub struct ClassifyOutput {
     pub new_files: Vec<FileEntry>,
     /// File IDs for files that already have chunks and need label added.
     pub existing_file_ids: HashSet<String>,
-    /// Count of new files (for display).
-    pub new_count: usize,
-    /// Count of existing files (for display).
-    pub existing_count: usize,
 }
 
 /// Classifies files as new or existing based on chunk presence.
@@ -151,8 +147,6 @@ pub async fn classify_files(
 
     let mut new_files: Vec<FileEntry> = Vec::new();
     let mut existing_file_ids: HashSet<String> = HashSet::new();
-    let mut new_count = 0;
-    let mut existing_count = 0;
 
     for file_entry in files {
         let file_id = crate::engine::util::compute_file_id(
@@ -171,7 +165,6 @@ pub async fn classify_files(
                 if !status.row.file_complete {
                     // Incomplete file - treat as new file to re-crawl
                     new_files.push(file_entry.clone());
-                    new_count += 1;
                     continue;
                 }
 
@@ -190,17 +183,14 @@ pub async fn classify_files(
                     // partial label coverage is possible (some chunks may be missing the label).
                     // The label-add phase will visit all chunks and update as needed.
                     existing_file_ids.insert(file_id);
-                    existing_count += 1;
                 } else {
                     // File exists but lacks vector - need to re-process for vector
                     new_files.push(file_entry.clone());
-                    new_count += 1;
                 }
             }
             Ok(None) => {
                 // No sentinel row - new file
                 new_files.push(file_entry.clone());
-                new_count += 1;
             }
             Err(e) => {
                 warnings(CrawlWarning::SentinelReadFailed {
@@ -208,23 +198,23 @@ pub async fn classify_files(
                     error: e.to_string(),
                 });
                 new_files.push(file_entry.clone());
-                new_count += 1;
             }
         }
     }
 
-    println!("  New files to index: {}", format_count(new_count as u64));
+    println!(
+        "  New files to index: {}",
+        format_count(new_files.len() as u64)
+    );
     println!(
         "  Existing files (label update only): {}",
-        format_count(existing_count as u64)
+        format_count(existing_file_ids.len() as u64)
     );
     println!();
 
     Ok(ClassifyOutput {
         new_files,
         existing_file_ids,
-        new_count,
-        existing_count,
     })
 }
 
@@ -331,7 +321,6 @@ pub fn chunk_new_files(
     catalog_name: &str,
     label_id: &LabelId,
     repo_path: &std::path::Path,
-    new_count: usize,
     vector_in_selection: bool,
     warning_counter: &std::cell::Cell<usize>,
     warnings: WarningSink<'_>,
@@ -339,6 +328,8 @@ pub fn chunk_new_files(
     let mut chunks: Vec<crate::engine::Chunk> = Vec::new();
     let mut touched_file_ids: HashSet<String> = HashSet::new();
     let mut warning_files: HashSet<String> = HashSet::new();
+
+    let new_count = new_files.len();
 
     if new_files.is_empty() {
         return Ok(ChunkingOutput {
@@ -1113,7 +1104,6 @@ mod tests {
             "test-catalog",
             &label_id,
             repo_path,
-            1,
             false, // vector_in_selection
             &warning_counter,
             &mut |w| warnings.push(w),

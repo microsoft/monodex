@@ -50,6 +50,20 @@ pub fn in_quoted_strs(col: &str, vals: &[&str]) -> String {
     format!("{} IN ({})", col, quoted.join(", "))
 }
 
+/// Construct a SQL array literal from a slice of strings: `['<v1>', '<v2>', ...]`.
+///
+/// For an empty slice, returns `[]`.
+///
+/// # Panics
+/// In debug builds, panics if any element contains a single quote.
+pub fn quoted_str_array(vals: &[&str]) -> String {
+    for val in vals {
+        debug_assert!(!val.contains('\''), "Value contains single quote: {}", val);
+    }
+    let quoted: Vec<String> = vals.iter().map(|v| format!("'{}'", v)).collect();
+    format!("[{}]", quoted.join(", "))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -105,5 +119,27 @@ mod tests {
     #[should_panic(expected = "Value contains single quote")]
     fn test_in_quoted_strs_rejects_single_quote() {
         let _ = in_quoted_strs("col", &["good", "bad'value"]);
+    }
+
+    #[test]
+    fn test_quoted_str_array() {
+        assert_eq!(
+            quoted_str_array(&["label1", "label2"]),
+            "['label1', 'label2']"
+        );
+        assert_eq!(quoted_str_array(&["single"]), "['single']");
+    }
+
+    #[test]
+    fn test_quoted_str_array_empty() {
+        // Empty slice returns empty array
+        assert_eq!(quoted_str_array(&[]), "[]");
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "Value contains single quote")]
+    fn test_quoted_str_array_rejects_single_quote() {
+        let _ = quoted_str_array(&["good", "bad'value"]);
     }
 }

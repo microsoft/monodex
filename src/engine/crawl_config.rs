@@ -126,37 +126,37 @@ impl CrawlConfig {
 
     /// Compile glob patterns into a matcher.
     pub fn compile(&self) -> Result<CompiledCrawlConfig> {
-        let mut exclude_builder = GlobSetBuilder::new();
-        let mut exclude_dirs = Vec::new();
-
-        for pattern in &self.patterns_to_exclude {
-            if pattern.ends_with('/') {
-                // Directory pattern: store as prefix matcher
-                exclude_dirs.push(pattern.clone());
-            } else {
-                exclude_builder.add(Glob::new(pattern)?);
-            }
-        }
-
-        let mut keep_builder = GlobSetBuilder::new();
-        let mut keep_dirs = Vec::new();
-
-        for pattern in &self.patterns_to_keep {
-            if pattern.ends_with('/') {
-                // Directory pattern: store as prefix matcher
-                keep_dirs.push(pattern.clone());
-            } else {
-                keep_builder.add(Glob::new(pattern)?);
-            }
-        }
+        let (exclude_set, exclude_dirs) = Self::compile_patterns(&self.patterns_to_exclude)?;
+        let (keep_set, keep_dirs) = Self::compile_patterns(&self.patterns_to_keep)?;
 
         Ok(CompiledCrawlConfig {
             config: self.clone(),
-            exclude_set: exclude_builder.build()?,
-            keep_set: keep_builder.build()?,
+            exclude_set,
+            keep_set,
             exclude_dirs,
             keep_dirs,
         })
+    }
+
+    /// Compile a list of patterns into a GlobSet and directory list.
+    ///
+    /// Returns `(glob_set, dirs)` where:
+    /// - `glob_set` matches non-directory patterns
+    /// - `dirs` contains directory patterns (ending in `/`) for prefix matching
+    fn compile_patterns(patterns: &[String]) -> Result<(GlobSet, Vec<String>)> {
+        let mut builder = GlobSetBuilder::new();
+        let mut dirs = Vec::new();
+
+        for pattern in patterns {
+            if pattern.ends_with('/') {
+                // Directory pattern: store as prefix matcher
+                dirs.push(pattern.clone());
+            } else {
+                builder.add(Glob::new(pattern)?);
+            }
+        }
+
+        Ok((builder.build()?, dirs))
     }
 }
 
@@ -182,44 +182,30 @@ impl CompiledCrawlConfig {
 
     /// Check if file matches a configured file type.
     fn matches_file_type(&self, path: &str) -> bool {
-        // Match against suffixes (case-sensitive, v1)
-        for suffix in self.config.file_types.keys() {
-            if path.ends_with(suffix) {
-                return true;
-            }
-        }
-        false
+        self.get_strategy(path) != ChunkingStrategy::Skip
     }
 
     /// Check if path matches exclusion patterns.
     fn matches_exclude(&self, path: &str) -> bool {
-        // Check glob patterns
-        if self.exclude_set.is_match(path) {
-            return true;
-        }
-        // Check directory prefixes
-        for dir in &self.exclude_dirs {
-            // Directory patterns match if:
-            // 1. Path starts with the directory (e.g., "lib/example.ts" matches "lib/")
-            // 2. Path contains the directory with leading slash (e.g., "path/to/lib/file.ts" matches "lib/")
-            if path.starts_with(dir) || path.contains(&format!("/{}", dir)) {
-                return true;
-            }
-        }
-        false
+        self.matches_patterns(&self.exclude_set, &self.exclude_dirs, path)
     }
 
     /// Check if path matches keep patterns.
     fn matches_keep(&self, path: &str) -> bool {
+        self.matches_patterns(&self.keep_set, &self.keep_dirs, path)
+    }
+
+    /// Shared logic for matching against a GlobSet and directory list.
+    fn matches_patterns(&self, glob_set: &GlobSet, dirs: &[String], path: &str) -> bool {
         // Check glob patterns
-        if self.keep_set.is_match(path) {
+        if glob_set.is_match(path) {
             return true;
         }
         // Check directory prefixes
-        for dir in &self.keep_dirs {
+        for dir in dirs {
             // Directory patterns match if:
-            // 1. Path starts with the directory (e.g., "src/example.ts" matches "src/")
-            // 2. Path contains the directory with leading slash (e.g., "path/to/src/file.ts" matches "src/")
+            // 1. Path starts with the directory (e.g., "lib/example.ts" matches "lib/")
+            // 2. Path contains the directory with leading slash (e.g., "path/to/lib/file.ts" matches "lib/")
             if path.starts_with(dir) || path.contains(&format!("/{}", dir)) {
                 return true;
             }
@@ -234,21 +220,29 @@ impl CompiledCrawlConfig {
     pub fn get_strategy(&self, repo_relative_path: &str) -> ChunkingStrategy {
         for (suffix, strategy) in &self.config.file_types {
             if repo_relative_path.ends_with(suffix) {
-                return match strategy.as_str() {
-                    "typescript" => ChunkingStrategy::TypeScript,
-                    "markdown" => ChunkingStrategy::Markdown,
-                    "lineBased" => ChunkingStrategy::LineBased,
-                    _ => ChunkingStrategy::Skip, // Unknown strategy string
-                };
+                return strategy_from_config_value(strategy).unwrap_or(ChunkingStrategy::Skip);
             }
         }
         ChunkingStrategy::Skip
     }
 }
 
+/// Parse a strategy name from config into a ChunkingStrategy.
+///
+/// Returns `Some(ChunkingStrategy)` for valid strategy names, `None` for invalid.
+/// This is the single source of truth for strategy-name mapping.
+fn strategy_from_config_value(strategy: &str) -> Option<ChunkingStrategy> {
+    match strategy {
+        "typescript" => Some(ChunkingStrategy::TypeScript),
+        "markdown" => Some(ChunkingStrategy::Markdown),
+        "lineBased" => Some(ChunkingStrategy::LineBased),
+        _ => None,
+    }
+}
+
 /// Check if a strategy name is valid.
 fn is_valid_strategy(strategy: &str) -> bool {
-    matches!(strategy, "typescript" | "markdown" | "lineBased")
+    strategy_from_config_value(strategy).is_some()
 }
 
 // =============================================================================

@@ -2,7 +2,7 @@
 //! Edit here when: Changing markdown split boundaries (headings, fenced code blocks, block quotes, paragraphs) or heading-slug behavior.
 //! Do not edit here for: TypeScript chunking (see `partitioner/`), breadcrumb-encoding primitives (see `breadcrumb.rs`), strategy dispatch (see `chunker.rs`).
 
-use super::breadcrumb::{encode_path_component, slugify_heading};
+use super::breadcrumb::encode_path_component;
 use github_slugger::Slugger;
 
 /// Partition a Markdown file into chunks
@@ -13,17 +13,13 @@ pub fn partition_markdown(
     catalog: &str,
 ) -> Result<Vec<super::partitioner::PartitionedChunk>, super::partitioner::PartitionError> {
     use super::partitioner::PartitionedChunk;
-    use sha2::{Digest, Sha256};
+    use super::util::compute_hash;
 
     let lines: Vec<&str> = source.lines().collect();
     let mut chunks = Vec::new();
 
     // Compute content hash
-    let content_hash = {
-        let mut hasher = Sha256::new();
-        hasher.update(source.as_bytes());
-        format!("sha256:{}", hex::encode(hasher.finalize()))
-    };
+    let content_hash = compute_hash(source);
 
     // Build breadcrumb prefix with encoded components
     let encoded_package = encode_path_component(&config.package_name);
@@ -103,7 +99,7 @@ pub fn partition_markdown(
         // Get heading for breadcrumb - slugify for consistent heading IDs
         let heading = extract_heading_text(section_lines[0]);
         let breadcrumb = if let Some(h) = &heading {
-            let slug = slugify_heading(&mut slugger, h);
+            let slug = slugger.slug(h);
             format!("{}:{}", breadcrumb_prefix, slug)
         } else {
             breadcrumb_prefix.clone()

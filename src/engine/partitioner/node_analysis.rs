@@ -5,6 +5,20 @@
 use super::debug::PartitionDebug;
 use tree_sitter::Node;
 
+/// Check if a node kind represents a complex type that should not be inlined.
+fn is_complex_type(kind: &str) -> bool {
+    matches!(
+        kind,
+        "arrow_function"
+            | "function_expression"
+            | "function_declaration"
+            | "object"
+            | "array"
+            | "jsx_element"
+            | "jsx_self_closing_element"
+    )
+}
+
 pub(super) fn get_meaningful_children<'a>(
     node: Node<'a>,
     source: &[u8],
@@ -28,7 +42,7 @@ pub(super) fn get_meaningful_children<'a>(
 }
 
 /// Get the end line of import statements (0 if no imports)
-pub(super) fn extract_imports_end_line(root: Node, _source: &[u8]) -> usize {
+pub(super) fn extract_imports_end_line(root: Node) -> usize {
     let mut cursor = root.walk();
     let mut last_import_end = 0usize;
 
@@ -186,13 +200,7 @@ pub(super) fn pair_has_complex_value(pair_node: Node) -> bool {
         if let Some(child) = pair_node.child(i as u32) {
             match child.kind() {
                 // Direct complex value types
-                "arrow_function"
-                | "function_expression"
-                | "function_declaration"
-                | "object"
-                | "array"
-                | "jsx_element"
-                | "jsx_self_closing_element" => {
+                kind if is_complex_type(kind) => {
                     return true;
                 }
                 // Nested expression might wrap a complex value
@@ -213,13 +221,7 @@ pub(super) fn node_contains_complex_structure(node: Node) -> bool {
     for i in 0..node.child_count() {
         if let Some(child) = node.child(i as u32) {
             match child.kind() {
-                "arrow_function"
-                | "function_expression"
-                | "function_declaration"
-                | "object"
-                | "array"
-                | "jsx_element"
-                | "jsx_self_closing_element" => {
+                kind if is_complex_type(kind) => {
                     return true;
                 }
                 _ => {

@@ -55,30 +55,29 @@ pub trait BlobSource {
 /// Reads file content and blob IDs directly from Git objects,
 /// ensuring deterministic, reproducible indexing.
 pub struct CommitBlobSource {
-    repo_path: std::path::PathBuf,
+    repo: gix::Repository,
     commit_oid: String,
 }
 
 impl CommitBlobSource {
-    pub fn new(repo_path: std::path::PathBuf, commit_oid: String) -> Self {
-        Self {
-            repo_path,
-            commit_oid,
-        }
+    pub fn new(repo_path: &std::path::Path, commit_oid: String) -> Result<Self> {
+        let repo = gix::open(repo_path)
+            .map_err(|e| anyhow::anyhow!("Failed to open repository at {:?}: {}", repo_path, e))?;
+        Ok(Self { repo, commit_oid })
     }
 }
 
 impl BlobSource for CommitBlobSource {
     fn enumerate(&self) -> Result<Vec<FileEntry>> {
-        enumerate_commit_tree(&self.repo_path, &self.commit_oid)
+        enumerate_commit_tree(&self.repo, &self.commit_oid)
     }
 
     fn read_content(&self, file: &FileEntry) -> Result<Vec<u8>> {
-        read_blob_content(&self.repo_path, &file.blob_id)
+        read_blob_content(&self.repo, &file.blob_id)
     }
 
     fn build_package_index(&self) -> Result<PackageIndex> {
-        build_package_index_for_commit(&self.repo_path, &self.commit_oid)
+        build_package_index_for_commit(&self.repo, &self.commit_oid)
     }
 }
 

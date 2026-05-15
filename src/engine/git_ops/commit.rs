@@ -22,10 +22,7 @@ pub fn resolve_commit_oid(repo_path: &Path, commit: &str) -> Result<String> {
     Ok(commit_id.to_hex().to_string())
 }
 
-pub fn enumerate_commit_tree(repo_path: &Path, commit: &str) -> Result<Vec<FileEntry>> {
-    let repo = gix::open(repo_path)
-        .map_err(|e| anyhow!("Failed to open repository at {:?}: {}", repo_path, e))?;
-
+pub fn enumerate_commit_tree(repo: &gix::Repository, commit: &str) -> Result<Vec<FileEntry>> {
     let commit_id: ObjectId = repo
         .rev_parse_single(commit)
         .map_err(|e| anyhow!("Failed to resolve commit '{}': {}", commit, e))?
@@ -56,7 +53,7 @@ pub fn enumerate_commit_tree(repo_path: &Path, commit: &str) -> Result<Vec<FileE
     gix::traverse::tree::breadthfirst(
         TreeRefIter::from_bytes(&tree_data),
         &mut gix::traverse::tree::breadthfirst::State::default(),
-        repo.objects,
+        repo.objects.clone(),
         &mut recorder,
     )
     .map_err(|e| anyhow!("Failed to traverse tree: {}", e))?;
@@ -72,10 +69,7 @@ pub fn enumerate_commit_tree(repo_path: &Path, commit: &str) -> Result<Vec<FileE
         .collect())
 }
 
-pub fn read_blob_content(repo_path: &Path, blob_id: &str) -> Result<Vec<u8>> {
-    let repo = gix::open(repo_path)
-        .map_err(|e| anyhow!("Failed to open repository at {:?}: {}", repo_path, e))?;
-
+pub fn read_blob_content(repo: &gix::Repository, blob_id: &str) -> Result<Vec<u8>> {
     let object_id = ObjectId::from_hex(blob_id.as_bytes())
         .map_err(|e| anyhow!("Invalid blob ID '{}': {}", blob_id, e))?;
 
@@ -88,10 +82,10 @@ pub fn read_blob_content(repo_path: &Path, blob_id: &str) -> Result<Vec<u8>> {
     Ok(blob.data.to_vec())
 }
 
-pub fn build_package_index_for_commit(repo_path: &Path, commit: &str) -> Result<PackageIndex> {
-    let repo = gix::open(repo_path)
-        .map_err(|e| anyhow!("Failed to open repository at {:?}: {}", repo_path, e))?;
-
+pub fn build_package_index_for_commit(
+    repo: &gix::Repository,
+    commit: &str,
+) -> Result<PackageIndex> {
     let commit_id: ObjectId = repo
         .rev_parse_single(commit)
         .map_err(|e| anyhow!("Failed to resolve commit '{}': {}", commit, e))?

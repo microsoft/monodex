@@ -9,7 +9,9 @@ use std::process::Command;
 #[test]
 fn test_enumerate_commit_tree_current_repo() {
     let repo_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let entries = enumerate_commit_tree(&repo_path, "HEAD").expect("Failed to enumerate");
+    let blob_source = CommitBlobSource::new(&repo_path, "HEAD".to_string())
+        .expect("Failed to create blob source");
+    let entries = blob_source.enumerate().expect("Failed to enumerate");
     assert!(!entries.is_empty(), "Should have found some files");
     assert!(entries.iter().any(|e| e.relative_path == "README.md"));
     assert!(entries.iter().any(|e| e.relative_path == "Cargo.toml"));
@@ -18,12 +20,16 @@ fn test_enumerate_commit_tree_current_repo() {
 #[test]
 fn test_read_blob_content_current_repo() {
     let repo_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let entries = enumerate_commit_tree(&repo_path, "HEAD").expect("Failed to enumerate");
+    let blob_source = CommitBlobSource::new(&repo_path, "HEAD".to_string())
+        .expect("Failed to create blob source");
+    let entries = blob_source.enumerate().expect("Failed to enumerate");
     let readme = entries
         .iter()
         .find(|e| e.relative_path == "README.md")
         .unwrap();
-    let content = read_blob_content(&repo_path, &readme.blob_id).expect("Failed to read blob");
+    let content = blob_source
+        .read_content(readme)
+        .expect("Failed to read blob");
     let content_str = String::from_utf8_lossy(&content);
     assert!(content_str.contains("Monodex"));
 }
@@ -31,7 +37,11 @@ fn test_read_blob_content_current_repo() {
 #[test]
 fn test_build_package_index() {
     let repo_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let _index = build_package_index_for_commit(&repo_path, "HEAD").expect("Failed to build index");
+    let blob_source = CommitBlobSource::new(&repo_path, "HEAD".to_string())
+        .expect("Failed to create blob source");
+    let _index = blob_source
+        .build_package_index()
+        .expect("Failed to build index");
 }
 
 #[test]
@@ -181,8 +191,9 @@ fn test_file_id_identical_between_modes() {
     assert!(git_commit.status.success(), "git commit failed");
 
     // Get commit-mode entries
-    let commit_entries =
-        enumerate_commit_tree(repo_path, "HEAD").expect("Failed to enumerate commit");
+    let blob_source =
+        CommitBlobSource::new(repo_path, "HEAD".to_string()).expect("Failed to create blob source");
+    let commit_entries = blob_source.enumerate().expect("Failed to enumerate commit");
     let commit_entry = commit_entries
         .iter()
         .find(|e| e.relative_path == "test.txt")
@@ -230,8 +241,9 @@ fn test_working_dir_blob_id_matches_commit() {
     let test_file = "test_artifacts/Colorize.ts";
 
     // Get commit-mode blob ID for the test file
-    let commit_entries =
-        enumerate_commit_tree(&repo_path, "HEAD").expect("Failed to enumerate commit");
+    let blob_source = CommitBlobSource::new(&repo_path, "HEAD".to_string())
+        .expect("Failed to create blob source");
+    let commit_entries = blob_source.enumerate().expect("Failed to enumerate commit");
     let file_commit = commit_entries
         .iter()
         .find(|e| e.relative_path == test_file)

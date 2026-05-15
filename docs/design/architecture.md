@@ -141,7 +141,7 @@ Crawl-pipeline orchestration shared between command handlers.
 
 Reusable indexing engine. Does not depend on `src/app/`.
 
-- `breadcrumb.rs`: Percent-encode reserved characters (`:`, `@`, `=`, `+`, `#`, `%`, whitespace) in breadcrumb path components. Slugify markdown headings GitHub-style.
+- `breadcrumb.rs`: Percent-encode reserved characters (`:`, `@`, `=`, `+`, `#`, `%`, whitespace) in breadcrumb path components.
 - `chunker.rs`: Strategy dispatcher: pick a chunking strategy by file extension and produce `Chunk` records. Computes `file_id` and `row_id` for each chunk.
 - `crawl_config.rs`: Load and compile `monodex-crawl.json` (file types, exclude/keep patterns) with `globset`. Implements the `should_crawl()` and `get_strategy()` evaluation rules. Holds the embedded default config and the `ChunkingStrategy` enum.
 - `fusion.rs`: Reciprocal rank fusion (RRF) for hybrid retrieval. Pure algorithm: takes per-method ranked lists of `MethodHit`s and produces fused `FusedHit`s with per-method `RankedContribution` provenance. No I/O, no storage coupling. See [search.md](./search.md) for the algorithm and tiebreak rule.

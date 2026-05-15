@@ -109,7 +109,7 @@ pub fn run_crawl_label(
     println!();
 
     // Construct the blob source and metadata
-    let blob_source = CommitBlobSource::new(repo_path.clone(), commit_oid.clone());
+    let blob_source = CommitBlobSource::new(&repo_path, commit_oid.clone())?;
     let source_metadata = CrawlSourceMetadata {
         source_kind: SOURCE_KIND_GIT_COMMIT,
         source_value: commit_oid,
@@ -289,7 +289,6 @@ async fn run_crawl_async(
         catalog_name,
         label_id,
         repo_path,
-        classify_output.new_count,
         vector_in_selection,
         &warning_counter,
         &mut warning_sink,
@@ -340,9 +339,6 @@ async fn run_crawl_async(
     // Mark vector phase as succeeded if it was in selection and no error was captured
     if vector_in_selection && chunk_write_error.is_none() {
         phase_results.vector_succeeded = Some(!pipeline_failures.has_failures());
-    } else if fts_in_selection && chunk_write_error.is_none() {
-        // FTS-only path: no vector phase, mark as succeeded (no failures possible)
-        phase_results.vector_succeeded = None;
     }
 
     // Combine touched file IDs
@@ -419,8 +415,8 @@ async fn run_crawl_async(
 
     print_summary(
         total_start,
-        classify_output.new_count,
-        classify_output.existing_count,
+        classify_output.new_files.len(),
+        classify_output.existing_file_ids.len(),
         label_add_output.success_file_ids.len(),
         has_existing_file_failures || had_embed_failures,
         !phase_results.label_reassignment_succeeded,

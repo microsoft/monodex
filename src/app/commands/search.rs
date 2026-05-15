@@ -8,6 +8,7 @@ use crate::app::{
     Config, format_source_pointer, resolve_database_path, resolve_label_context,
     search::{self, EndMarker, Preamble, SearchRenderModel, SearchWarning},
 };
+use crate::engine::identifier::LabelId;
 use crate::engine::storage::ChunkRow;
 use crate::engine::{
     ParallelConfig, ParallelEmbedder, RetrievalMethod,
@@ -282,19 +283,15 @@ fn format_decision_error(
                 vector_source, fts_source, label, source_pointer
             )
         }
-        DecisionError::MethodNotInSelection { method } => {
-            format!(
-                "Method {} is not in this label's retrieval selection. Re-run `monodex crawl --label {} {} --retrieval {}` to add it.",
-                method, label, source_pointer, method
-            )
-        }
-        DecisionError::MethodsNotInSelection { methods } => {
+        DecisionError::MethodNotInSelection { methods } => {
             let methods_str: Vec<String> = methods.iter().map(|m| format!("{}", m)).collect();
+            let retrieval_flags: Vec<String> = methods.iter().map(|m| format!("--retrieval {}", m)).collect();
             format!(
-                "Methods {} are not in this label's retrieval selection. Re-run `monodex crawl --label {} {}` to add them.",
+                "The requested retrieval method ({}) is not in this label's retrieval selection. Re-run `monodex crawl --label {} {} {}` to add it.",
                 methods_str.join(", "),
                 label,
-                source_pointer
+                source_pointer,
+                retrieval_flags.join(" ")
             )
         }
     }
@@ -309,7 +306,7 @@ async fn run_single_method_search<W: Write>(
     text: &str,
     limit: usize,
     candidate_limit: usize,
-    label_id: &str,
+    label_id: &LabelId,
     label_metadata: &crate::engine::storage::LabelMetadataRow,
     method: RetrievalMethod,
     preamble: Preamble,
@@ -340,14 +337,7 @@ async fn run_single_method_search<W: Write>(
             collect_vector(results, candidate_limit)
         }
         RetrievalMethod::Fts => {
-            // Parse label_id into LabelId
-            let parts: Vec<&str> = label_id.splitn(2, ':').collect();
-            if parts.len() != 2 {
-                return Err(anyhow!("Invalid label_id format: {}", label_id));
-            }
-            let label_id_struct = crate::engine::identifier::LabelId::new(parts[0], parts[1])?;
-
-            let outcome = collect_fts(db_path, &label_id_struct, text, candidate_limit).await?;
+            let outcome = collect_fts(db_path, label_id, text, candidate_limit).await?;
 
             match outcome {
                 FtsCollectOutcome::Collected(collected) => collected,
@@ -489,7 +479,7 @@ async fn run_hybrid_search<W: Write>(
     text: &str,
     limit: usize,
     candidate_limit: usize,
-    label_id: &str,
+    label_id: &LabelId,
     label_metadata: &crate::engine::storage::LabelMetadataRow,
     methods: BTreeSet<RetrievalMethod>,
     preamble: Preamble,
@@ -504,14 +494,7 @@ async fn run_hybrid_search<W: Write>(
     let mut saturations: Vec<bool> = Vec::new();
 
     if methods.contains(&RetrievalMethod::Fts) {
-        // Parse label_id into LabelId
-        let parts: Vec<&str> = label_id.splitn(2, ':').collect();
-        if parts.len() != 2 {
-            return Err(anyhow!("Invalid label_id format: {}", label_id));
-        }
-        let label_id_struct = crate::engine::identifier::LabelId::new(parts[0], parts[1])?;
-
-        let outcome = collect_fts(db_path, &label_id_struct, text, candidate_limit).await?;
+        let outcome = collect_fts(db_path, label_id, text, candidate_limit).await?;
 
         match outcome {
             FtsCollectOutcome::Collected(collected) => {
@@ -825,14 +808,18 @@ mod tests {
     #[test]
     fn test_format_decision_error_method_not_in_selection() {
         use crate::engine::retrieval::RetrievalMethod;
+        use std::collections::BTreeSet;
 
         let metadata = make_test_metadata();
-        let err = crate::engine::search_decision::DecisionError::MethodNotInSelection {
-            method: RetrievalMethod::Fts,
-        };
+        let mut methods: BTreeSet<RetrievalMethod> = BTreeSet::new();
+        methods.insert(RetrievalMethod::Fts);
+
+        let err = crate::engine::search_decision::DecisionError::MethodNotInSelection { methods };
         let result = format_decision_error(&err, &metadata, "main", false);
 
-        assert!(result.contains("Method fts is not in this label's retrieval selection."));
+        assert!(result.contains(
+            "The requested retrieval method (fts) is not in this label's retrieval selection."
+        ));
         assert!(result.contains(
             "Re-run `monodex crawl --label main --commit abc123 --retrieval fts` to add it."
         ));
@@ -848,14 +835,14 @@ mod tests {
         methods.insert(RetrievalMethod::Fts);
         methods.insert(RetrievalMethod::Vector);
 
-        let err = crate::engine::search_decision::DecisionError::MethodsNotInSelection { methods };
+        let err = crate::engine::search_decision::DecisionError::MethodNotInSelection { methods };
         let result = format_decision_error(&err, &metadata, "main", false);
 
         assert!(
-            result.contains("Methods fts, vector are not in this label's retrieval selection.")
+            result.contains("The requested retrieval method (fts, vector) is not in this label's retrieval selection.")
         );
         assert!(
-            result.contains("Re-run `monodex crawl --label main --commit abc123` to add them.")
+            result.contains("Re-run `monodex crawl --label main --commit abc123 --retrieval fts --retrieval vector` to add it.")
         );
     }
 }

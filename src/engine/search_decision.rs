@@ -20,7 +20,7 @@
 use std::collections::BTreeSet;
 
 use crate::engine::retrieval::RetrievalMethod;
-use crate::engine::storage::LabelMetadataRow;
+use crate::engine::storage::{LabelMetadataRow, read_selection};
 use crate::engine::warning::DecisionWarning;
 
 /// The decision outcome from evaluating label metadata and requested methods.
@@ -56,11 +56,9 @@ pub enum DecisionError {
         vector_source: String,
         fts_source: String,
     },
-    /// Explicit --retrieval requested a method not in the selection.
-    MethodNotInSelection { method: RetrievalMethod },
-    /// Explicit --retrieval requested multiple methods but some are not in selection.
+    /// Explicit --retrieval requested method(s) not in the selection.
     /// The set contains the methods that were requested but not available.
-    MethodsNotInSelection { methods: BTreeSet<RetrievalMethod> },
+    MethodNotInSelection { methods: BTreeSet<RetrievalMethod> },
 }
 
 /// Evaluate the decision table and return which retrieval methods to use.
@@ -86,13 +84,7 @@ pub fn decide(
     requested: Option<BTreeSet<RetrievalMethod>>,
 ) -> Decision {
     // Step 1: Compute the persistent selection (methods with non-NULL source)
-    let mut persistent_selection: BTreeSet<RetrievalMethod> = BTreeSet::new();
-    if metadata.vector_source.is_some() {
-        persistent_selection.insert(RetrievalMethod::Vector);
-    }
-    if metadata.fts_source.is_some() {
-        persistent_selection.insert(RetrievalMethod::Fts);
-    }
+    let persistent_selection = read_selection(metadata);
 
     // Step 2: Apply explicit --retrieval filter if provided
     let candidate_subset = if let Some(ref requested_set) = requested {
@@ -103,14 +95,9 @@ pub fn decide(
             .collect();
 
         if !not_in_selection.is_empty() {
-            if not_in_selection.len() == 1 {
-                let method = not_in_selection.iter().next().copied().unwrap();
-                return Decision::Error(DecisionError::MethodNotInSelection { method });
-            } else {
-                return Decision::Error(DecisionError::MethodsNotInSelection {
-                    methods: not_in_selection,
-                });
-            }
+            return Decision::Error(DecisionError::MethodNotInSelection {
+                methods: not_in_selection,
+            });
         }
 
         requested_set.clone()
@@ -365,11 +352,11 @@ mod tests {
         requested.insert(RetrievalMethod::Fts);
 
         let result = decide(&metadata, Some(requested));
+        let mut expected = BTreeSet::new();
+        expected.insert(RetrievalMethod::Fts);
         assert_eq!(
             result,
-            Decision::Error(DecisionError::MethodNotInSelection {
-                method: RetrievalMethod::Fts
-            })
+            Decision::Error(DecisionError::MethodNotInSelection { methods: expected })
         );
     }
 
@@ -389,7 +376,7 @@ mod tests {
         expected.insert(RetrievalMethod::Vector);
         assert_eq!(
             result,
-            Decision::Error(DecisionError::MethodsNotInSelection { methods: expected })
+            Decision::Error(DecisionError::MethodNotInSelection { methods: expected })
         );
     }
 

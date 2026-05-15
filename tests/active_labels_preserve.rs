@@ -2,16 +2,9 @@
 //! Edit here when: Adding or modifying tests for the active_label_ids preservation invariant.
 //! Do not edit here for: Production storage code (see `engine/storage/chunks/`); other storage tests (see `tests/label_add.rs`).
 
-use std::sync::Arc;
+mod common;
 
-use lancedb::connect;
-
-use monodex::engine::{
-    Chunk,
-    identifier::LabelId,
-    schema::chunks_schema,
-    storage::{ChunkRow, ChunkStorage},
-};
+use monodex::engine::{Chunk, identifier::LabelId};
 
 fn test_chunk_with_labels(
     path: &str,
@@ -45,54 +38,6 @@ fn test_chunk_with_labels(
     }
 }
 
-async fn create_test_storage() -> (tempfile::TempDir, ChunkStorage) {
-    let tmp_dir = tempfile::TempDir::new().unwrap();
-    let db_path = tmp_dir.path().join("test_db");
-
-    let db = connect(db_path.to_str().unwrap())
-        .execute()
-        .await
-        .expect("Failed to create database");
-
-    let schema = chunks_schema();
-    let table = db
-        .create_empty_table("chunks", schema)
-        .execute()
-        .await
-        .expect("Failed to create table");
-
-    // Pass db_path for commit mutex acquisition in write methods
-    (tmp_dir, ChunkStorage::new(Arc::new(table), db_path))
-}
-
-fn chunk_to_row(chunk: &Chunk) -> ChunkRow {
-    ChunkRow {
-        row_id: chunk.row_id(),
-        text: chunk.text.clone(),
-        catalog: chunk.catalog.clone(),
-        active_label_ids: chunk.active_label_ids.clone(),
-        embedder_id: chunk.embedder_id.clone(),
-        chunker_id: chunk.chunker_id.clone(),
-        blob_id: chunk.blob_id.clone(),
-        content_hash: chunk.content_hash.clone(),
-        file_id: chunk.file_id.clone(),
-        relative_path: chunk.relative_path.clone(),
-        package_name: chunk.package_name.clone(),
-        source_uri: chunk.source_uri.clone(),
-        chunk_ordinal: chunk.chunk_ordinal as i32,
-        chunk_count: chunk.chunk_count as i32,
-        start_line: chunk.start_line as i32,
-        end_line: chunk.end_line as i32,
-        symbol_name: chunk.symbol_name.clone(),
-        chunk_type: chunk.chunk_type.clone(),
-        chunk_kind: chunk.chunk_kind.clone(),
-        breadcrumb: Some(chunk.breadcrumb.clone()),
-        split_part_ordinal: chunk.split_part_ordinal.map(|n| n as i32),
-        split_part_count: chunk.split_part_count.map(|n| n as i32),
-        file_complete: true,
-    }
-}
-
 /// Test that upsert_with_vectors merges active_label_ids instead of replacing.
 ///
 /// This verifies the active_label_ids preservation invariant:
@@ -105,7 +50,7 @@ fn chunk_to_row(chunk: &Chunk) -> ChunkRow {
 /// 3. Verify the chunk now has active_label_ids containing both A and B
 #[tokio::test]
 async fn test_active_label_ids_preserved_vector_path() {
-    let (_db_dir, chunk_storage) = create_test_storage().await;
+    let (_db_dir, chunk_storage) = common::create_test_storage().await;
 
     let catalog = "test-catalog";
     let label_a = "label-a";
@@ -120,7 +65,7 @@ async fn test_active_label_ids_preserved_vector_path() {
         catalog,
         vec![label_a_id.clone()],
     );
-    let row_a = chunk_to_row(&chunk_a);
+    let row_a = common::chunk_to_row(&chunk_a);
 
     // Create a simple vector
     let mut vector = vec![0.0f32; 768];
@@ -137,7 +82,7 @@ async fn test_active_label_ids_preserved_vector_path() {
         active_label_ids: vec![label_b_id.clone()],
         ..chunk_a.clone()
     };
-    let row_b = chunk_to_row(&chunk_b);
+    let row_b = common::chunk_to_row(&chunk_b);
 
     chunk_storage
         .upsert_with_vectors(std::slice::from_ref(&row_b), &[vector.clone()])
@@ -172,7 +117,7 @@ async fn test_active_label_ids_preserved_vector_path() {
 /// 3. Verify the chunk has both labels AND the vector works
 #[tokio::test]
 async fn test_active_label_ids_preserved_fts_then_vector() {
-    let (_db_dir, chunk_storage) = create_test_storage().await;
+    let (_db_dir, chunk_storage) = common::create_test_storage().await;
 
     let catalog = "test-catalog";
     let label_a = "label-a";
@@ -187,7 +132,7 @@ async fn test_active_label_ids_preserved_fts_then_vector() {
         catalog,
         vec![label_a_id.clone()],
     );
-    let row_a = chunk_to_row(&chunk_a);
+    let row_a = common::chunk_to_row(&chunk_a);
 
     // Step 1: Insert with label A via FTS-only path (no vector)
     chunk_storage
@@ -200,7 +145,7 @@ async fn test_active_label_ids_preserved_fts_then_vector() {
         active_label_ids: vec![label_b_id.clone()],
         ..chunk_a.clone()
     };
-    let row_b = chunk_to_row(&chunk_b);
+    let row_b = common::chunk_to_row(&chunk_b);
 
     let mut vector = vec![0.0f32; 768];
     vector[0] = 1.0;
@@ -253,7 +198,7 @@ async fn test_active_label_ids_preserved_fts_then_vector() {
 /// 3. Verify active_label_ids still has exactly [A], not [A, A]
 #[tokio::test]
 async fn test_active_label_ids_self_upsert_idempotent() {
-    let (_db_dir, chunk_storage) = create_test_storage().await;
+    let (_db_dir, chunk_storage) = common::create_test_storage().await;
 
     let catalog = "test-catalog";
     let label_a = "label-a";
@@ -266,7 +211,7 @@ async fn test_active_label_ids_self_upsert_idempotent() {
         catalog,
         vec![label_a_id.clone()],
     );
-    let row = chunk_to_row(&chunk);
+    let row = common::chunk_to_row(&chunk);
 
     let mut vector = vec![0.0f32; 768];
     vector[0] = 1.0;

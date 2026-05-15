@@ -1,6 +1,6 @@
-//! Purpose: Percent-encode reserved characters in breadcrumb path components and slugify markdown headings GitHub-style.
-//! Edit here when: Changing the reserved-character set, percent-encoding rules, or heading slugification.
-//! Do not edit here for: Identifier validation (see `identifier.rs`), breadcrumb composition by chunkers (see `chunker.rs`, `markdown_partitioner.rs`, `partitioner/`).
+//! Purpose: Percent-encode reserved characters in breadcrumb path components.
+//! Edit here when: Changing the reserved-character set or percent-encoding rules.
+//! Do not edit here for: Identifier validation (see `identifier.rs`), breadcrumb composition by chunkers (see `chunker.rs`, `markdown_partitioner.rs`, `partitioner/`), heading slugification (see `markdown_partitioner.rs`).
 
 /// Percent-encodes reserved characters in a path component for use in locators (breadcrumbs).
 ///
@@ -19,14 +19,11 @@ pub fn encode_path_component(s: &str) -> String {
     let mut result = String::with_capacity(s.len());
     for c in s.chars() {
         match c {
-            // Grammar-reserved characters
-            ':' | '@' | '=' | '+' | '#' | '%' => {
-                for byte in c.to_string().as_bytes() {
-                    result.push_str(&format!("%{:02X}", byte));
-                }
-            }
-            // Whitespace and control characters
-            c if c.is_control() || c.is_whitespace() => {
+            // Grammar-reserved characters, whitespace, and control characters
+            c if matches!(c, ':' | '@' | '=' | '+' | '#' | '%')
+                || c.is_control()
+                || c.is_whitespace() =>
+            {
                 for byte in c.to_string().as_bytes() {
                     result.push_str(&format!("%{:02X}", byte));
                 }
@@ -36,26 +33,6 @@ pub fn encode_path_component(s: &str) -> String {
         }
     }
     result
-}
-
-/// Slugifies a markdown heading using GitHub-style slugification.
-///
-/// Uses the `github-slugger` crate for consistent heading ID generation.
-/// Duplicate headings get numbered suffixes (e.g., `examples`, `examples-1`).
-///
-/// # Example
-///
-/// ```
-/// use monodex::engine::breadcrumb::slugify_heading;
-/// use github_slugger::Slugger;
-///
-/// let mut slugger = Slugger::default();
-/// assert_eq!(slugify_heading(&mut slugger, "API: Configuration"), "api-configuration");
-/// assert_eq!(slugify_heading(&mut slugger, "Examples"), "examples");
-/// assert_eq!(slugify_heading(&mut slugger, "Examples"), "examples-1");
-/// ```
-pub fn slugify_heading(slugger: &mut github_slugger::Slugger, heading: &str) -> String {
-    slugger.slug(heading)
 }
 
 #[cfg(test)]
@@ -109,52 +86,6 @@ mod tests {
 
         // Alphanumeric
         assert_eq!(encode_path_component("File123"), "File123");
-    }
-
-    #[test]
-    fn test_slugify_heading_basic() {
-        let mut slugger = github_slugger::Slugger::default();
-
-        assert_eq!(
-            slugify_heading(&mut slugger, "Introduction"),
-            "introduction"
-        );
-        assert_eq!(
-            slugify_heading(&mut slugger, "API Reference"),
-            "api-reference"
-        );
-        assert_eq!(slugify_heading(&mut slugger, "What's New?"), "whats-new");
-    }
-
-    #[test]
-    fn test_slugify_heading_duplicates() {
-        let mut slugger = github_slugger::Slugger::default();
-
-        // First occurrence gets base slug
-        assert_eq!(slugify_heading(&mut slugger, "Examples"), "examples");
-
-        // Second occurrence gets numbered suffix
-        assert_eq!(slugify_heading(&mut slugger, "Examples"), "examples-1");
-
-        // Third occurrence
-        assert_eq!(slugify_heading(&mut slugger, "Examples"), "examples-2");
-    }
-
-    #[test]
-    fn test_slugify_heading_special_chars() {
-        let mut slugger = github_slugger::Slugger::default();
-
-        // Colons become hyphens
-        assert_eq!(
-            slugify_heading(&mut slugger, "API: Configuration"),
-            "api-configuration"
-        );
-
-        // Multiple spaces become multiple hyphens (GitHub slugger behavior)
-        assert_eq!(
-            slugify_heading(&mut slugger, "Multiple   Spaces"),
-            "multiple---spaces"
-        );
     }
 
     #[test]
