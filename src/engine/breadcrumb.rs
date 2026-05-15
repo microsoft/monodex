@@ -1,6 +1,6 @@
-//! Purpose: Percent-encode reserved characters in breadcrumb path components and slugify markdown headings GitHub-style.
-//! Edit here when: Changing the reserved-character set, percent-encoding rules, or heading slugification.
-//! Do not edit here for: Identifier validation (see `identifier.rs`), breadcrumb composition by chunkers (see `chunker.rs`, `markdown_partitioner.rs`, `partitioner/`).
+//! Purpose: Percent-encode reserved characters in breadcrumb path components.
+//! Edit here when: Changing the reserved-character set or percent-encoding rules.
+//! Do not edit here for: Identifier validation (see `identifier.rs`), breadcrumb composition by chunkers (see `chunker.rs`, `markdown_partitioner.rs`, `partitioner/`), heading slugification (see `markdown_partitioner.rs`).
 
 /// Percent-encodes reserved characters in a path component for use in locators (breadcrumbs).
 ///
@@ -35,10 +35,6 @@ pub fn encode_path_component(s: &str) -> String {
     result
 }
 
-/// Slugifies a markdown heading using GitHub-style slugification.
-///
-/// Uses the `github-slugger` crate for consistent heading ID generation.
-/// Duplicate headings get numbered suffixes (e.g., `examples`, `examples-1`).
 #[cfg(test)]
 mod tests {
     use super::*;
