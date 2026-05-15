@@ -98,6 +98,16 @@ In Rust source files, the header is a module doc comment (`//!`). Two shapes are
 
 When editing an existing file whose header doesn't match this rule, update it only if the task touches the header, moves the file, or substantially changes the file's edit intent. Otherwise leave it and optionally note in the footer.
 
+## Test strategy
+
+This codebase does not pursue 100% line coverage. Several specific decisions reflect the testing posture used here:
+
+- **Pure decision logic is extracted and unit-tested; effectful orchestration is covered by integration tests at real seams.** `engine/search_decision.rs` is a pure function with focused unit tests. `app/commands/crawl.rs`'s `run_crawl_async` orchestrator is covered by `tests/active_labels_preserve.rs`, `tests/label_add.rs`, and `tests/vector_preserve.rs` running against real LanceDB, not against mocked storage.
+- **Some short predicates carry one test per named input category.** `should_skip_label_cleanup` in `app/commands/crawl.rs` is a three-term boolean with four tests, one per failure category.
+- **Stable user-facing output is snapshot-tested rather than asserted with substring batteries.** A snapshot diff is reviewable as a single user-experience change.
+- **State invariants are checked at construction with `assert!` / `debug_assert!`.** `file_id` and `row_id` derivation in `engine/util.rs` and identifier validation in `engine/identifier.rs` are the examples. The test suite does not duplicate these checks across input combinations.
+- **Bug-fix PRs add a regression test when the bug class is plausibly re-introducible on future edits.** A miswritten conditional caught by review does not need its own test; a subtle ordering bug in a phase-gating predicate does.
+
 ## Test placement
 
 - **Inline `#[cfg(test)]` blocks must be under 300 lines.** Below that, prefer inline when tests are tightly coupled to private items in the file; otherwise use a sibling `tests.rs`.
