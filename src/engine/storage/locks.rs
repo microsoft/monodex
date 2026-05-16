@@ -70,21 +70,25 @@ impl Drop for FileLockGuard {
 /// RAII guard for a shared database lock.
 ///
 /// Holds the file handle and releases the lock on drop.
+#[allow(dead_code)]
 pub struct DatabaseLockShared(FileLockGuard);
 
 /// RAII guard for an exclusive database lock.
 ///
 /// Holds the file handle and releases the lock on drop.
+#[allow(dead_code)]
 pub struct DatabaseLockExclusive(FileLockGuard);
 
 /// RAII guard for a catalog lock.
 ///
 /// Holds the file handle and releases the lock on drop.
+#[allow(dead_code)]
 pub struct CatalogLock(FileLockGuard);
 
 /// RAII guard for the commit mutex.
 ///
 /// Holds the file handle and releases the lock on drop.
+#[allow(dead_code)]
 pub struct CommitMutex(FileLockGuard);
 
 // ============================================================================

@@ -630,6 +630,7 @@ fn write_summary_counts(
     .unwrap();
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn write_summary(
     mut out: impl std::io::Write,
     total_start: std::time::Instant,
