@@ -303,23 +303,22 @@ fn git_hash_object_batch(repo_root: &Path, paths: &[String]) -> Result<Vec<(Stri
 /// working-tree contents (including local modifications), plus untracked non-ignored
 /// files. Blob IDs are computed via `git hash-object` so they respect `.gitattributes`,
 /// clean filters, and other repo-specific settings.
-pub fn enumerate_working_directory(repo_path: &Path) -> Result<Vec<FileEntry>> {
-    // Build the Git-aware blob map, which is the authoritative source of
-    // Git's working-tree view: tracked files plus untracked non-ignored files.
+fn for_each_working_tree_entry(repo_path: &Path, mut visit: impl FnMut(&str, &str)) -> Result<()> {
     let blob_map = build_working_tree_blob_map(repo_path)?;
+    for (relative_path, blob_id) in &blob_map.blobs_by_path {
+        visit(relative_path, blob_id);
+    }
+    Ok(())
+}
 
-    // Iterate the blob map directly instead of walking the filesystem.
-    // This ensures we include ALL Git-tracked files, regardless of whether
-    // they live under hidden directories.
-    let entries: Vec<FileEntry> = blob_map
-        .blobs_by_path
-        .into_iter()
-        .map(|(relative_path, blob_id)| FileEntry {
-            relative_path,
-            blob_id,
-        })
-        .collect();
-
+pub fn enumerate_working_directory(repo_path: &Path) -> Result<Vec<FileEntry>> {
+    let mut entries = Vec::new();
+    for_each_working_tree_entry(repo_path, |relative_path, blob_id| {
+        entries.push(FileEntry {
+            relative_path: relative_path.to_string(),
+            blob_id: blob_id.to_string(),
+        });
+    })?;
     Ok(entries)
 }
 
@@ -329,37 +328,28 @@ pub fn enumerate_working_directory(repo_path: &Path) -> Result<Vec<FileEntry>> {
 /// like .github/ or .vscode/.
 pub fn build_package_index_for_working_dir(repo_path: &Path) -> Result<PackageIndex> {
     let mut index = PackageIndex::new();
-
-    // Build the Git-aware blob map to find all tracked files
-    let blob_map = build_working_tree_blob_map(repo_path)?;
-
-    // Find all package.json files Git tracks
-    for relative_path in blob_map.blobs_by_path.keys() {
-        // Exact filename match: split on last '/' and compare the trailing segment
+    for_each_working_tree_entry(repo_path, |relative_path, _blob_id| {
         let filename = relative_path
             .rsplit_once('/')
             .map(|(_, trailing)| trailing)
             .unwrap_or(relative_path);
 
         if filename != "package.json" {
-            continue;
+            return;
         }
 
-        // Extract the directory path: strip "/package.json" or "package.json" (repo root)
         let dir_path = relative_path
             .strip_suffix("/package.json")
             .or_else(|| relative_path.strip_suffix("package.json"))
             .unwrap_or("")
             .to_string();
 
-        // Read the file content and extract package name
         if let Ok(content) = read_working_file_content(repo_path, relative_path)
             && let Some(name) = extract_package_name_from_bytes(&content)
         {
             index.package_name_by_dir.insert(dir_path, name);
         }
-    }
-
+    })?;
     Ok(index)
 }
 
