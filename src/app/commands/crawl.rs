@@ -12,27 +12,18 @@ use std::sync::Arc;
 
 use crate::app::crawl::phases::{
     add_label_to_existing_files, build_package_index, chunk_new_files, classify_files,
-    enumerate_files, filter_files, format_selection_for_display, open_storage,
-    print_narrowing_announcement, print_summary, print_warning_summary, run_fts_phase,
-    run_label_cleanup, update_final_metadata, write_in_progress_metadata,
+    enumerate_files, filter_files, open_storage, print_narrowing_announcement, print_summary,
+    print_warning_summary, run_fts_phase, run_label_cleanup, update_final_metadata,
+    write_in_progress_metadata,
 };
+use crate::app::crawl::preamble::{CrawlInput, CrawlPreamble, prepare_crawl_preamble};
 use crate::app::crawl::types::{CrawlSourceMetadata, PhaseResults};
 use crate::app::crawl::warning::create_warning_sink;
-use crate::app::util::stderr_lock_progress;
-use crate::app::{
-    Config, resolve_database_path, run_embed_upload_pipeline, run_upsert_without_vectors,
-    validate_config_path,
-};
-use crate::engine::crawl_config::load_compiled_crawl_config;
-use crate::engine::git_ops::{
-    BlobSource, CommitBlobSource, WorkingDirBlobSource, resolve_commit_oid,
-};
+use crate::app::{Config, run_embed_upload_pipeline, run_upsert_without_vectors};
+use crate::engine::git_ops::{BlobSource, CommitBlobSource, WorkingDirBlobSource};
 use crate::engine::identifier::LabelId;
 use crate::engine::retrieval::RetrievalMethod;
-use crate::engine::storage::{
-    SOURCE_KIND_GIT_COMMIT, SOURCE_KIND_WORKING_DIRECTORY, acquire_catalog_lock,
-    acquire_database_shared, read_selection,
-};
+use crate::engine::storage::{SOURCE_KIND_GIT_COMMIT, read_selection};
 
 /// Report from the post-chunking phases, used by print_summary.
 ///
@@ -52,27 +43,7 @@ struct PostChunkingReport {
     fts_phase_failed: bool,
 }
 
-/// Returns all retrieval methods (used when no explicit --retrieval is specified).
-fn all_retrieval_methods() -> BTreeSet<RetrievalMethod> {
-    let mut methods = BTreeSet::new();
-    methods.insert(RetrievalMethod::Fts);
-    methods.insert(RetrievalMethod::Vector);
-    methods
-}
-
-/// Normalizes `Vec<RetrievalMethod>` to `BTreeSet<RetrievalMethod>`.
-/// Empty vec means all methods; non-empty vec is deduplicated into a set.
-fn normalize_retrieval(retrieval: Vec<RetrievalMethod>) -> BTreeSet<RetrievalMethod> {
-    if retrieval.is_empty() {
-        all_retrieval_methods()
-    } else {
-        // Set semantics: --retrieval vector --retrieval vector collapses to {Vector}
-        retrieval.into_iter().collect()
-    }
-}
-
 /// Run crawl for a git commit label
-#[allow(clippy::too_many_arguments)]
 pub fn run_crawl_label(
     config: &Config,
     catalog_name: &str,
@@ -81,57 +52,27 @@ pub fn run_crawl_label(
     retrieval: Vec<RetrievalMethod>,
     debug: bool,
 ) -> Result<()> {
-    let selection = normalize_retrieval(retrieval);
-    let total_start = std::time::Instant::now();
-    println!("🔍 Starting label-aware crawl...");
-    println!("Catalog: {}", catalog_name);
-    println!(
-        "Label: {} {}",
+    let preamble = prepare_crawl_preamble(
+        config,
+        catalog_name,
         label,
-        format_selection_for_display(&selection)
-    );
+        retrieval,
+        CrawlInput::Commit { commit },
+    )?;
 
-    // Get catalog config
-    let catalog_config = config
-        .catalogs
-        .get(catalog_name)
-        .ok_or_else(|| anyhow::anyhow!("Catalog '{}' not found in config", catalog_name))?;
+    let CrawlPreamble {
+        selection,
+        total_start,
+        repo_path,
+        label_id,
+        crawl_config,
+        db_path,
+        source_metadata,
+        _db_guard,
+        _catalog_guard,
+    } = preamble;
 
-    // Validate catalog path (must be absolute, no ~ or $VAR)
-    let repo_path = validate_config_path("catalog path", &catalog_config.path)?;
-    println!("Repository: {}", repo_path.display());
-    println!("Type: {}", catalog_config.r#type);
-    println!("Commit: {}", commit);
-    println!();
-
-    // Compute label_id (internal storage form)
-    let label_id = LabelId::new(catalog_name, label).map_err(|e| anyhow::anyhow!("{}", e))?;
-
-    // Load repo-specific crawl configuration
-    let crawl_config = load_compiled_crawl_config(&config.paths, Some(&repo_path))?;
-    println!("Loaded crawl configuration for repository");
-
-    // Resolve database path (needed for locks and metadata)
-    let db_path = resolve_database_path(config)?;
-    println!("Database: {}", db_path.display());
-
-    // Acquire locks before any catalog-scoped I/O
-    // Order: DatabaseLockShared first, then CatalogLock
-    let _db_guard = acquire_database_shared(&db_path, &stderr_lock_progress)?;
-    let _catalog_guard = acquire_catalog_lock(&db_path, catalog_name, &stderr_lock_progress)?;
-
-    // Resolve commit to full SHA before constructing the blob source
-    println!("📦 Resolving commit...");
-    let commit_oid = resolve_commit_oid(&repo_path, commit)?;
-    println!("Resolved {} to {}", commit, &commit_oid[..12]);
-    println!();
-
-    // Construct the blob source and metadata
-    let blob_source = CommitBlobSource::new(&repo_path, commit_oid.clone())?;
-    let source_metadata = CrawlSourceMetadata {
-        source_kind: SOURCE_KIND_GIT_COMMIT,
-        source_value: commit_oid,
-    };
+    let blob_source = CommitBlobSource::new(&repo_path, source_metadata.source_value.clone())?;
 
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(run_crawl_async(
@@ -151,7 +92,6 @@ pub fn run_crawl_label(
 }
 
 /// Run crawl for working directory (indexes uncommitted changes)
-#[allow(clippy::too_many_arguments)]
 pub fn run_crawl_working_dir(
     config: &Config,
     catalog_name: &str,
@@ -159,51 +99,27 @@ pub fn run_crawl_working_dir(
     retrieval: Vec<RetrievalMethod>,
     debug: bool,
 ) -> Result<()> {
-    let selection = normalize_retrieval(retrieval);
-    let total_start = std::time::Instant::now();
-    println!("🔍 Starting working directory crawl...");
-    println!("Catalog: {}", catalog_name);
-    println!(
-        "Label: {} {}",
+    let preamble = prepare_crawl_preamble(
+        config,
+        catalog_name,
         label,
-        format_selection_for_display(&selection)
-    );
+        retrieval,
+        CrawlInput::WorkingDir,
+    )?;
 
-    // Get catalog config
-    let catalog_config = config
-        .catalogs
-        .get(catalog_name)
-        .ok_or_else(|| anyhow::anyhow!("Catalog '{}' not found in config", catalog_name))?;
+    let CrawlPreamble {
+        selection,
+        total_start,
+        repo_path,
+        label_id,
+        crawl_config,
+        db_path,
+        source_metadata,
+        _db_guard,
+        _catalog_guard,
+    } = preamble;
 
-    // Validate catalog path (must be absolute, no ~ or $VAR)
-    let repo_path = validate_config_path("catalog path", &catalog_config.path)?;
-    println!("Repository: {}", repo_path.display());
-    println!("Type: {}", catalog_config.r#type);
-    println!("Source: working directory (uncommitted changes)");
-    println!();
-
-    // Compute label_id (internal storage form)
-    let label_id = LabelId::new(catalog_name, label).map_err(|e| anyhow::anyhow!("{}", e))?;
-
-    // Load repo-specific crawl configuration
-    let crawl_config = load_compiled_crawl_config(&config.paths, Some(&repo_path))?;
-    println!("Loaded crawl configuration for repository");
-
-    // Resolve database path (needed for locks and metadata)
-    let db_path = resolve_database_path(config)?;
-    println!("Database: {}", db_path.display());
-
-    // Acquire locks before any catalog-scoped I/O
-    // Order: DatabaseLockShared first, then CatalogLock
-    let _db_guard = acquire_database_shared(&db_path, &stderr_lock_progress)?;
-    let _catalog_guard = acquire_catalog_lock(&db_path, catalog_name, &stderr_lock_progress)?;
-
-    // Construct the blob source and metadata
     let blob_source = WorkingDirBlobSource::new(repo_path.clone());
-    let source_metadata = CrawlSourceMetadata {
-        source_kind: SOURCE_KIND_WORKING_DIRECTORY,
-        source_value: crate::engine::make_working_dir_source_sentinel(),
-    };
 
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(run_crawl_async(
