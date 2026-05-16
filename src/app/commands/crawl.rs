@@ -225,11 +225,11 @@ pub fn run_crawl_working_dir(
 /// Run the post-chunking phases: embed/upload, label cleanup, and FTS indexing.
 ///
 /// This helper owns the chunk-write phase, the label-reassignment phase, and the FTS phase.
-/// It uses `?` for short-circuiting, which automatically enforces the error priority
-/// order: vector > reassignment > FTS. A chunk-write failure returns before label
-/// cleanup or FTS can run.
+/// It early-returns on the first phase error, which automatically enforces the error
+/// priority order: vector > reassignment > FTS. A chunk-write failure returns before
+/// label cleanup or FTS can run.
 ///
-/// Phase outcomes are written to `phase_results` and `report` before any `?` return,
+/// Phase outcomes are written to `phase_results` and `report` before any early return,
 /// so partial state survives for the caller's metadata update.
 #[allow(clippy::too_many_arguments)]
 async fn run_post_chunking_phases(
@@ -279,7 +279,9 @@ async fn run_post_chunking_phases(
     };
 
     // Mark vector phase as succeeded if it was in selection
-    phase_results.vector_succeeded = Some(!pipeline_failures.has_failures());
+    if vector_in_selection {
+        phase_results.vector_succeeded = Some(!pipeline_failures.has_failures());
+    }
 
     // Track report fields
     report.pipeline_failures_total = pipeline_failures.total();
