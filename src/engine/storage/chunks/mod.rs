@@ -7,6 +7,7 @@
 //! Do not edit here for: Row types (see rows.rs), label metadata operations (see labels.rs),
 //!   database open logic (see database.rs).
 
+use super::arrow;
 use anyhow::{Result, anyhow};
 use arrow_array::{
     Array, ArrayRef, BooleanArray, FixedSizeListArray, Float32Array, Int32Array, ListArray,
@@ -57,233 +58,170 @@ enum VectorPolicy<'a> {
     Without,
 }
 
-/// Convert an iterator of ChunkRows with their vectors to a RecordBatch.
+/// Convert a slice of ChunkRows to a RecordBatch with configurable vector handling.
 ///
-/// This is the primary function for writing chunks during crawl, where we have
-/// both the row data and the computed embedding vectors.
-fn chunk_rows_to_record_batch_with_vectors<'a>(
-    rows: impl IntoIterator<Item = (&'a ChunkRow, &'a [f32])>,
+/// This is the unified function for building RecordBatch from ChunkRows,
+/// handling both vector and non-vector upserts.
+fn chunk_rows_to_record_batch(
+    rows: &[ChunkRow],
+    vectors: VectorPolicy<'_>,
     schema: SchemaRef,
 ) -> Result<RecordBatch> {
-    let rows: Vec<(&ChunkRow, &[f32])> = rows.into_iter().collect();
-    let n = rows.len();
-
-    let row_id: StringArray = rows.iter().map(|(r, _)| Some(r.row_id.as_str())).collect();
-    let text: StringArray = rows.iter().map(|(r, _)| Some(r.text.as_str())).collect();
-
-    // Vector column with actual embedding values
-    let vector_field = Field::new("item", DataType::Float32, true);
-    let mut all_vector_values: Vec<f32> = Vec::with_capacity(VECTOR_DIMENSION * n);
-    for (_, vector) in &rows {
-        if vector.len() != VECTOR_DIMENSION {
-            return Err(anyhow!(
-                "Vector dimension mismatch: expected {}, got {}",
-                VECTOR_DIMENSION,
-                vector.len()
-            ));
-        }
-        all_vector_values.extend_from_slice(vector);
-    }
-    let vector_values: Float32Array = all_vector_values.into();
-    let vector: ArrayRef = Arc::new(FixedSizeListArray::new(
-        Arc::new(vector_field),
-        VECTOR_DIMENSION as i32,
-        Arc::new(vector_values),
-        None,
-    ));
-
-    let catalog: StringArray = rows.iter().map(|(r, _)| Some(r.catalog.as_str())).collect();
-
-    // active_label_ids: List<Utf8>
-    let active_label_ids = build_string_list_array(
-        &rows
-            .iter()
-            .map(|(r, _)| r.active_label_ids.as_slice())
-            .collect::<Vec<_>>(),
-    );
-
-    let embedder_id: StringArray = rows
-        .iter()
-        .map(|(r, _)| Some(r.embedder_id.as_str()))
-        .collect();
-    let chunker_id: StringArray = rows
-        .iter()
-        .map(|(r, _)| Some(r.chunker_id.as_str()))
-        .collect();
-    let blob_id: StringArray = rows.iter().map(|(r, _)| Some(r.blob_id.as_str())).collect();
-    let content_hash: StringArray = rows
-        .iter()
-        .map(|(r, _)| Some(r.content_hash.as_str()))
-        .collect();
-    let file_id: StringArray = rows.iter().map(|(r, _)| Some(r.file_id.as_str())).collect();
-    let relative_path: StringArray = rows
-        .iter()
-        .map(|(r, _)| Some(r.relative_path.as_str()))
-        .collect();
-    let package_name: StringArray = rows
-        .iter()
-        .map(|(r, _)| Some(r.package_name.as_str()))
-        .collect();
-    let source_uri: StringArray = rows
-        .iter()
-        .map(|(r, _)| Some(r.source_uri.as_str()))
-        .collect();
-
-    let chunk_ordinal: Int32Array = rows.iter().map(|(r, _)| Some(r.chunk_ordinal)).collect();
-    let chunk_count: Int32Array = rows.iter().map(|(r, _)| Some(r.chunk_count)).collect();
-    let start_line: Int32Array = rows.iter().map(|(r, _)| Some(r.start_line)).collect();
-    let end_line: Int32Array = rows.iter().map(|(r, _)| Some(r.end_line)).collect();
-
-    // Nullable string fields
-    let symbol_name: StringArray = rows.iter().map(|(r, _)| r.symbol_name.as_deref()).collect();
-    let chunk_type: StringArray = rows
-        .iter()
-        .map(|(r, _)| Some(r.chunk_type.as_str()))
-        .collect();
-    let chunk_kind: StringArray = rows
-        .iter()
-        .map(|(r, _)| Some(r.chunk_kind.as_str()))
-        .collect();
-    let breadcrumb: StringArray = rows.iter().map(|(r, _)| r.breadcrumb.as_deref()).collect();
-
-    // Nullable int fields
-    let split_part_ordinal: Int32Array = rows.iter().map(|(r, _)| r.split_part_ordinal).collect();
-    let split_part_count: Int32Array = rows.iter().map(|(r, _)| r.split_part_count).collect();
-
-    let file_complete: BooleanArray = rows.iter().map(|(r, _)| Some(r.file_complete)).collect();
-
-    let columns: Vec<ArrayRef> = vec![
-        Arc::new(row_id),
-        Arc::new(text),
-        vector,
-        Arc::new(catalog),
-        active_label_ids,
-        Arc::new(embedder_id),
-        Arc::new(chunker_id),
-        Arc::new(blob_id),
-        Arc::new(content_hash),
-        Arc::new(file_id),
-        Arc::new(relative_path),
-        Arc::new(package_name),
-        Arc::new(source_uri),
-        Arc::new(chunk_ordinal),
-        Arc::new(chunk_count),
-        Arc::new(start_line),
-        Arc::new(end_line),
-        Arc::new(symbol_name),
-        Arc::new(chunk_type),
-        Arc::new(chunk_kind),
-        Arc::new(breadcrumb),
-        Arc::new(split_part_ordinal),
-        Arc::new(split_part_count),
-        Arc::new(file_complete),
-    ];
-
-    RecordBatch::try_new(schema, columns)
-        .map_err(|e| anyhow!("Failed to create RecordBatch: {}", e))
-}
-
-/// Convert an iterator of ChunkRows without vectors to a RecordBatch.
-///
-/// This is used for FTS-only crawls where we don't have embedding vectors.
-/// The vector column is omitted entirely, which preserves existing vectors
-/// on matched rows (LanceDB's merge_insert only updates columns present in
-/// the source batch).
-fn chunk_rows_to_record_batch_without_vectors<'a>(
-    rows: impl IntoIterator<Item = &'a ChunkRow>,
-    schema: SchemaRef,
-) -> Result<RecordBatch> {
-    let rows: Vec<&ChunkRow> = rows.into_iter().collect();
-
     let row_id: StringArray = rows.iter().map(|r| Some(r.row_id.as_str())).collect();
     let text: StringArray = rows.iter().map(|r| Some(r.text.as_str())).collect();
 
-    let catalog: StringArray = rows.iter().map(|r| Some(r.catalog.as_str())).collect();
-
-    // active_label_ids: List<Utf8>
-    let active_label_ids = build_string_list_array(
-        &rows
-            .iter()
-            .map(|r| r.active_label_ids.as_slice())
-            .collect::<Vec<_>>(),
-    );
-
-    let embedder_id: StringArray = rows.iter().map(|r| Some(r.embedder_id.as_str())).collect();
-    let chunker_id: StringArray = rows.iter().map(|r| Some(r.chunker_id.as_str())).collect();
-    let blob_id: StringArray = rows.iter().map(|r| Some(r.blob_id.as_str())).collect();
-    let content_hash: StringArray = rows.iter().map(|r| Some(r.content_hash.as_str())).collect();
-    let file_id: StringArray = rows.iter().map(|r| Some(r.file_id.as_str())).collect();
-    let relative_path: StringArray = rows
-        .iter()
-        .map(|r| Some(r.relative_path.as_str()))
-        .collect();
-    let package_name: StringArray = rows.iter().map(|r| Some(r.package_name.as_str())).collect();
-    let source_uri: StringArray = rows.iter().map(|r| Some(r.source_uri.as_str())).collect();
-
-    let chunk_ordinal: Int32Array = rows.iter().map(|r| Some(r.chunk_ordinal)).collect();
-    let chunk_count: Int32Array = rows.iter().map(|r| Some(r.chunk_count)).collect();
-    let start_line: Int32Array = rows.iter().map(|r| Some(r.start_line)).collect();
-    let end_line: Int32Array = rows.iter().map(|r| Some(r.end_line)).collect();
-
-    // Nullable string fields
-    let symbol_name: StringArray = rows.iter().map(|r| r.symbol_name.as_deref()).collect();
-    let chunk_type: StringArray = rows.iter().map(|r| Some(r.chunk_type.as_str())).collect();
-    let chunk_kind: StringArray = rows.iter().map(|r| Some(r.chunk_kind.as_str())).collect();
-    let breadcrumb: StringArray = rows.iter().map(|r| r.breadcrumb.as_deref()).collect();
-
-    // Nullable int fields
-    let split_part_ordinal: Int32Array = rows.iter().map(|r| r.split_part_ordinal).collect();
-    let split_part_count: Int32Array = rows.iter().map(|r| r.split_part_count).collect();
-
-    let file_complete: BooleanArray = rows.iter().map(|r| Some(r.file_complete)).collect();
-
-    // Note: vector column is intentionally omitted to preserve existing vectors.
-    // We project the schema to exclude the vector column rather than creating
-    // a new schema from scratch, to ensure field metadata matches.
-    let columns: Vec<ArrayRef> = vec![
+    // Build common columns (everything except vector). The vector column, if present,
+    // will be inserted at position 2 (between text and catalog).
+    let mut columns: Vec<ArrayRef> = vec![
         Arc::new(row_id),
         Arc::new(text),
-        // vector column omitted - this is the key difference
-        Arc::new(catalog),
-        active_label_ids,
-        Arc::new(embedder_id),
-        Arc::new(chunker_id),
-        Arc::new(blob_id),
-        Arc::new(content_hash),
-        Arc::new(file_id),
-        Arc::new(relative_path),
-        Arc::new(package_name),
-        Arc::new(source_uri),
-        Arc::new(chunk_ordinal),
-        Arc::new(chunk_count),
-        Arc::new(start_line),
-        Arc::new(end_line),
-        Arc::new(symbol_name),
-        Arc::new(chunk_type),
-        Arc::new(chunk_kind),
-        Arc::new(breadcrumb),
-        Arc::new(split_part_ordinal),
-        Arc::new(split_part_count),
-        Arc::new(file_complete),
+        // vector column placeholder - inserted at position 2 for VectorPolicy::With
+        Arc::new(build_string_array(rows.iter().map(|r| r.catalog.as_str()))),
+        build_string_list_array(
+            &rows
+                .iter()
+                .map(|r| r.active_label_ids.as_slice())
+                .collect::<Vec<_>>(),
+        ),
+        Arc::new(build_string_array(
+            rows.iter().map(|r| r.embedder_id.as_str()),
+        )),
+        Arc::new(build_string_array(
+            rows.iter().map(|r| r.chunker_id.as_str()),
+        )),
+        Arc::new(build_string_array(rows.iter().map(|r| r.blob_id.as_str()))),
+        Arc::new(build_string_array(
+            rows.iter().map(|r| r.content_hash.as_str()),
+        )),
+        Arc::new(build_string_array(rows.iter().map(|r| r.file_id.as_str()))),
+        Arc::new(build_string_array(
+            rows.iter().map(|r| r.relative_path.as_str()),
+        )),
+        Arc::new(build_string_array(
+            rows.iter().map(|r| r.package_name.as_str()),
+        )),
+        Arc::new(build_string_array(
+            rows.iter().map(|r| r.source_uri.as_str()),
+        )),
+        Arc::new(
+            rows.iter()
+                .map(|r| Some(r.chunk_ordinal))
+                .collect::<Int32Array>(),
+        ),
+        Arc::new(
+            rows.iter()
+                .map(|r| Some(r.chunk_count))
+                .collect::<Int32Array>(),
+        ),
+        Arc::new(
+            rows.iter()
+                .map(|r| Some(r.start_line))
+                .collect::<Int32Array>(),
+        ),
+        Arc::new(
+            rows.iter()
+                .map(|r| Some(r.end_line))
+                .collect::<Int32Array>(),
+        ),
+        Arc::new(
+            rows.iter()
+                .map(|r| r.symbol_name.as_deref())
+                .collect::<StringArray>(),
+        ),
+        Arc::new(build_string_array(
+            rows.iter().map(|r| r.chunk_type.as_str()),
+        )),
+        Arc::new(build_string_array(
+            rows.iter().map(|r| r.chunk_kind.as_str()),
+        )),
+        Arc::new(
+            rows.iter()
+                .map(|r| r.breadcrumb.as_deref())
+                .collect::<StringArray>(),
+        ),
+        Arc::new(
+            rows.iter()
+                .map(|r| r.split_part_ordinal)
+                .collect::<Int32Array>(),
+        ),
+        Arc::new(
+            rows.iter()
+                .map(|r| r.split_part_count)
+                .collect::<Int32Array>(),
+        ),
+        Arc::new(
+            rows.iter()
+                .map(|r| Some(r.file_complete))
+                .collect::<BooleanArray>(),
+        ),
     ];
 
-    // Project the schema to exclude the vector column
-    let schema_without_vector: SchemaRef = Arc::new(
-        schema
-            .project(
-                &schema
-                    .fields()
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, f)| f.name() != "vector")
-                    .map(|(i, _)| i)
-                    .collect::<Vec<_>>(),
-            )
-            .map_err(|e| anyhow!("Failed to project schema: {}", e))?,
-    );
+    // Vector column handling depends on policy
+    let final_schema = match vectors {
+        VectorPolicy::With(all_vectors) => {
+            // Validate vectors match rows count
+            if all_vectors.len() != rows.len() {
+                return Err(anyhow!(
+                    "Rows and vectors count mismatch: {} vs {}",
+                    rows.len(),
+                    all_vectors.len()
+                ));
+            }
 
-    RecordBatch::try_new(schema_without_vector, columns)
+            // Validate each vector's dimension
+            for vector in all_vectors {
+                if vector.len() != VECTOR_DIMENSION {
+                    return Err(anyhow!(
+                        "Vector dimension mismatch: expected {}, got {}",
+                        VECTOR_DIMENSION,
+                        vector.len()
+                    ));
+                }
+            }
+
+            // Build vector column
+            let mut all_vector_values: Vec<f32> = Vec::with_capacity(VECTOR_DIMENSION * rows.len());
+            for vector in all_vectors {
+                all_vector_values.extend_from_slice(vector);
+            }
+            let vector_values: Float32Array = all_vector_values.into();
+            let vector_field = Field::new("item", DataType::Float32, true);
+            let vector: ArrayRef = Arc::new(FixedSizeListArray::new(
+                Arc::new(vector_field),
+                VECTOR_DIMENSION as i32,
+                Arc::new(vector_values),
+                None,
+            ));
+
+            // Insert vector at position 2 (between text and catalog)
+            columns.insert(2, vector);
+            schema
+        }
+        VectorPolicy::Without => {
+            // Project the schema to exclude the vector column
+            Arc::new(
+                schema
+                    .project(
+                        &schema
+                            .fields()
+                            .iter()
+                            .enumerate()
+                            .filter(|(_, f)| f.name() != "vector")
+                            .map(|(i, _)| i)
+                            .collect::<Vec<_>>(),
+                    )
+                    .map_err(|e| anyhow!("Failed to project schema: {}", e))?,
+            )
+        }
+    };
+
+    RecordBatch::try_new(final_schema, columns)
         .map_err(|e| anyhow!("Failed to create RecordBatch: {}", e))
+}
+
+/// Build a StringArray from an iterator of &str values (all non-null).
+fn build_string_array<'a>(values: impl Iterator<Item = &'a str>) -> StringArray {
+    values.map(Some).collect()
 }
 
 /// Build a List<Utf8> array from a slice of string slices.
@@ -317,239 +255,31 @@ fn build_string_list_array(values: &[&[String]]) -> ArrayRef {
 ///
 /// Validates all identifier fields.
 fn parse_chunk_row(batch: &RecordBatch, row_idx: usize) -> Result<ChunkRow> {
-    let row_id = batch
-        .column_by_name("row_id")
-        .ok_or_else(|| anyhow!("row_id column not found"))?
-        .as_any()
-        .downcast_ref::<StringArray>()
-        .ok_or_else(|| anyhow!("row_id column is not a StringArray"))?
-        .value(row_idx)
-        .to_string();
-
-    let text = batch
-        .column_by_name("text")
-        .ok_or_else(|| anyhow!("text column not found"))?
-        .as_any()
-        .downcast_ref::<StringArray>()
-        .ok_or_else(|| anyhow!("text column is not a StringArray"))?
-        .value(row_idx)
-        .to_string();
-
     // "vector" is intentionally not read here; ChunkRow does not carry the embedding.
 
-    let catalog = batch
-        .column_by_name("catalog")
-        .ok_or_else(|| anyhow!("catalog column not found"))?
-        .as_any()
-        .downcast_ref::<StringArray>()
-        .ok_or_else(|| anyhow!("catalog column is not a StringArray"))?
-        .value(row_idx)
-        .to_string();
-
-    let active_label_ids = {
-        let list_array = batch
-            .column_by_name("active_label_ids")
-            .ok_or_else(|| anyhow!("active_label_ids column not found"))?
-            .as_any()
-            .downcast_ref::<ListArray>()
-            .ok_or_else(|| anyhow!("active_label_ids column is not a ListArray"))?;
-        let list_value = list_array.value(row_idx);
-        let string_array = list_value
-            .as_any()
-            .downcast_ref::<StringArray>()
-            .ok_or_else(|| anyhow!("active_label_ids inner array is not a StringArray"))?;
-        (0..string_array.len())
-            .map(|i| string_array.value(i).to_string())
-            .collect()
-    };
-
-    let embedder_id = batch
-        .column_by_name("embedder_id")
-        .ok_or_else(|| anyhow!("embedder_id column not found"))?
-        .as_any()
-        .downcast_ref::<StringArray>()
-        .ok_or_else(|| anyhow!("embedder_id column is not a StringArray"))?
-        .value(row_idx)
-        .to_string();
-
-    let chunker_id = batch
-        .column_by_name("chunker_id")
-        .ok_or_else(|| anyhow!("chunker_id column not found"))?
-        .as_any()
-        .downcast_ref::<StringArray>()
-        .ok_or_else(|| anyhow!("chunker_id column is not a StringArray"))?
-        .value(row_idx)
-        .to_string();
-
-    let blob_id = batch
-        .column_by_name("blob_id")
-        .ok_or_else(|| anyhow!("blob_id column not found"))?
-        .as_any()
-        .downcast_ref::<StringArray>()
-        .ok_or_else(|| anyhow!("blob_id column is not a StringArray"))?
-        .value(row_idx)
-        .to_string();
-
-    let content_hash = batch
-        .column_by_name("content_hash")
-        .ok_or_else(|| anyhow!("content_hash column not found"))?
-        .as_any()
-        .downcast_ref::<StringArray>()
-        .ok_or_else(|| anyhow!("content_hash column is not a StringArray"))?
-        .value(row_idx)
-        .to_string();
-
-    let file_id = batch
-        .column_by_name("file_id")
-        .ok_or_else(|| anyhow!("file_id column not found"))?
-        .as_any()
-        .downcast_ref::<StringArray>()
-        .ok_or_else(|| anyhow!("file_id column is not a StringArray"))?
-        .value(row_idx)
-        .to_string();
-
-    let relative_path = batch
-        .column_by_name("relative_path")
-        .ok_or_else(|| anyhow!("relative_path column not found"))?
-        .as_any()
-        .downcast_ref::<StringArray>()
-        .ok_or_else(|| anyhow!("relative_path column is not a StringArray"))?
-        .value(row_idx)
-        .to_string();
-
-    let package_name = batch
-        .column_by_name("package_name")
-        .ok_or_else(|| anyhow!("package_name column not found"))?
-        .as_any()
-        .downcast_ref::<StringArray>()
-        .ok_or_else(|| anyhow!("package_name column is not a StringArray"))?
-        .value(row_idx)
-        .to_string();
-
-    let source_uri = batch
-        .column_by_name("source_uri")
-        .ok_or_else(|| anyhow!("source_uri column not found"))?
-        .as_any()
-        .downcast_ref::<StringArray>()
-        .ok_or_else(|| anyhow!("source_uri column is not a StringArray"))?
-        .value(row_idx)
-        .to_string();
-
-    let chunk_ordinal = batch
-        .column_by_name("chunk_ordinal")
-        .ok_or_else(|| anyhow!("chunk_ordinal column not found"))?
-        .as_any()
-        .downcast_ref::<Int32Array>()
-        .ok_or_else(|| anyhow!("chunk_ordinal column is not an Int32Array"))?
-        .value(row_idx);
-
-    let chunk_count = batch
-        .column_by_name("chunk_count")
-        .ok_or_else(|| anyhow!("chunk_count column not found"))?
-        .as_any()
-        .downcast_ref::<Int32Array>()
-        .ok_or_else(|| anyhow!("chunk_count column is not an Int32Array"))?
-        .value(row_idx);
-
-    let start_line = batch
-        .column_by_name("start_line")
-        .ok_or_else(|| anyhow!("start_line column not found"))?
-        .as_any()
-        .downcast_ref::<Int32Array>()
-        .ok_or_else(|| anyhow!("start_line column is not an Int32Array"))?
-        .value(row_idx);
-
-    let end_line = batch
-        .column_by_name("end_line")
-        .ok_or_else(|| anyhow!("end_line column not found"))?
-        .as_any()
-        .downcast_ref::<Int32Array>()
-        .ok_or_else(|| anyhow!("end_line column is not an Int32Array"))?
-        .value(row_idx);
-
-    // Nullable string fields
-    let symbol_name = {
-        let arr = batch
-            .column_by_name("symbol_name")
-            .ok_or_else(|| anyhow!("symbol_name column not found"))?
-            .as_any()
-            .downcast_ref::<StringArray>()
-            .ok_or_else(|| anyhow!("symbol_name column is not a StringArray"))?;
-        if arr.is_null(row_idx) {
-            None
-        } else {
-            Some(arr.value(row_idx).to_string())
-        }
-    };
-
-    let chunk_type = batch
-        .column_by_name("chunk_type")
-        .ok_or_else(|| anyhow!("chunk_type column not found"))?
-        .as_any()
-        .downcast_ref::<StringArray>()
-        .ok_or_else(|| anyhow!("chunk_type column is not a StringArray"))?
-        .value(row_idx)
-        .to_string();
-
-    let chunk_kind = batch
-        .column_by_name("chunk_kind")
-        .ok_or_else(|| anyhow!("chunk_kind column not found"))?
-        .as_any()
-        .downcast_ref::<StringArray>()
-        .ok_or_else(|| anyhow!("chunk_kind column is not a StringArray"))?
-        .value(row_idx)
-        .to_string();
-
-    let breadcrumb = {
-        let arr = batch
-            .column_by_name("breadcrumb")
-            .ok_or_else(|| anyhow!("breadcrumb column not found"))?
-            .as_any()
-            .downcast_ref::<StringArray>()
-            .ok_or_else(|| anyhow!("breadcrumb column is not a StringArray"))?;
-        if arr.is_null(row_idx) {
-            None
-        } else {
-            Some(arr.value(row_idx).to_string())
-        }
-    };
-
-    // Nullable int fields
-    let split_part_ordinal = {
-        let arr = batch
-            .column_by_name("split_part_ordinal")
-            .ok_or_else(|| anyhow!("split_part_ordinal column not found"))?
-            .as_any()
-            .downcast_ref::<Int32Array>()
-            .ok_or_else(|| anyhow!("split_part_ordinal column is not an Int32Array"))?;
-        if arr.is_null(row_idx) {
-            None
-        } else {
-            Some(arr.value(row_idx))
-        }
-    };
-
-    let split_part_count = {
-        let arr = batch
-            .column_by_name("split_part_count")
-            .ok_or_else(|| anyhow!("split_part_count column not found"))?
-            .as_any()
-            .downcast_ref::<Int32Array>()
-            .ok_or_else(|| anyhow!("split_part_count column is not an Int32Array"))?;
-        if arr.is_null(row_idx) {
-            None
-        } else {
-            Some(arr.value(row_idx))
-        }
-    };
-
-    let file_complete = batch
-        .column_by_name("file_complete")
-        .ok_or_else(|| anyhow!("file_complete column not found"))?
-        .as_any()
-        .downcast_ref::<BooleanArray>()
-        .ok_or_else(|| anyhow!("file_complete column is not a BooleanArray"))?
-        .value(row_idx);
+    let row_id = arrow::read_required_string(batch, row_idx, "row_id")?;
+    let text = arrow::read_required_string(batch, row_idx, "text")?;
+    let catalog = arrow::read_required_string(batch, row_idx, "catalog")?;
+    let active_label_ids = arrow::read_string_list(batch, row_idx, "active_label_ids")?;
+    let embedder_id = arrow::read_required_string(batch, row_idx, "embedder_id")?;
+    let chunker_id = arrow::read_required_string(batch, row_idx, "chunker_id")?;
+    let blob_id = arrow::read_required_string(batch, row_idx, "blob_id")?;
+    let content_hash = arrow::read_required_string(batch, row_idx, "content_hash")?;
+    let file_id = arrow::read_required_string(batch, row_idx, "file_id")?;
+    let relative_path = arrow::read_required_string(batch, row_idx, "relative_path")?;
+    let package_name = arrow::read_required_string(batch, row_idx, "package_name")?;
+    let source_uri = arrow::read_required_string(batch, row_idx, "source_uri")?;
+    let chunk_ordinal = arrow::read_required_i32(batch, row_idx, "chunk_ordinal")?;
+    let chunk_count = arrow::read_required_i32(batch, row_idx, "chunk_count")?;
+    let start_line = arrow::read_required_i32(batch, row_idx, "start_line")?;
+    let end_line = arrow::read_required_i32(batch, row_idx, "end_line")?;
+    let symbol_name = arrow::read_nullable_string(batch, row_idx, "symbol_name")?;
+    let chunk_type = arrow::read_required_string(batch, row_idx, "chunk_type")?;
+    let chunk_kind = arrow::read_required_string(batch, row_idx, "chunk_kind")?;
+    let breadcrumb = arrow::read_nullable_string(batch, row_idx, "breadcrumb")?;
+    let split_part_ordinal = arrow::read_nullable_i32(batch, row_idx, "split_part_ordinal")?;
+    let split_part_count = arrow::read_nullable_i32(batch, row_idx, "split_part_count")?;
+    let file_complete = arrow::read_required_bool(batch, row_idx, "file_complete")?;
 
     let row = ChunkRow {
         row_id,
@@ -681,7 +411,7 @@ impl ChunkStorage {
             row.validate()?;
         }
 
-        self.upsert_chunks_inner(rows, VectorPolicy::With(vectors))
+        self.upsert_chunks_inner(rows, VectorPolicy::With(vectors), None)
             .await
     }
 
@@ -714,7 +444,8 @@ impl ChunkStorage {
             row.validate()?;
         }
 
-        self.upsert_chunks_inner(rows, VectorPolicy::Without).await
+        self.upsert_chunks_inner(rows, VectorPolicy::Without, None)
+            .await
     }
 
     /// Upsert chunks without vectors with progress reporting.
@@ -756,41 +487,12 @@ impl ChunkStorage {
             row.validate()?;
         }
 
-        let total_rows = rows.len();
         let total_sentinels = sentinel_row_ids.len();
 
         // Phase A: Upsert chunks without vectors
         if !rows.is_empty() {
-            let schema = self.table.schema().await?;
-
-            for batch_start in (0..rows.len()).step_by(UPSERT_BATCH_SIZE) {
-                let batch_end = std::cmp::min(batch_start + UPSERT_BATCH_SIZE, rows.len());
-                let batch_rows = &rows[batch_start..batch_end];
-
-                // Fetch existing rows for this batch to preserve active_label_ids
-                let batch_row_ids: Vec<&str> =
-                    batch_rows.iter().map(|r| r.row_id.as_str()).collect();
-                let existing_rows = self.get_by_row_ids_inner(&batch_row_ids).await?;
-                let merged_rows = merge_active_label_ids(batch_rows, &existing_rows);
-
-                let batch =
-                    chunk_rows_to_record_batch_without_vectors(merged_rows.iter(), schema.clone())?;
-
-                let batch_schema = batch.schema();
-                let reader = RecordBatchIterator::new(std::iter::once(Ok(batch)), batch_schema);
-                let mut builder = self.table.merge_insert(&["row_id"]);
-                builder
-                    .when_matched_update_all(None)
-                    .when_not_matched_insert_all();
-                builder.execute(Box::new(reader)).await?;
-
-                on_progress(StorageProgressEvent {
-                    phase: "Upserting chunks",
-                    completed: batch_end,
-                    total: total_rows,
-                    unit: "chunks",
-                });
-            }
+            self.upsert_chunks_inner(rows, VectorPolicy::Without, Some(&on_progress))
+                .await?;
         }
 
         // Phase B: Mark file sentinels as complete
@@ -830,6 +532,7 @@ impl ChunkStorage {
         &self,
         rows: &[ChunkRow],
         vectors: VectorPolicy<'_>,
+        on_progress: Option<&(dyn Fn(StorageProgressEvent) + Send + Sync)>,
     ) -> Result<()> {
         let schema = self.table.schema().await?;
 
@@ -847,17 +550,14 @@ impl ChunkStorage {
             let batch = match &vectors {
                 VectorPolicy::With(all_vectors) => {
                     let batch_vectors = &all_vectors[batch_start..batch_end];
-                    let rows_with_vectors: Vec<(&ChunkRow, &[f32])> = merged_rows
-                        .iter()
-                        .zip(batch_vectors.iter().map(|v| v.as_slice()))
-                        .collect();
-                    chunk_rows_to_record_batch_with_vectors(
-                        rows_with_vectors.into_iter(),
+                    chunk_rows_to_record_batch(
+                        &merged_rows,
+                        VectorPolicy::With(batch_vectors),
                         schema.clone(),
                     )?
                 }
                 VectorPolicy::Without => {
-                    chunk_rows_to_record_batch_without_vectors(merged_rows.iter(), schema.clone())?
+                    chunk_rows_to_record_batch(&merged_rows, VectorPolicy::Without, schema.clone())?
                 }
             };
 
@@ -869,6 +569,16 @@ impl ChunkStorage {
                 .when_matched_update_all(None)
                 .when_not_matched_insert_all();
             builder.execute(Box::new(reader)).await?;
+
+            // Report progress if callback provided
+            if let Some(cb) = on_progress {
+                cb(StorageProgressEvent {
+                    phase: "Upserting chunks",
+                    completed: batch_end,
+                    total: rows.len(),
+                    unit: "chunks",
+                });
+            }
         }
 
         Ok(())
@@ -937,28 +647,10 @@ impl ChunkStorage {
         }
 
         let predicate = in_quoted_strs("row_id", row_ids);
-
-        let results = self
-            .table
-            .query()
-            .only_if(&predicate)
-            .execute()
-            .await
-            .map_err(|e| anyhow!("Failed to query chunks by row_ids: {}", e))?;
-
-        let batches = results
-            .try_collect::<Vec<_>>()
-            .await
-            .map_err(|e| anyhow!("Failed to collect query results: {}", e))?;
-
-        let mut rows: Vec<ChunkRow> = Vec::new();
-        for batch in &batches {
-            for i in 0..batch.num_rows() {
-                rows.push(parse_chunk_row(batch, i)?);
-            }
-        }
-
-        Ok(rows)
+        arrow::collect_rows(&self.table, &predicate, "chunks by row_ids", |batch, i| {
+            parse_chunk_row(batch, i)
+        })
+        .await
     }
 
     /// Look up a single chunk by row_id.
@@ -966,28 +658,10 @@ impl ChunkStorage {
     /// Returns None if the chunk doesn't exist.
     pub async fn get_by_row_id(&self, row_id: &str) -> Result<Option<ChunkRow>> {
         let predicate = eq_str("row_id", row_id);
-
-        let results = self
-            .table
-            .query()
-            .only_if(&predicate)
-            .execute()
-            .await
-            .map_err(|e| anyhow!("Failed to query chunk by row_id: {}", e))?;
-
-        let batches = results
-            .try_collect::<Vec<_>>()
-            .await
-            .map_err(|e| anyhow!("Failed to collect query results: {}", e))?;
-
-        for batch in &batches {
-            if batch.num_rows() > 0 {
-                let row = parse_chunk_row(batch, 0)?;
-                return Ok(Some(row));
-            }
-        }
-
-        Ok(None)
+        arrow::collect_first_row(&self.table, &predicate, "chunk by row_id", |batch, i| {
+            parse_chunk_row(batch, i)
+        })
+        .await
     }
 
     /// Return all chunks for a given file_id where active_label_ids contains
@@ -1005,25 +679,11 @@ impl ChunkStorage {
             array_contains_str("active_label_ids", label_id)
         );
 
-        let results = self
-            .table
-            .query()
-            .only_if(&predicate)
-            .execute()
-            .await
-            .map_err(|e| anyhow!("Failed to query chunks by file_id: {}", e))?;
-
-        let batches = results
-            .try_collect::<Vec<_>>()
-            .await
-            .map_err(|e| anyhow!("Failed to collect query results: {}", e))?;
-
-        let mut rows: Vec<ChunkRow> = Vec::new();
-        for batch in &batches {
-            for i in 0..batch.num_rows() {
-                rows.push(parse_chunk_row(batch, i)?);
-            }
-        }
+        let mut rows =
+            arrow::collect_rows(&self.table, &predicate, "chunks by file_id", |batch, i| {
+                parse_chunk_row(batch, i)
+            })
+            .await?;
 
         // Sort by chunk_ordinal
         rows.sort_by_key(|r| r.chunk_ordinal);
@@ -1038,25 +698,11 @@ impl ChunkStorage {
     pub async fn get_chunks_by_file_id(&self, file_id: &str) -> Result<Vec<ChunkRow>> {
         let predicate = eq_str("file_id", file_id);
 
-        let results = self
-            .table
-            .query()
-            .only_if(&predicate)
-            .execute()
-            .await
-            .map_err(|e| anyhow!("Failed to query chunks by file_id: {}", e))?;
-
-        let batches = results
-            .try_collect::<Vec<_>>()
-            .await
-            .map_err(|e| anyhow!("Failed to collect query results: {}", e))?;
-
-        let mut rows: Vec<ChunkRow> = Vec::new();
-        for batch in &batches {
-            for i in 0..batch.num_rows() {
-                rows.push(parse_chunk_row(batch, i)?);
-            }
-        }
+        let mut rows =
+            arrow::collect_rows(&self.table, &predicate, "chunks by file_id", |batch, i| {
+                parse_chunk_row(batch, i)
+            })
+            .await?;
 
         // Sort by chunk_ordinal
         rows.sort_by_key(|r| r.chunk_ordinal);
@@ -1123,27 +769,10 @@ impl ChunkStorage {
             None => array_contains_str("active_label_ids", label_id),
         };
 
-        let results = self
-            .table
-            .query()
-            .only_if(&predicate)
-            .execute()
-            .await
-            .map_err(|e| anyhow!("Failed to query chunks for label: {}", e))?;
-
-        let batches = results
-            .try_collect::<Vec<_>>()
-            .await
-            .map_err(|e| anyhow!("Failed to collect query results: {}", e))?;
-
-        let mut rows: Vec<ChunkRow> = Vec::new();
-        for batch in &batches {
-            for i in 0..batch.num_rows() {
-                rows.push(parse_chunk_row(batch, i)?);
-            }
-        }
-
-        Ok(rows)
+        arrow::collect_rows(&self.table, &predicate, "chunks for label", |batch, i| {
+            parse_chunk_row(batch, i)
+        })
+        .await
     }
 
     /// Get chunks by a list of row_ids for a specific label.
@@ -1174,27 +803,10 @@ impl ChunkStorage {
             in_quoted_strs("row_id", &vals)
         );
 
-        let results = self
-            .table
-            .query()
-            .only_if(&predicate)
-            .execute()
-            .await
-            .map_err(|e| anyhow!("Failed to query chunks by row_ids: {}", e))?;
-
-        let batches = results
-            .try_collect::<Vec<_>>()
-            .await
-            .map_err(|e| anyhow!("Failed to collect query results: {}", e))?;
-
-        let mut rows: Vec<ChunkRow> = Vec::new();
-        for batch in &batches {
-            for i in 0..batch.num_rows() {
-                rows.push(parse_chunk_row(batch, i)?);
-            }
-        }
-
-        Ok(rows)
+        arrow::collect_rows(&self.table, &predicate, "chunks by row_ids", |batch, i| {
+            parse_chunk_row(batch, i)
+        })
+        .await
     }
 
     /// Update the active_label_ids array of a single chunk.

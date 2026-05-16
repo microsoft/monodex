@@ -2,13 +2,12 @@
 //! Edit here when: Adding/modifying label metadata storage operations.
 //! Do not edit here for: Row types (see rows.rs), chunk operations (see chunks/mod.rs), database open logic (see database.rs).
 
+use super::arrow;
 use anyhow::{Result, anyhow};
 use arrow_array::{
-    Array, ArrayRef, BooleanArray, Int64Array, RecordBatch, RecordBatchIterator, StringArray,
+    ArrayRef, BooleanArray, Int64Array, RecordBatch, RecordBatchIterator, StringArray,
 };
 use arrow_schema::SchemaRef;
-use futures::TryStreamExt;
-use lancedb::query::{ExecutableQuery, QueryBase};
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -56,83 +55,15 @@ fn label_metadata_rows_to_record_batch<'a>(
 ///
 /// Validates all identifier fields.
 fn parse_label_metadata_row(batch: &RecordBatch, row_idx: usize) -> Result<LabelMetadataRow> {
-    let label_id = batch
-        .column_by_name("label_id")
-        .ok_or_else(|| anyhow!("label_id column not found"))?
-        .as_any()
-        .downcast_ref::<StringArray>()
-        .ok_or_else(|| anyhow!("label_id column is not a StringArray"))?
-        .value(row_idx)
-        .to_string();
-
-    let catalog = batch
-        .column_by_name("catalog")
-        .ok_or_else(|| anyhow!("catalog column not found"))?
-        .as_any()
-        .downcast_ref::<StringArray>()
-        .ok_or_else(|| anyhow!("catalog column is not a StringArray"))?
-        .value(row_idx)
-        .to_string();
-
-    let label = batch
-        .column_by_name("label")
-        .ok_or_else(|| anyhow!("label column not found"))?
-        .as_any()
-        .downcast_ref::<StringArray>()
-        .ok_or_else(|| anyhow!("label column is not a StringArray"))?
-        .value(row_idx)
-        .to_string();
-
-    let source_kind = batch
-        .column_by_name("source_kind")
-        .ok_or_else(|| anyhow!("source_kind column not found"))?
-        .as_any()
-        .downcast_ref::<StringArray>()
-        .ok_or_else(|| anyhow!("source_kind column is not a StringArray"))?
-        .value(row_idx)
-        .to_string();
-
-    // Helper to read nullable string column
-    let read_nullable_string = |col_name: &str| -> Result<Option<String>> {
-        let col = batch
-            .column_by_name(col_name)
-            .ok_or_else(|| anyhow!("{} column not found", col_name))?
-            .as_any()
-            .downcast_ref::<StringArray>()
-            .ok_or_else(|| anyhow!("{} column is not a StringArray", col_name))?;
-        if col.is_null(row_idx) {
-            Ok(None)
-        } else {
-            Ok(Some(col.value(row_idx).to_string()))
-        }
-    };
-
-    let vector_source = read_nullable_string("vector_source")?;
-    let fts_source = read_nullable_string("fts_source")?;
-
-    let vector_complete = batch
-        .column_by_name("vector_complete")
-        .ok_or_else(|| anyhow!("vector_complete column not found"))?
-        .as_any()
-        .downcast_ref::<BooleanArray>()
-        .ok_or_else(|| anyhow!("vector_complete column is not a BooleanArray"))?
-        .value(row_idx);
-
-    let fts_complete = batch
-        .column_by_name("fts_complete")
-        .ok_or_else(|| anyhow!("fts_complete column not found"))?
-        .as_any()
-        .downcast_ref::<BooleanArray>()
-        .ok_or_else(|| anyhow!("fts_complete column is not a BooleanArray"))?
-        .value(row_idx);
-
-    let updated_at_unix_secs = batch
-        .column_by_name("updated_at_unix_secs")
-        .ok_or_else(|| anyhow!("updated_at_unix_secs column not found"))?
-        .as_any()
-        .downcast_ref::<Int64Array>()
-        .ok_or_else(|| anyhow!("updated_at_unix_secs column is not an Int64Array"))?
-        .value(row_idx);
+    let label_id = arrow::read_required_string(batch, row_idx, "label_id")?;
+    let catalog = arrow::read_required_string(batch, row_idx, "catalog")?;
+    let label = arrow::read_required_string(batch, row_idx, "label")?;
+    let source_kind = arrow::read_required_string(batch, row_idx, "source_kind")?;
+    let vector_source = arrow::read_nullable_string(batch, row_idx, "vector_source")?;
+    let fts_source = arrow::read_nullable_string(batch, row_idx, "fts_source")?;
+    let vector_complete = arrow::read_required_bool(batch, row_idx, "vector_complete")?;
+    let fts_complete = arrow::read_required_bool(batch, row_idx, "fts_complete")?;
+    let updated_at_unix_secs = arrow::read_required_i64(batch, row_idx, "updated_at_unix_secs")?;
 
     let row = LabelMetadataRow {
         label_id,
@@ -204,28 +135,10 @@ impl LabelStorage {
     /// Returns None if the label doesn't exist.
     pub async fn get_by_label_id(&self, label_id: &str) -> Result<Option<LabelMetadataRow>> {
         let predicate = eq_str("label_id", label_id);
-
-        let results = self
-            .table
-            .query()
-            .only_if(&predicate)
-            .execute()
-            .await
-            .map_err(|e| anyhow!("Failed to query label metadata: {}", e))?;
-
-        let batches = results
-            .try_collect::<Vec<_>>()
-            .await
-            .map_err(|e| anyhow!("Failed to collect query results: {}", e))?;
-
-        for batch in &batches {
-            if batch.num_rows() > 0 {
-                let row = parse_label_metadata_row(batch, 0)?;
-                return Ok(Some(row));
-            }
-        }
-
-        Ok(None)
+        arrow::collect_first_row(&self.table, &predicate, "label metadata", |batch, i| {
+            parse_label_metadata_row(batch, i)
+        })
+        .await
     }
 
     /// List all label metadata rows for a given catalog.
@@ -233,28 +146,13 @@ impl LabelStorage {
     /// Used by label-reassignment discovery.
     pub async fn list_for_catalog(&self, catalog: &str) -> Result<Vec<LabelMetadataRow>> {
         let predicate = eq_str("catalog", catalog);
-
-        let results = self
-            .table
-            .query()
-            .only_if(&predicate)
-            .execute()
-            .await
-            .map_err(|e| anyhow!("Failed to list label metadata for catalog: {}", e))?;
-
-        let batches = results
-            .try_collect::<Vec<_>>()
-            .await
-            .map_err(|e| anyhow!("Failed to collect query results: {}", e))?;
-
-        let mut rows: Vec<LabelMetadataRow> = Vec::new();
-        for batch in &batches {
-            for i in 0..batch.num_rows() {
-                rows.push(parse_label_metadata_row(batch, i)?);
-            }
-        }
-
-        Ok(rows)
+        arrow::collect_rows(
+            &self.table,
+            &predicate,
+            "label metadata for catalog",
+            parse_label_metadata_row,
+        )
+        .await
     }
 
     /// Delete a single label metadata row by label_id.
