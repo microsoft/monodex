@@ -22,7 +22,7 @@ pub fn resolve_commit_oid(repo_path: &Path, commit: &str) -> Result<String> {
     Ok(commit_id.to_hex().to_string())
 }
 
-pub fn enumerate_commit_tree(repo: &gix::Repository, commit: &str) -> Result<Vec<FileEntry>> {
+fn walk_commit_tree(repo: &gix::Repository, commit: &str) -> Result<Recorder> {
     let commit_id: ObjectId = repo
         .rev_parse_single(commit)
         .map_err(|e| anyhow!("Failed to resolve commit '{}': {}", commit, e))?
@@ -58,6 +58,11 @@ pub fn enumerate_commit_tree(repo: &gix::Repository, commit: &str) -> Result<Vec
     )
     .map_err(|e| anyhow!("Failed to traverse tree: {}", e))?;
 
+    Ok(recorder)
+}
+
+pub fn enumerate_commit_tree(repo: &gix::Repository, commit: &str) -> Result<Vec<FileEntry>> {
+    let recorder = walk_commit_tree(repo, commit)?;
     Ok(recorder
         .records
         .into_iter()
@@ -86,40 +91,7 @@ pub fn build_package_index_for_commit(
     repo: &gix::Repository,
     commit: &str,
 ) -> Result<PackageIndex> {
-    let commit_id: ObjectId = repo
-        .rev_parse_single(commit)
-        .map_err(|e| anyhow!("Failed to resolve commit '{}': {}", commit, e))?
-        .detach();
-
-    let commit_obj = repo
-        .find_object(commit_id)
-        .map_err(|e| anyhow!("Failed to find commit object: {}", e))?;
-
-    let tree_id: ObjectId = {
-        let commit = commit_obj
-            .try_into_commit()
-            .map_err(|_| anyhow!("'{}' is not a commit", commit))?;
-        commit
-            .tree_id()
-            .map_err(|e| anyhow!("Failed to get tree ID: {}", e))?
-            .detach()
-    };
-
-    let tree_data = {
-        let tree_obj = repo
-            .find_object(tree_id)
-            .map_err(|e| anyhow!("Failed to find tree object: {}", e))?;
-        tree_obj.data.clone()
-    };
-
-    let mut recorder = Recorder::default();
-    gix::traverse::tree::breadthfirst(
-        TreeRefIter::from_bytes(&tree_data),
-        &mut gix::traverse::tree::breadthfirst::State::default(),
-        repo.objects.clone(),
-        &mut recorder,
-    )
-    .map_err(|e| anyhow!("Failed to traverse tree: {}", e))?;
+    let recorder = walk_commit_tree(repo, commit)?;
 
     let package_json_entries: Vec<(String, ObjectId)> = recorder
         .records
