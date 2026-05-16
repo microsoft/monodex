@@ -56,62 +56,65 @@ pub fn next_progress_action(elapsed: Duration, last_emit: Option<Duration>) -> P
 // RAII Guard Types
 // ============================================================================
 
+/// Inner RAII guard that owns the file handle and the single Drop impl.
+struct FileLockGuard {
+    file: File,
+}
+
+impl Drop for FileLockGuard {
+    fn drop(&mut self) {
+        let _ = self.file.unlock();
+    }
+}
+
 /// RAII guard for a shared database lock.
 ///
 /// Holds the file handle and releases the lock on drop.
-pub struct DatabaseLockShared {
-    _file: File,
-}
-
-impl Drop for DatabaseLockShared {
-    fn drop(&mut self) {
-        // fs4 unlocks on drop automatically, but we call unlock explicitly for clarity
-        let _ = self._file.unlock();
-    }
-}
+pub struct DatabaseLockShared(FileLockGuard);
 
 /// RAII guard for an exclusive database lock.
 ///
 /// Holds the file handle and releases the lock on drop.
-pub struct DatabaseLockExclusive {
-    _file: File,
-}
-
-impl Drop for DatabaseLockExclusive {
-    fn drop(&mut self) {
-        let _ = self._file.unlock();
-    }
-}
+pub struct DatabaseLockExclusive(FileLockGuard);
 
 /// RAII guard for a catalog lock.
 ///
 /// Holds the file handle and releases the lock on drop.
-pub struct CatalogLock {
-    _file: File,
-}
-
-impl Drop for CatalogLock {
-    fn drop(&mut self) {
-        let _ = self._file.unlock();
-    }
-}
+pub struct CatalogLock(FileLockGuard);
 
 /// RAII guard for the commit mutex.
 ///
 /// Holds the file handle and releases the lock on drop.
-pub struct CommitMutex {
-    _file: File,
-}
-
-impl Drop for CommitMutex {
-    fn drop(&mut self) {
-        let _ = self._file.unlock();
-    }
-}
+pub struct CommitMutex(FileLockGuard);
 
 // ============================================================================
 // Acquisition Functions
 // ============================================================================
+
+/// Lock mode for internal acquisition.
+enum LockMode {
+    Shared,
+    Exclusive,
+}
+
+/// Internal helper that owns lockfile-open + shared/exclusive acquisition.
+fn acquire_file_lock(lockfile_path: &Path, mode: LockMode) -> Result<FileLockGuard> {
+    ensure_lock_dir(lockfile_path)?;
+
+    let file = OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(lockfile_path)?;
+
+    match mode {
+        LockMode::Shared => file.lock_shared()?,
+        LockMode::Exclusive => file.lock_exclusive()?,
+    }
+
+    Ok(FileLockGuard { file })
+}
 
 /// Acquires a shared lock on the database.
 ///
@@ -124,15 +127,7 @@ pub fn acquire_database_shared(
 ) -> Result<DatabaseLockShared> {
     let lockfile_path = db_path.join("locks").join("database.lock");
     run_with_watchdog(progress, db_path, || {
-        ensure_lock_dir(&lockfile_path)?;
-        let file = OpenOptions::new()
-            .create(true)
-            .truncate(false)
-            .read(true)
-            .write(true)
-            .open(&lockfile_path)?;
-        file.lock_shared()?;
-        Ok(DatabaseLockShared { _file: file })
+        acquire_file_lock(&lockfile_path, LockMode::Shared).map(DatabaseLockShared)
     })
 }
 
@@ -147,15 +142,7 @@ pub fn acquire_database_exclusive(
 ) -> Result<DatabaseLockExclusive> {
     let lockfile_path = db_path.join("locks").join("database.lock");
     run_with_watchdog(progress, db_path, || {
-        ensure_lock_dir(&lockfile_path)?;
-        let file = OpenOptions::new()
-            .create(true)
-            .truncate(false)
-            .read(true)
-            .write(true)
-            .open(&lockfile_path)?;
-        file.lock_exclusive()?;
-        Ok(DatabaseLockExclusive { _file: file })
+        acquire_file_lock(&lockfile_path, LockMode::Exclusive).map(DatabaseLockExclusive)
     })
 }
 
@@ -179,15 +166,7 @@ pub fn acquire_catalog_lock(
         .join("per-catalog")
         .join(format!("{}.lock", catalog));
     run_with_watchdog(progress, db_path, || {
-        ensure_lock_dir(&lockfile_path)?;
-        let file = OpenOptions::new()
-            .create(true)
-            .truncate(false)
-            .read(true)
-            .write(true)
-            .open(&lockfile_path)?;
-        file.lock_exclusive()?;
-        Ok(CatalogLock { _file: file })
+        acquire_file_lock(&lockfile_path, LockMode::Exclusive).map(CatalogLock)
     })
 }
 
@@ -197,15 +176,7 @@ pub fn acquire_catalog_lock(
 /// No progress callback; commit-mutex contention is expected to be millisecond-scale.
 pub fn acquire_commit_mutex(db_path: &Path) -> Result<CommitMutex> {
     let lockfile_path = db_path.join("locks").join("commit.lock");
-    ensure_lock_dir(&lockfile_path)?;
-    let file = OpenOptions::new()
-        .create(true)
-        .truncate(false)
-        .read(true)
-        .write(true)
-        .open(&lockfile_path)?;
-    file.lock_exclusive()?;
-    Ok(CommitMutex { _file: file })
+    acquire_file_lock(&lockfile_path, LockMode::Exclusive).map(CommitMutex)
 }
 
 // ============================================================================
