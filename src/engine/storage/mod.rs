@@ -7,6 +7,7 @@
 //!   or modifying the database open/validate logic.
 //! Do not edit here for: Chunking logic (see engine/partitioner/), CLI handlers (see app/commands/).
 
+mod arrow;
 mod chunks;
 mod database;
 mod labels;
