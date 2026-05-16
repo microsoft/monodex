@@ -70,8 +70,94 @@ fn chunk_rows_to_record_batch(
     let row_id: StringArray = rows.iter().map(|r| Some(r.row_id.as_str())).collect();
     let text: StringArray = rows.iter().map(|r| Some(r.text.as_str())).collect();
 
+    // Build common columns (everything except vector). The vector column, if present,
+    // will be inserted at position 2 (between text and catalog).
+    let mut columns: Vec<ArrayRef> = vec![
+        Arc::new(row_id),
+        Arc::new(text),
+        // vector column placeholder - inserted at position 2 for VectorPolicy::With
+        Arc::new(build_string_array(rows.iter().map(|r| r.catalog.as_str()))),
+        build_string_list_array(
+            &rows
+                .iter()
+                .map(|r| r.active_label_ids.as_slice())
+                .collect::<Vec<_>>(),
+        ),
+        Arc::new(build_string_array(
+            rows.iter().map(|r| r.embedder_id.as_str()),
+        )),
+        Arc::new(build_string_array(
+            rows.iter().map(|r| r.chunker_id.as_str()),
+        )),
+        Arc::new(build_string_array(rows.iter().map(|r| r.blob_id.as_str()))),
+        Arc::new(build_string_array(
+            rows.iter().map(|r| r.content_hash.as_str()),
+        )),
+        Arc::new(build_string_array(rows.iter().map(|r| r.file_id.as_str()))),
+        Arc::new(build_string_array(
+            rows.iter().map(|r| r.relative_path.as_str()),
+        )),
+        Arc::new(build_string_array(
+            rows.iter().map(|r| r.package_name.as_str()),
+        )),
+        Arc::new(build_string_array(
+            rows.iter().map(|r| r.source_uri.as_str()),
+        )),
+        Arc::new(
+            rows.iter()
+                .map(|r| Some(r.chunk_ordinal))
+                .collect::<Int32Array>(),
+        ),
+        Arc::new(
+            rows.iter()
+                .map(|r| Some(r.chunk_count))
+                .collect::<Int32Array>(),
+        ),
+        Arc::new(
+            rows.iter()
+                .map(|r| Some(r.start_line))
+                .collect::<Int32Array>(),
+        ),
+        Arc::new(
+            rows.iter()
+                .map(|r| Some(r.end_line))
+                .collect::<Int32Array>(),
+        ),
+        Arc::new(
+            rows.iter()
+                .map(|r| r.symbol_name.as_deref())
+                .collect::<StringArray>(),
+        ),
+        Arc::new(build_string_array(
+            rows.iter().map(|r| r.chunk_type.as_str()),
+        )),
+        Arc::new(build_string_array(
+            rows.iter().map(|r| r.chunk_kind.as_str()),
+        )),
+        Arc::new(
+            rows.iter()
+                .map(|r| r.breadcrumb.as_deref())
+                .collect::<StringArray>(),
+        ),
+        Arc::new(
+            rows.iter()
+                .map(|r| r.split_part_ordinal)
+                .collect::<Int32Array>(),
+        ),
+        Arc::new(
+            rows.iter()
+                .map(|r| r.split_part_count)
+                .collect::<Int32Array>(),
+        ),
+        Arc::new(
+            rows.iter()
+                .map(|r| Some(r.file_complete))
+                .collect::<BooleanArray>(),
+        ),
+    ];
+
     // Vector column handling depends on policy
-    let (columns, final_schema) = match vectors {
+    let final_schema = match vectors {
         VectorPolicy::With(all_vectors) => {
             // Validate vectors match rows count
             if all_vectors.len() != rows.len() {
@@ -107,180 +193,13 @@ fn chunk_rows_to_record_batch(
                 None,
             ));
 
-            // Build common columns (same as Without case, but with vector inserted at position 2)
-            let columns: Vec<ArrayRef> = vec![
-                Arc::new(row_id),
-                Arc::new(text),
-                vector,
-                Arc::new(build_string_array(rows.iter().map(|r| r.catalog.as_str()))),
-                build_string_list_array(
-                    &rows
-                        .iter()
-                        .map(|r| r.active_label_ids.as_slice())
-                        .collect::<Vec<_>>(),
-                ),
-                Arc::new(build_string_array(
-                    rows.iter().map(|r| r.embedder_id.as_str()),
-                )),
-                Arc::new(build_string_array(
-                    rows.iter().map(|r| r.chunker_id.as_str()),
-                )),
-                Arc::new(build_string_array(rows.iter().map(|r| r.blob_id.as_str()))),
-                Arc::new(build_string_array(
-                    rows.iter().map(|r| r.content_hash.as_str()),
-                )),
-                Arc::new(build_string_array(rows.iter().map(|r| r.file_id.as_str()))),
-                Arc::new(build_string_array(
-                    rows.iter().map(|r| r.relative_path.as_str()),
-                )),
-                Arc::new(build_string_array(
-                    rows.iter().map(|r| r.package_name.as_str()),
-                )),
-                Arc::new(build_string_array(
-                    rows.iter().map(|r| r.source_uri.as_str()),
-                )),
-                Arc::new(
-                    rows.iter()
-                        .map(|r| Some(r.chunk_ordinal))
-                        .collect::<Int32Array>(),
-                ),
-                Arc::new(
-                    rows.iter()
-                        .map(|r| Some(r.chunk_count))
-                        .collect::<Int32Array>(),
-                ),
-                Arc::new(
-                    rows.iter()
-                        .map(|r| Some(r.start_line))
-                        .collect::<Int32Array>(),
-                ),
-                Arc::new(
-                    rows.iter()
-                        .map(|r| Some(r.end_line))
-                        .collect::<Int32Array>(),
-                ),
-                Arc::new(
-                    rows.iter()
-                        .map(|r| r.symbol_name.as_deref())
-                        .collect::<StringArray>(),
-                ),
-                Arc::new(build_string_array(
-                    rows.iter().map(|r| r.chunk_type.as_str()),
-                )),
-                Arc::new(build_string_array(
-                    rows.iter().map(|r| r.chunk_kind.as_str()),
-                )),
-                Arc::new(
-                    rows.iter()
-                        .map(|r| r.breadcrumb.as_deref())
-                        .collect::<StringArray>(),
-                ),
-                Arc::new(
-                    rows.iter()
-                        .map(|r| r.split_part_ordinal)
-                        .collect::<Int32Array>(),
-                ),
-                Arc::new(
-                    rows.iter()
-                        .map(|r| r.split_part_count)
-                        .collect::<Int32Array>(),
-                ),
-                Arc::new(
-                    rows.iter()
-                        .map(|r| Some(r.file_complete))
-                        .collect::<BooleanArray>(),
-                ),
-            ];
-            (columns, schema)
+            // Insert vector at position 2 (between text and catalog)
+            columns.insert(2, vector);
+            schema
         }
         VectorPolicy::Without => {
-            // Build columns without vector
-            let columns: Vec<ArrayRef> = vec![
-                Arc::new(row_id),
-                Arc::new(text),
-                // vector column omitted - this preserves existing vectors on matched rows
-                Arc::new(build_string_array(rows.iter().map(|r| r.catalog.as_str()))),
-                build_string_list_array(
-                    &rows
-                        .iter()
-                        .map(|r| r.active_label_ids.as_slice())
-                        .collect::<Vec<_>>(),
-                ),
-                Arc::new(build_string_array(
-                    rows.iter().map(|r| r.embedder_id.as_str()),
-                )),
-                Arc::new(build_string_array(
-                    rows.iter().map(|r| r.chunker_id.as_str()),
-                )),
-                Arc::new(build_string_array(rows.iter().map(|r| r.blob_id.as_str()))),
-                Arc::new(build_string_array(
-                    rows.iter().map(|r| r.content_hash.as_str()),
-                )),
-                Arc::new(build_string_array(rows.iter().map(|r| r.file_id.as_str()))),
-                Arc::new(build_string_array(
-                    rows.iter().map(|r| r.relative_path.as_str()),
-                )),
-                Arc::new(build_string_array(
-                    rows.iter().map(|r| r.package_name.as_str()),
-                )),
-                Arc::new(build_string_array(
-                    rows.iter().map(|r| r.source_uri.as_str()),
-                )),
-                Arc::new(
-                    rows.iter()
-                        .map(|r| Some(r.chunk_ordinal))
-                        .collect::<Int32Array>(),
-                ),
-                Arc::new(
-                    rows.iter()
-                        .map(|r| Some(r.chunk_count))
-                        .collect::<Int32Array>(),
-                ),
-                Arc::new(
-                    rows.iter()
-                        .map(|r| Some(r.start_line))
-                        .collect::<Int32Array>(),
-                ),
-                Arc::new(
-                    rows.iter()
-                        .map(|r| Some(r.end_line))
-                        .collect::<Int32Array>(),
-                ),
-                Arc::new(
-                    rows.iter()
-                        .map(|r| r.symbol_name.as_deref())
-                        .collect::<StringArray>(),
-                ),
-                Arc::new(build_string_array(
-                    rows.iter().map(|r| r.chunk_type.as_str()),
-                )),
-                Arc::new(build_string_array(
-                    rows.iter().map(|r| r.chunk_kind.as_str()),
-                )),
-                Arc::new(
-                    rows.iter()
-                        .map(|r| r.breadcrumb.as_deref())
-                        .collect::<StringArray>(),
-                ),
-                Arc::new(
-                    rows.iter()
-                        .map(|r| r.split_part_ordinal)
-                        .collect::<Int32Array>(),
-                ),
-                Arc::new(
-                    rows.iter()
-                        .map(|r| r.split_part_count)
-                        .collect::<Int32Array>(),
-                ),
-                Arc::new(
-                    rows.iter()
-                        .map(|r| Some(r.file_complete))
-                        .collect::<BooleanArray>(),
-                ),
-            ];
-
             // Project the schema to exclude the vector column
-            let schema_without_vector: SchemaRef = Arc::new(
+            Arc::new(
                 schema
                     .project(
                         &schema
@@ -292,8 +211,7 @@ fn chunk_rows_to_record_batch(
                             .collect::<Vec<_>>(),
                     )
                     .map_err(|e| anyhow!("Failed to project schema: {}", e))?,
-            );
-            (columns, schema_without_vector)
+            )
         }
     };
 
