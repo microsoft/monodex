@@ -19,6 +19,100 @@ use crate::engine::storage::{
 };
 
 // ============================================================================
+// Existing database state enum
+// ============================================================================
+
+/// Represents the state of an existing database directory.
+///
+/// Used by `read_existing_database_state` to classify what's on disk,
+/// then consumed by `check_existing_database_pre_lock` and `check_existing_database`
+/// which apply different policies to some states.
+enum ExistingDatabaseState {
+    /// Path does not exist.
+    Missing,
+    /// Path exists and contains only lockfile/locks/fts detritus.
+    EmptyDirectory,
+    /// Meta file and both table directories exist; schema version matches.
+    Complete(MetaFile),
+    /// Meta file is missing, but at least one table directory exists.
+    /// Pre-lock: tolerate (concurrent init may be in progress).
+    /// Under-lock: bail (partial state is corruption).
+    TablesWithoutMeta,
+    /// Meta file exists but at least one table directory is missing.
+    /// Always a bail at both call sites today.
+    MetaWithoutTables,
+    /// Meta file's recorded schema version does not match the current binary's.
+    IncompatibleSchema { recorded: u32, current: u32 },
+    /// Meta file is unreadable / corrupt.
+    CorruptMeta,
+    /// Path exists, not empty, no meta file, no table directories.
+    NonMonodexDirectory,
+}
+
+/// Read and classify the state of an existing database directory.
+///
+/// This function is infallible - it returns a state classification,
+/// not a Result. Callers decide what policy to apply to each state.
+fn read_existing_database_state(db_path: &Path) -> ExistingDatabaseState {
+    if !db_path.exists() {
+        return ExistingDatabaseState::Missing;
+    }
+
+    let meta_path = db_path.join(META_FILE);
+    let chunks_path = db_path.join(format!("{}.lance", CHUNKS_TABLE));
+    let labels_path = db_path.join(format!("{}.lance", LABEL_METADATA_TABLE));
+
+    if meta_path.exists() {
+        // Try to load meta file
+        let meta = match Database::load_meta(&meta_path) {
+            Ok(m) => m,
+            Err(_) => return ExistingDatabaseState::CorruptMeta,
+        };
+
+        // Check schema version
+        if meta.monodex_schema_version != crate::engine::schema::MONODEX_SCHEMA_VERSION {
+            return ExistingDatabaseState::IncompatibleSchema {
+                recorded: meta.monodex_schema_version,
+                current: crate::engine::schema::MONODEX_SCHEMA_VERSION,
+            };
+        }
+
+        // Check that table directories exist
+        if !chunks_path.exists() || !labels_path.exists() {
+            return ExistingDatabaseState::MetaWithoutTables;
+        }
+
+        ExistingDatabaseState::Complete(meta)
+    } else {
+        // No meta file - check for partial state (tables exist but no meta)
+        if chunks_path.exists() || labels_path.exists() {
+            return ExistingDatabaseState::TablesWithoutMeta;
+        }
+
+        // Check if directory is empty (ignoring lockfile, locks/, and fts/ detritus)
+        let is_empty = db_path
+            .read_dir()
+            .map(|mut entries| {
+                entries.all(|e| {
+                    e.ok()
+                        .map(|e| {
+                            let name = e.file_name();
+                            name == ".monodex.lock" || name == "locks" || name == "fts"
+                        })
+                        .unwrap_or(false)
+                })
+            })
+            .unwrap_or(false);
+
+        if is_empty {
+            ExistingDatabaseState::EmptyDirectory
+        } else {
+            ExistingDatabaseState::NonMonodexDirectory
+        }
+    }
+}
+
+// ============================================================================
 // Error message helpers
 // These produce load-bearing user-facing strings. Tests assert exact matches.
 // ============================================================================
@@ -179,68 +273,17 @@ pub fn run_init_db(config: &Config, delete_everything: bool) -> Result<()> {
 /// process might be mid-init. The caller should acquire the exclusive lock and recheck with
 /// the strict `check_existing_database`.
 fn check_existing_database_pre_lock(db_path: &Path) -> Result<Option<MetaFile>> {
-    if !db_path.exists() {
-        return Ok(None);
-    }
-
-    // Check if it's a valid monodex database
-    let meta_path = db_path.join(META_FILE);
-    let chunks_path = db_path.join(format!("{}.lance", CHUNKS_TABLE));
-    let labels_path = db_path.join(format!("{}.lance", LABEL_METADATA_TABLE));
-
-    if meta_path.exists() {
-        // Try to load meta file
-        let meta = match Database::load_meta(&meta_path) {
-            Ok(m) => m,
-            Err(_) => {
-                // Corrupted meta file - terminal error
-                bail!(err_partial_state(db_path));
-            }
-        };
-
-        // Check schema version
-        if meta.monodex_schema_version != crate::engine::schema::MONODEX_SCHEMA_VERSION {
-            bail!(err_schema_mismatch(
-                meta.monodex_schema_version,
-                crate::engine::schema::MONODEX_SCHEMA_VERSION
-            ));
+    match read_existing_database_state(db_path) {
+        ExistingDatabaseState::Missing => Ok(None),
+        ExistingDatabaseState::EmptyDirectory => Ok(None),
+        ExistingDatabaseState::Complete(meta) => Ok(Some(meta)),
+        ExistingDatabaseState::TablesWithoutMeta => Ok(None),
+        ExistingDatabaseState::MetaWithoutTables => bail!(err_partial_state(db_path)),
+        ExistingDatabaseState::IncompatibleSchema { recorded, current } => {
+            bail!(err_schema_mismatch(recorded, current))
         }
-
-        // Check that table directories exist
-        if !chunks_path.exists() || !labels_path.exists() {
-            bail!(err_partial_state(db_path));
-        }
-
-        Ok(Some(meta))
-    } else {
-        // Check for partial state (tables exist but no meta)
-        // Pre-lock: this might be a concurrent init in progress, so fall through to lock
-        if chunks_path.exists() || labels_path.exists() {
-            return Ok(None);
-        }
-
-        // Check if directory is empty (ignoring lockfile, locks/, and fts/ detritus)
-        let is_empty = db_path
-            .read_dir()
-            .map(|mut entries| {
-                entries.all(|e| {
-                    e.ok()
-                        .map(|e| {
-                            let name = e.file_name();
-                            name == ".monodex.lock" || name == "locks" || name == "fts"
-                        })
-                        .unwrap_or(false)
-                })
-            })
-            .unwrap_or(false);
-
-        if is_empty {
-            // Empty directory (or only lockfile/locks/fts), treat as non-existent
-            Ok(None)
-        } else {
-            // Non-empty without meta file or tables
-            bail!(err_not_monodex_db(db_path));
-        }
+        ExistingDatabaseState::CorruptMeta => bail!(err_partial_state(db_path)),
+        ExistingDatabaseState::NonMonodexDirectory => bail!(err_not_monodex_db(db_path)),
     }
 }
 
@@ -253,67 +296,17 @@ fn check_existing_database_pre_lock(db_path: &Path) -> Result<Option<MetaFile>> 
 /// This is the strict version used after acquiring the exclusive lock. Under the lock,
 /// no other process can be mid-init, so any partial state is a real corruption.
 fn check_existing_database(db_path: &Path) -> Result<Option<MetaFile>> {
-    if !db_path.exists() {
-        return Ok(None);
-    }
-
-    // Check if it's a valid monodex database
-    let meta_path = db_path.join(META_FILE);
-    let chunks_path = db_path.join(format!("{}.lance", CHUNKS_TABLE));
-    let labels_path = db_path.join(format!("{}.lance", LABEL_METADATA_TABLE));
-
-    if meta_path.exists() {
-        // Try to load meta file
-        let meta = match Database::load_meta(&meta_path) {
-            Ok(m) => m,
-            Err(_) => {
-                // Corrupted meta file
-                bail!(err_partial_state(db_path));
-            }
-        };
-
-        // Check schema version
-        if meta.monodex_schema_version != crate::engine::schema::MONODEX_SCHEMA_VERSION {
-            bail!(err_schema_mismatch(
-                meta.monodex_schema_version,
-                crate::engine::schema::MONODEX_SCHEMA_VERSION
-            ));
+    match read_existing_database_state(db_path) {
+        ExistingDatabaseState::Missing => Ok(None),
+        ExistingDatabaseState::EmptyDirectory => Ok(None),
+        ExistingDatabaseState::Complete(meta) => Ok(Some(meta)),
+        ExistingDatabaseState::TablesWithoutMeta => bail!(err_partial_state(db_path)),
+        ExistingDatabaseState::MetaWithoutTables => bail!(err_partial_state(db_path)),
+        ExistingDatabaseState::IncompatibleSchema { recorded, current } => {
+            bail!(err_schema_mismatch(recorded, current))
         }
-
-        // Check that table directories exist
-        if !chunks_path.exists() || !labels_path.exists() {
-            bail!(err_partial_state(db_path));
-        }
-
-        Ok(Some(meta))
-    } else {
-        // Check for partial state (tables exist but no meta)
-        if chunks_path.exists() || labels_path.exists() {
-            bail!(err_partial_state(db_path));
-        }
-
-        // Check if directory is empty (ignoring lockfile, locks/, and fts/ detritus)
-        let is_empty = db_path
-            .read_dir()
-            .map(|mut entries| {
-                entries.all(|e| {
-                    e.ok()
-                        .map(|e| {
-                            let name = e.file_name();
-                            name == ".monodex.lock" || name == "locks" || name == "fts"
-                        })
-                        .unwrap_or(false)
-                })
-            })
-            .unwrap_or(false);
-
-        if is_empty {
-            // Empty directory (or only lockfile/locks/fts), treat as non-existent
-            Ok(None)
-        } else {
-            // Non-empty without meta file or tables
-            bail!(err_not_monodex_db(db_path));
-        }
+        ExistingDatabaseState::CorruptMeta => bail!(err_partial_state(db_path)),
+        ExistingDatabaseState::NonMonodexDirectory => bail!(err_not_monodex_db(db_path)),
     }
 }
 

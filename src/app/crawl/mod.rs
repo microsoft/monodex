@@ -9,6 +9,7 @@
 
 pub mod phases;
 pub mod pipeline;
+pub(crate) mod preamble;
 pub mod types;
 pub mod warning;
 

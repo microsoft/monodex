@@ -592,6 +592,39 @@ pub async fn update_final_metadata(
     Ok(())
 }
 
+fn write_summary_counts(
+    out: &mut impl std::io::Write,
+    total_elapsed: std::time::Duration,
+    new_count: usize,
+    existing_count: usize,
+    existing_success_count: usize,
+) {
+    writeln!(
+        out,
+        "  Total time: {}",
+        format_duration(total_elapsed.as_secs_f64())
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "  New files indexed: {}",
+        format_count(new_count as u64)
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "  Existing files detected: {}",
+        format_count(existing_count as u64)
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "  Existing files updated successfully: {}",
+        format_count(existing_success_count as u64)
+    )
+    .unwrap();
+}
+
 /// Writes the crawl summary to the given writer.
 ///
 /// This is the core implementation that can be used with any `Write` sink.
@@ -614,30 +647,13 @@ pub fn write_summary(
     let total_elapsed = total_start.elapsed();
     if had_failures || cleanup_failed || vector_phase_failed || fts_phase_failed {
         writeln!(out, "⚠️  Crawl completed with errors!").unwrap();
-        writeln!(
-            out,
-            "  Total time: {}",
-            format_duration(total_elapsed.as_secs_f64())
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "  New files indexed: {}",
-            format_count(new_count as u64)
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "  Existing files detected: {}",
-            format_count(existing_count as u64)
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "  Existing files updated successfully: {}",
-            format_count(existing_success_count as u64)
-        )
-        .unwrap();
+        write_summary_counts(
+            &mut out,
+            total_elapsed,
+            new_count,
+            existing_count,
+            existing_success_count,
+        );
         let total_failures = pipeline_failures_count + existing_file_failures_count;
         writeln!(
             out,
@@ -670,30 +686,13 @@ pub fn write_summary(
         .unwrap();
     } else {
         writeln!(out, "✅ Crawl complete!").unwrap();
-        writeln!(
-            out,
-            "  Total time: {}",
-            format_duration(total_elapsed.as_secs_f64())
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "  New files indexed: {}",
-            format_count(new_count as u64)
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "  Existing files detected: {}",
-            format_count(existing_count as u64)
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "  Existing files updated successfully: {}",
-            format_count(existing_success_count as u64)
-        )
-        .unwrap();
+        write_summary_counts(
+            &mut out,
+            total_elapsed,
+            new_count,
+            existing_count,
+            existing_success_count,
+        );
     }
 }
 
