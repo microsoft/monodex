@@ -29,6 +29,8 @@ The thresholds apply when making a non-trivial addition to a file, not when only
 
 **At the split-or-flag threshold:** apply the test below. The result is either a split (the test authorizes one) or a note in the "Out-of-scope notes" footer (the test is inconclusive or no clean split exists).
 
+**Hard ceiling:** no file exceeds 2000 lines total (everything in the file, not the production-only count used above). At this size the file is too large to navigate as one unit regardless of edit intent, so the edit-intent test does not apply and footer-noting is not an option. Raise it as a reorganization signal per "When the local rules don't fit" below.
+
 ### Test before splitting
 
 Name each proposed file and complete this sentence for it:
