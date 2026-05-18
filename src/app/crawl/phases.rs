@@ -592,11 +592,6 @@ pub async fn update_final_metadata(
     Ok(())
 }
 
-/// Writes the crawl summary to the given writer.
-///
-/// This is the core implementation that can be used with any `Write` sink.
-/// The `print_summary` function wraps this with stdout.
-#[allow(clippy::too_many_arguments)]
 fn write_summary_counts(
     out: &mut impl std::io::Write,
     total_elapsed: std::time::Duration,
@@ -630,6 +625,10 @@ fn write_summary_counts(
     .unwrap();
 }
 
+/// Writes the crawl summary to the given writer.
+///
+/// This is the core implementation that can be used with any `Write` sink.
+/// The `print_summary` function wraps this with stdout.
 #[allow(clippy::too_many_arguments)]
 pub fn write_summary(
     mut out: impl std::io::Write,

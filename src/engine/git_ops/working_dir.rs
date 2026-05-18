@@ -297,12 +297,6 @@ fn git_hash_object_batch(repo_root: &Path, paths: &[String]) -> Result<Vec<(Stri
         .collect())
 }
 
-/// Enumerate files from the working directory using Git-aware blob IDs.
-///
-/// Returns all files in Git's working-tree view: tracked files at their current
-/// working-tree contents (including local modifications), plus untracked non-ignored
-/// files. Blob IDs are computed via `git hash-object` so they respect `.gitattributes`,
-/// clean filters, and other repo-specific settings.
 fn for_each_working_tree_entry(repo_path: &Path, mut visit: impl FnMut(&str, &str)) -> Result<()> {
     let blob_map = build_working_tree_blob_map(repo_path)?;
     for (relative_path, blob_id) in &blob_map.blobs_by_path {
@@ -311,6 +305,12 @@ fn for_each_working_tree_entry(repo_path: &Path, mut visit: impl FnMut(&str, &st
     Ok(())
 }
 
+/// Enumerate files from the working directory using Git-aware blob IDs.
+///
+/// Returns all files in Git's working-tree view: tracked files at their current
+/// working-tree contents (including local modifications), plus untracked non-ignored
+/// files. Blob IDs are computed via `git hash-object` so they respect `.gitattributes`,
+/// clean filters, and other repo-specific settings.
 pub fn enumerate_working_directory(repo_path: &Path) -> Result<Vec<FileEntry>> {
     let mut entries = Vec::new();
     for_each_working_tree_entry(repo_path, |relative_path, blob_id| {

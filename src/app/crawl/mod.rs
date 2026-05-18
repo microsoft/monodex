@@ -7,11 +7,11 @@
 //! (see `pipeline.rs`), crawl types (see `types.rs`), warning handling (see `warning.rs`),
 //! or crawl command handlers (see `../commands/crawl.rs`).
 
-pub(crate) mod phases;
-pub(crate) mod pipeline;
+pub mod phases;
+pub mod pipeline;
 pub(crate) mod preamble;
-pub(crate) mod types;
-pub(crate) mod warning;
+pub mod types;
+pub mod warning;
 
 pub use pipeline::{run_embed_upload_pipeline, run_upsert_without_vectors};
 pub use types::{CrawlFailures, PhaseResults};
