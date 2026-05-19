@@ -42,7 +42,6 @@ Name each proposed file and complete this sentence for it:
 The split is valid only if all of the following hold:
 
 - The two answers are different kinds of work, not the same work described two ways. "Predicate construction" and "predicate validation" are the same work. "Predicate primitives" and "label metadata storage" are different work.
-- Neither answer is "helpers", "shared logic", "misc", or "utilities".
 - Each answer names a change visible in existing code, tests, docs, or the current task: not a hypothetical future change.
 
 If any of these fails, do not split. Note the situation in the footer instead.
@@ -88,7 +87,7 @@ This section can be omitted when there is nothing to flag.
 - **New storage operation** → pick the `engine/storage/` submodule by operation family: `database.rs` for connection/open, `chunks/` for chunk operations, `labels.rs` for label metadata. If a family outgrows a single file per the edit-intent test, split it into its own subdirectory (as `chunks/` already shows).
 - **New partitioner heuristic** → `split_search.rs` for split-point logic, `node_analysis.rs` for AST node properties, `scoring.rs` for quality measurement.
 - **New config field** → `app/config.rs` for app-level config, `engine/crawl_config.rs` for crawl filtering rules.
-- **Shared utility** → small generic-utility files are tolerated as a holding pen until their contents grow large or coherent enough to earn a specific name. `app/util.rs` is the current example. When such a file's contents reach a size where one or more focused names would describe them better, split it into those focused names (e.g. as a holding pen grows, "formatting" and "parsing" might emerge as the two real edit intents that earn their own files). Engine-wide helpers similarly go in files named for what they actually hold (`identity.rs` for identity and version-stamp helpers); a future engine-wide holding pen is allowed if needed, but is expected to graduate to focused names over time.
+- **Shared utility** → name it for what it actually holds, narrowest accurate name. Rename when contents change.
 
 ## Module header comments
 
@@ -153,7 +152,7 @@ There is no fixed threshold. The judgment is relative: tag the largest contribut
 
 ## Banned patterns
 
-- No files named `helpers.rs`, `common.rs`, or `misc.rs`.
+- No semantically vapid filenames. `utilities.rs`, `helpers.rs`, `common.rs`, `misc.rs` are free to write and tell the next reader nothing; half the codebase is "utilities" of some sort. The work of naming is finding what the functions actually have in common, and that shared trait is usually a better name: `formatting.rs` if the trait is formatting, `test_mocks.rs` or `test_fixtures.rs` if the trait is test setup. `test_helpers.rs` is acceptable only when no narrower trait is visible. Pick the narrowest accurate name today; rename when contents change.
 - No wildcard re-exports (`pub use submodule::*`). List re-exports explicitly.
 - No putting unrelated items together just because they're small.
 - No structural splits in the same change as feature or fix work. Splits are their own change unless explicitly authorized by the maintainer or the planned reorganization being applied.
