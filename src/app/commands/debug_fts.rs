@@ -11,8 +11,8 @@ use crate::app::chunk_selector::{ChunkSelector, parse_chunk_selector};
 use crate::app::number_format::format_count;
 use crate::app::search::format_source_pointer;
 use crate::app::{Config, resolve_database_path, resolve_label_context};
-use crate::engine::fts::index::FtsIndex;
-use crate::engine::fts::tokenizer::tokenize_text;
+use crate::engine::fts::FtsIndex;
+use crate::engine::fts::tokenize_text;
 use crate::engine::identity::compute_row_id;
 use crate::engine::storage::Database;
 

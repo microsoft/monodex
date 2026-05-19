@@ -156,7 +156,25 @@ There is no fixed threshold. The judgment is relative: tag the largest contribut
 - No wildcard re-exports (`pub use submodule::*`). List re-exports explicitly.
 - No putting unrelated items together just because they're small.
 - No structural splits in the same change as feature or fix work. Splits are their own change unless explicitly authorized by the maintainer or the planned reorganization being applied.
-- No substantive code in `mod.rs`. A `mod.rs` should contain module declarations, explicit re-exports, the module header comment, and small glue (brief dispatch arms, trivial trait impls). Algorithms, command handlers, storage operations, and types beyond a small central type live in named sibling files. The point is that `mod.rs` is the directory's table of contents, not its content; named files are easier to navigate, search, and refer to.
+- No substantive code in `mod.rs`. It's the directory's table of contents (module declarations, explicit re-exports, header), not its content. A small number of simple constants that are part of the directory's public surface is fine; move them out when they grow into an implementation vocabulary with its own edit intent.
+
+## Module organization at the directory level
+
+A directory is an organizational unit: a name that predicts what's inside. The `mod.rs` is the directory's table of contents: module declarations, explicit re-exports, the header. Non-trivial code lives in named sibling files, never in `mod.rs`.
+
+**Cross-directory reach.** Prefer the shortest path through a directory's `mod.rs` re-exports. If an item is reachable only by a deep path that skips `mod.rs`, either it belongs in the directory's surface (add a `pub use` in `mod.rs`) or your use site is reaching past the directory's contract and the design should be reconsidered. Don't introduce a new deep-path use site to an item `mod.rs` already re-exports under a shorter name.
+
+**Visibility keywords.** Items inside files default to `pub`; the directory boundary is what the policy maintains, not item-level discipline. Child `mod` declarations in `mod.rs` are `pub mod` when the child name is part of the intended navigation surface, and plain `mod` when external callers reach items via `mod.rs` re-exports instead. Both are valid: `engine/identifier.rs` is `pub mod` because `identifier` is itself the concept callers reach for; `app/crawl/phases.rs` is `pub mod` because `phases` is an intended decomposition unit, not an implementation detail; `engine/fts/index.rs` is plain `mod` because callers reach its items via `engine::fts::FtsIndex`, already re-exported. An existing `pub mod` is not itself a problem to fix; the trigger for action is a use site that bypasses a shorter path already exposed by `mod.rs`. Narrower keywords (`pub(super)`, `pub(crate)`) are available for sensitive seams but not required.
+
+**File layout.** This project uses `<dir>/mod.rs`, not the `<dir>.rs` + `<dir>/` form Rust 2018 also permits.
+
+A directory with both production files and child subdirectories is fine when its files and the child directory share an edit intent. A directory holding only subdirectories is suspect: either the parent has an unwritten job, or one level of nesting is gratuitous.
+
+Many files in a directory (rough sense: more than ~8) is a signal worth pausing on, not a rule. Apply the edit-intent test to the directory: name the change that would cause this directory to be edited, and check whether all the children answer the same question.
+
+**Creating a new directory.** Two cases. Decomposing a single file into multiple production files: create `mod.rs` from the start, declaring the children and curating the surface. Extracting an inline test block via `#[cfg(test)] mod tests;` in a parent `.rs` file: Rust resolves the tests to `<parent>/tests.rs`, and the directory holds `tests.rs` only, with no `mod.rs`.
+
+If a directory in the second form later acquires a second production child, promote it: convert the parent `.rs` to `<parent>/mod.rs`, move the original contents to a named sibling, keep `tests.rs`.
 
 ## Configuration at the edges
 
