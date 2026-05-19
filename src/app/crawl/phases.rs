@@ -2,14 +2,14 @@
 //!
 //! Purpose: Individual phases of the crawl pipeline, extracted for clarity and maintainability.
 //! Edit here when: Modifying phase logic, adding new phases (e.g., FTS indexing), or changing phase ordering.
-//! Do not edit here for: Crawl orchestration (see ../commands/crawl.rs), embed/upload pipeline (see pipeline.rs).
+//! Do not edit here for: Crawl orchestration (see ../commands/crawl.rs), embed/upload pipeline (see pipeline.rs), startup/preamble output (see preamble.rs), completion/warning summary output (see summary.rs).
 
 use anyhow::Result;
 use std::collections::{BTreeSet, HashSet};
 use std::sync::Arc;
 
 use crate::app::crawl::types::PhaseResults;
-use crate::app::{format_count, format_duration};
+use crate::app::number_format::format_count;
 use crate::engine::{
     TARGET_CHARS,
     chunker::{ChunkContext, chunk_content},
@@ -149,9 +149,9 @@ pub async fn classify_files(
     let mut existing_file_ids: HashSet<String> = HashSet::new();
 
     for file_entry in files {
-        let file_id = crate::engine::util::compute_file_id(
-            crate::engine::util::EMBEDDER_ID,
-            crate::engine::util::CHUNKER_ID,
+        let file_id = crate::engine::identity::compute_file_id(
+            crate::engine::identity::EMBEDDER_ID,
+            crate::engine::identity::CHUNKER_ID,
             catalog_name,
             &file_entry.blob_id,
             &file_entry.relative_path,
@@ -471,7 +471,8 @@ pub async fn run_fts_phase(
     is_commit_mode: bool,
     debug: bool,
 ) -> Result<()> {
-    use crate::app::util::{format_count, format_duration};
+    use crate::app::crawl::progress_format::format_duration;
+    use crate::app::number_format::format_count;
     use std::time::Instant;
 
     println!("🔶 FTS indexing...");
@@ -592,315 +593,12 @@ pub async fn update_final_metadata(
     Ok(())
 }
 
-fn write_summary_counts(
-    out: &mut impl std::io::Write,
-    total_elapsed: std::time::Duration,
-    new_count: usize,
-    existing_count: usize,
-    existing_success_count: usize,
-) {
-    writeln!(
-        out,
-        "  Total time: {}",
-        format_duration(total_elapsed.as_secs_f64())
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "  New files indexed: {}",
-        format_count(new_count as u64)
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "  Existing files detected: {}",
-        format_count(existing_count as u64)
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "  Existing files updated successfully: {}",
-        format_count(existing_success_count as u64)
-    )
-    .unwrap();
-}
-
-/// Writes the crawl summary to the given writer.
-///
-/// This is the core implementation that can be used with any `Write` sink.
-/// The `print_summary` function wraps this with stdout.
-#[allow(clippy::too_many_arguments)]
-pub fn write_summary(
-    mut out: impl std::io::Write,
-    total_start: std::time::Instant,
-    new_count: usize,
-    existing_count: usize,
-    existing_success_count: usize,
-    had_failures: bool,
-    cleanup_failed: bool,
-    existing_file_failures_count: usize,
-    pipeline_failures_count: usize,
-    // Phase failure indicators for the summary
-    vector_phase_failed: bool,
-    fts_phase_failed: bool,
-) {
-    let total_elapsed = total_start.elapsed();
-    if had_failures || cleanup_failed || vector_phase_failed || fts_phase_failed {
-        writeln!(out, "⚠️  Crawl completed with errors!").unwrap();
-        write_summary_counts(
-            &mut out,
-            total_elapsed,
-            new_count,
-            existing_count,
-            existing_success_count,
-        );
-        let total_failures = pipeline_failures_count + existing_file_failures_count;
-        writeln!(
-            out,
-            "  Total failures: {}",
-            format_count(total_failures as u64)
-        )
-        .unwrap();
-        if existing_file_failures_count > 0 {
-            writeln!(
-                out,
-                "  - Existing file label-add failures: {}",
-                format_count(existing_file_failures_count as u64)
-            )
-            .unwrap();
-        }
-        if cleanup_failed {
-            writeln!(out, "  - Label cleanup failed (crawl not marked complete)").unwrap();
-        }
-        if vector_phase_failed {
-            writeln!(out, "  - Vector phase: failed (see error above)").unwrap();
-        }
-        if fts_phase_failed {
-            writeln!(out, "  - FTS phase: failed (see error above)").unwrap();
-        }
-        writeln!(out).unwrap();
-        writeln!(
-            out,
-            "  This crawl is marked as incomplete. Re-run to complete indexing."
-        )
-        .unwrap();
-    } else {
-        writeln!(out, "✅ Crawl complete!").unwrap();
-        write_summary_counts(
-            &mut out,
-            total_elapsed,
-            new_count,
-            existing_count,
-            existing_success_count,
-        );
-    }
-}
-
-/// Prints the crawl summary to stdout.
-///
-/// Wrapper around `write_summary` that writes to stdout.
-#[allow(clippy::too_many_arguments)]
-pub fn print_summary(
-    total_start: std::time::Instant,
-    new_count: usize,
-    existing_count: usize,
-    existing_success_count: usize,
-    had_failures: bool,
-    cleanup_failed: bool,
-    existing_file_failures_count: usize,
-    pipeline_failures_count: usize,
-    vector_phase_failed: bool,
-    fts_phase_failed: bool,
-) {
-    write_summary(
-        std::io::stdout().lock(),
-        total_start,
-        new_count,
-        existing_count,
-        existing_success_count,
-        had_failures,
-        cleanup_failed,
-        existing_file_failures_count,
-        pipeline_failures_count,
-        vector_phase_failed,
-        fts_phase_failed,
-    )
-}
-
-/// Formats the retrieval selection for display in the crawl preamble.
-///
-/// Returns a string like "(fts, vector)", "(fts only)", "(vector only)",
-/// or "(no retrieval methods)" for empty selection.
-pub fn format_selection_for_display(selection: &BTreeSet<RetrievalMethod>) -> String {
-    format!(
-        "({})",
-        crate::engine::retrieval::format_selection(selection)
-    )
-}
-
-/// Prints the selection-narrowing announcement if applicable.
-///
-/// This should be called after the previous label metadata has been read,
-/// which happens after storage is opened. The announcement prints separately
-/// from the main preamble (which prints before storage is open).
-pub fn print_narrowing_announcement(
-    writer: &mut dyn std::io::Write,
-    previous_selection: &BTreeSet<RetrievalMethod>,
-    new_selection: &BTreeSet<RetrievalMethod>,
-) {
-    // Only print if this is a strict narrowing (previous is a strict superset of new)
-    if previous_selection.is_superset(new_selection) && previous_selection != new_selection {
-        let has_fts = new_selection.contains(&RetrievalMethod::Fts);
-        let has_vector = new_selection.contains(&RetrievalMethod::Vector);
-
-        match (has_fts, has_vector) {
-            (true, false) => {
-                writeln!(writer).unwrap();
-                writeln!(
-                    writer,
-                    "👉 This crawl narrows retrieval selection to fts only, no vector."
-                )
-                .unwrap();
-                writeln!(
-                    writer,
-                    "   Any vector data from a previous crawl is preserved and will be reused"
-                )
-                .unwrap();
-                writeln!(writer, "   if you re-add vector to the selection.").unwrap();
-            }
-            (false, true) => {
-                writeln!(writer).unwrap();
-                writeln!(
-                    writer,
-                    "👉 This crawl narrows retrieval selection to vector only, no fts."
-                )
-                .unwrap();
-                writeln!(
-                    writer,
-                    "   Any fts data from a previous crawl is preserved and will be reused"
-                )
-                .unwrap();
-                writeln!(writer, "   if you re-add fts to the selection.").unwrap();
-            }
-            // Empty selection or other narrowing combinations are not expected in practice,
-            // but if they occur, we don't print a misleading message.
-            _ => {}
-        }
-    }
-}
-
-/// Prints the warning summary.
-pub fn print_warning_summary(crawl_warning_files: &HashSet<String>) {
-    if crawl_warning_files.is_empty() {
-        return;
-    }
-    let mut sorted: Vec<&String> = crawl_warning_files.iter().collect();
-    sorted.sort();
-    let plural = if sorted.len() == 1 { "file" } else { "files" };
-    println!();
-    println!(
-        "Chunking warnings in {} {}:",
-        format_count(sorted.len() as u64),
-        plural
-    );
-    for file in sorted.iter().take(20) {
-        println!("  - {}", file);
-    }
-    if sorted.len() > 20 {
-        println!(
-            "  ... and {} more",
-            format_count((sorted.len() - 20) as u64)
-        );
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn make_selection(methods: &[RetrievalMethod]) -> BTreeSet<RetrievalMethod> {
         methods.iter().cloned().collect()
-    }
-
-    #[test]
-    fn test_format_selection_both_methods() {
-        let selection = make_selection(&[RetrievalMethod::Fts, RetrievalMethod::Vector]);
-        assert_eq!(format_selection_for_display(&selection), "(fts, vector)");
-    }
-
-    #[test]
-    fn test_format_selection_fts_only() {
-        let selection = make_selection(&[RetrievalMethod::Fts]);
-        assert_eq!(format_selection_for_display(&selection), "(fts only)");
-    }
-
-    #[test]
-    fn test_format_selection_vector_only() {
-        let selection = make_selection(&[RetrievalMethod::Vector]);
-        assert_eq!(format_selection_for_display(&selection), "(vector only)");
-    }
-
-    #[test]
-    fn test_format_selection_empty() {
-        let selection: BTreeSet<RetrievalMethod> = BTreeSet::new();
-        assert_eq!(
-            format_selection_for_display(&selection),
-            "(no retrieval methods)"
-        );
-    }
-
-    #[test]
-    fn test_narrowing_announcement_fts_only() {
-        // Previous: both methods, New: fts only -> should print narrowing announcement
-        let previous = make_selection(&[RetrievalMethod::Fts, RetrievalMethod::Vector]);
-        let new = make_selection(&[RetrievalMethod::Fts]);
-        let mut output = Vec::new();
-        print_narrowing_announcement(&mut output, &previous, &new);
-        let output = String::from_utf8(output).unwrap();
-        assert!(output.contains("narrows retrieval selection to fts only"));
-        assert!(output.contains("vector data from a previous crawl is preserved"));
-    }
-
-    #[test]
-    fn test_narrowing_announcement_vector_only() {
-        // Previous: both methods, New: vector only -> should print narrowing announcement
-        let previous = make_selection(&[RetrievalMethod::Fts, RetrievalMethod::Vector]);
-        let new = make_selection(&[RetrievalMethod::Vector]);
-        let mut output = Vec::new();
-        print_narrowing_announcement(&mut output, &previous, &new);
-        let output = String::from_utf8(output).unwrap();
-        assert!(output.contains("narrows retrieval selection to vector only"));
-        assert!(output.contains("fts data from a previous crawl is preserved"));
-    }
-
-    #[test]
-    fn test_narrowing_announcement_no_narrowing_same() {
-        // Previous and new are the same -> no announcement
-        let previous = make_selection(&[RetrievalMethod::Fts, RetrievalMethod::Vector]);
-        let new = make_selection(&[RetrievalMethod::Fts, RetrievalMethod::Vector]);
-        let mut output = Vec::new();
-        print_narrowing_announcement(&mut output, &previous, &new);
-        assert!(output.is_empty());
-    }
-
-    #[test]
-    fn test_narrowing_announcement_no_narrowing_widening() {
-        // Previous: fts only, New: both -> widening, not narrowing
-        let previous = make_selection(&[RetrievalMethod::Fts]);
-        let new = make_selection(&[RetrievalMethod::Fts, RetrievalMethod::Vector]);
-        let mut output = Vec::new();
-        print_narrowing_announcement(&mut output, &previous, &new);
-        assert!(output.is_empty());
-    }
-
-    #[test]
-    fn test_narrowing_announcement_first_crawl() {
-        // Previous: empty (first crawl), New: both -> no narrowing announcement
-        let previous: BTreeSet<RetrievalMethod> = BTreeSet::new();
-        let new = make_selection(&[RetrievalMethod::Fts, RetrievalMethod::Vector]);
-        let mut output = Vec::new();
-        print_narrowing_announcement(&mut output, &previous, &new);
-        assert!(output.is_empty());
     }
 
     /// Test that update_final_metadata correctly maps PhaseResults to per-method completion flags.
@@ -1008,43 +706,6 @@ mod tests {
             metadata.fts_source,
             Some("abc123def456".to_string()),
             "fts_source should be set"
-        );
-    }
-
-    /// Test that write_summary includes FTS phase failure in output.
-    ///
-    /// This verifies the FTS-phase failure is mentioned in the summary output.
-    #[test]
-    fn test_summary_includes_fts_phase_failure() {
-        let mut output = Vec::new();
-        let start = std::time::Instant::now();
-
-        write_summary(
-            &mut output,
-            start,
-            10,    // new_count
-            5,     // existing_count
-            5,     // existing_success_count
-            false, // had_failures
-            false, // cleanup_failed
-            0,     // existing_file_failures_count
-            0,     // pipeline_failures_count
-            false, // vector_phase_failed
-            true,  // fts_phase_failed
-        );
-
-        let output_str = String::from_utf8(output).unwrap();
-
-        // Check that the output contains both "FTS" and "failed"
-        assert!(
-            output_str.contains("FTS"),
-            "Summary should mention FTS, got: {}",
-            output_str
-        );
-        assert!(
-            output_str.contains("failed"),
-            "Summary should mention failure, got: {}",
-            output_str
         );
     }
 

@@ -3,7 +3,8 @@
 //! Purpose: Crawl a repository and index chunks into LanceDB.
 //! Edit here when: Modifying crawl entry points, label creation, or storage interactions.
 //! Do not edit here for: Embed/upload pipeline (see ../crawl/pipeline.rs), crawl types (see ../crawl/types.rs),
-//!                       crawl phases (see ../crawl/phases.rs).
+//!                       crawl phases (see ../crawl/phases.rs), shared preamble setup (see ../crawl/preamble.rs),
+//!                       completion/warning summary rendering (see ../crawl/summary.rs).
 
 use anyhow::Result;
 use std::cell::Cell;
@@ -12,11 +13,13 @@ use std::sync::Arc;
 
 use crate::app::crawl::phases::{
     add_label_to_existing_files, build_package_index, chunk_new_files, classify_files,
-    enumerate_files, filter_files, open_storage, print_narrowing_announcement, print_summary,
-    print_warning_summary, run_fts_phase, run_label_cleanup, update_final_metadata,
-    write_in_progress_metadata,
+    enumerate_files, filter_files, open_storage, run_fts_phase, run_label_cleanup,
+    update_final_metadata, write_in_progress_metadata,
 };
-use crate::app::crawl::preamble::{CrawlInput, CrawlPreamble, prepare_crawl_preamble};
+use crate::app::crawl::preamble::{
+    CrawlInput, CrawlPreamble, prepare_crawl_preamble, print_narrowing_announcement,
+};
+use crate::app::crawl::summary::{print_summary, print_warning_summary};
 use crate::app::crawl::types::{CrawlSourceMetadata, PhaseResults};
 use crate::app::crawl::warning::create_warning_sink;
 use crate::app::{Config, run_embed_upload_pipeline, run_upsert_without_vectors};

@@ -1,14 +1,17 @@
-//! Purpose: Public `BlobSource` abstraction over commit and working-directory crawl sources, plus the shared package-index vocabulary.
-//! Edit here when: Changing the `BlobSource` trait, `FileEntry`, `PackageIndex`, the two `BlobSource` impls, or `package.json` name extraction.
-//! Do not edit here for: gix-based commit traversal (see `commit.rs`), subprocess-based working-tree reading (see `working_dir.rs`).
+//! Purpose: Git-aware enumeration and blob reading for crawl sources.
+//! Edit here when: Adding or renaming git_ops submodules, or changing the public surface re-exported from this directory.
+//! Do not edit here for: the `BlobSource` trait or `FileEntry` (see `blob_source.rs`), package-index lookup and extraction (see `package_index.rs`), gix-based commit traversal (see `commit.rs`), subprocess-based working-tree reading (see `working_dir.rs`).
 
 pub mod commit;
 pub mod working_dir;
 
-use anyhow::Result;
-use serde::Deserialize;
-use std::collections::HashMap;
-use std::path::Path;
+mod blob_source;
+mod package_index;
+#[cfg(test)]
+mod tests;
+
+pub use blob_source::{BlobSource, CommitBlobSource, FileEntry, WorkingDirBlobSource};
+pub use package_index::{PackageIndex, extract_package_name_from_bytes};
 
 // Re-export public API from submodules
 pub use self::commit::{
@@ -18,162 +21,3 @@ pub use self::working_dir::{
     WorkingTreeBlobMap, build_package_index_for_working_dir, build_working_tree_blob_map,
     enumerate_working_directory, read_working_file_content,
 };
-
-/// A file entry with its relative path and Git blob ID.
-///
-/// This struct is used by both commit-based and working-directory enumeration.
-#[derive(Debug, Clone)]
-pub struct FileEntry {
-    pub relative_path: String,
-    pub blob_id: String,
-}
-
-/// Trait for abstracting over crawl sources (commit tree vs working directory).
-///
-/// This trait provides behavior-only methods for the three operations that
-/// differ between commit-based and working-directory crawling:
-/// - enumerating files
-/// - reading file content
-/// - building the package index
-///
-/// Source identity (`source_kind`, `commit_oid`) is NOT on the trait.
-/// Those values travel as `CrawlSourceMetadata` alongside the trait object,
-/// keeping the trait focused on behavior and preventing mode-branching patterns.
-pub trait BlobSource {
-    /// Enumerate all files in this source.
-    fn enumerate(&self) -> Result<Vec<FileEntry>>;
-
-    /// Read the content of a file from this source.
-    fn read_content(&self, file: &FileEntry) -> Result<Vec<u8>>;
-
-    /// Build the package index for this source.
-    fn build_package_index(&self) -> Result<PackageIndex>;
-}
-
-/// Blob source for a specific Git commit.
-///
-/// Reads file content and blob IDs directly from Git objects,
-/// ensuring deterministic, reproducible indexing.
-pub struct CommitBlobSource {
-    repo: gix::Repository,
-    commit_oid: String,
-}
-
-impl CommitBlobSource {
-    pub fn new(repo_path: &std::path::Path, commit_oid: String) -> Result<Self> {
-        let repo = gix::open(repo_path)
-            .map_err(|e| anyhow::anyhow!("Failed to open repository at {:?}: {}", repo_path, e))?;
-        Ok(Self { repo, commit_oid })
-    }
-}
-
-impl BlobSource for CommitBlobSource {
-    fn enumerate(&self) -> Result<Vec<FileEntry>> {
-        enumerate_commit_tree(&self.repo, &self.commit_oid)
-    }
-
-    fn read_content(&self, file: &FileEntry) -> Result<Vec<u8>> {
-        read_blob_content(&self.repo, &file.blob_id)
-    }
-
-    fn build_package_index(&self) -> Result<PackageIndex> {
-        build_package_index_for_commit(&self.repo, &self.commit_oid)
-    }
-}
-
-/// Blob source for the working directory.
-///
-/// Reads files directly from the filesystem and computes Git-compatible
-/// blob IDs that respect .gitattributes and clean filters.
-pub struct WorkingDirBlobSource {
-    repo_path: std::path::PathBuf,
-}
-
-impl WorkingDirBlobSource {
-    pub fn new(repo_path: std::path::PathBuf) -> Self {
-        Self { repo_path }
-    }
-}
-
-impl BlobSource for WorkingDirBlobSource {
-    fn enumerate(&self) -> Result<Vec<FileEntry>> {
-        enumerate_working_directory(&self.repo_path)
-    }
-
-    fn read_content(&self, file: &FileEntry) -> Result<Vec<u8>> {
-        read_working_file_content(&self.repo_path, &file.relative_path)
-    }
-
-    fn build_package_index(&self) -> Result<PackageIndex> {
-        build_package_index_for_working_dir(&self.repo_path)
-    }
-}
-
-pub struct PackageIndex {
-    package_name_by_dir: HashMap<String, String>,
-}
-
-impl PackageIndex {
-    pub fn new() -> Self {
-        Self {
-            package_name_by_dir: HashMap::new(),
-        }
-    }
-
-    pub fn find_package_name(&self, relative_path: &str) -> Option<&str> {
-        let path = Path::new(relative_path);
-        let mut current = path.parent().unwrap_or(path);
-
-        loop {
-            let dir_str = current.to_string_lossy();
-            let dir_key = if dir_str == "." {
-                String::new()
-            } else {
-                dir_str.replace('\\', "/")
-            };
-
-            if let Some(name) = self.package_name_by_dir.get(&dir_key) {
-                return Some(name);
-            }
-
-            if current == Path::new("") || current == Path::new(".") {
-                if let Some(name) = self.package_name_by_dir.get("") {
-                    return Some(name);
-                }
-                break;
-            }
-
-            match current.parent() {
-                Some(parent) => current = parent,
-                None => break,
-            }
-        }
-
-        None
-    }
-}
-
-impl Default for PackageIndex {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-#[derive(Deserialize)]
-pub struct PackageJsonName {
-    name: Option<String>,
-}
-
-/// Extract the "name" field from a package.json file content.
-///
-/// Uses proper JSON parsing (not string search) to handle edge cases
-/// like nested "name" fields in other objects.
-pub fn extract_package_name_from_bytes(content: &[u8]) -> Option<String> {
-    serde_json::from_slice::<PackageJsonName>(content)
-        .ok()?
-        .name
-        .filter(|name| !name.is_empty())
-}
-
-#[cfg(test)]
-mod tests;

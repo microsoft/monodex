@@ -1,13 +1,13 @@
 //! Purpose: Handler for the `view` command — retrieve chunks by `file_id` with selector syntax and reconstruct file content.
 //! Edit here when: Modifying view output or file reconstruction logic.
-//! Do not edit here for: Chunk selector parsing (see `app/util.rs`), chunk retrieval primitives (see `engine/storage/chunks/mod.rs`).
+//! Do not edit here for: Chunk selector parsing (see `app/chunk_selector.rs`), chunk retrieval primitives (see `engine/storage/chunks/storage.rs`), chunk display (see `app/chunk_display.rs`), terminal sanitization (see `app/terminal_output.rs`).
 
 use std::collections::HashSet;
 
-use crate::app::{
-    ChunkSelector, Config, format_chunk_report, parse_chunk_selector, resolve_database_path,
-    resolve_label_context, sanitize_for_terminal,
-};
+use crate::app::chunk_display::format_chunk_report;
+use crate::app::chunk_selector::{ChunkSelector, parse_chunk_selector};
+use crate::app::terminal_output::sanitize_for_terminal;
+use crate::app::{Config, resolve_database_path, resolve_label_context};
 use crate::engine::storage::{ChunkRow, Database};
 
 pub fn run_view(
@@ -165,7 +165,7 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
-    use crate::app::commands::test_helpers::{
+    use crate::app::commands::test_fixtures::{
         create_test_db_with_chunks, test_chunk_row, test_label_metadata_row, write_minimal_config,
     };
     use crate::paths::Paths;

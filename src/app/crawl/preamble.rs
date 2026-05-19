@@ -1,6 +1,6 @@
-//! Purpose: Shared crawl-preamble preparation for the `crawl` command's two entry points (commit and working-directory).
-//! Edit here when: changing what setup steps are performed before the post-chunking phases run, or when adding a new crawl source kind.
-//! Do not edit here for: blob-source construction at the command boundary (see commands/crawl.rs), the post-chunking phase pipeline (see crawl/phases.rs), or lock primitives (see engine/storage/locks.rs).
+//! Purpose: Shared crawl-preamble preparation for the `crawl` command's two entry points (commit and working-directory), plus startup-time retrieval-selection messaging.
+//! Edit here when: changing what setup steps are performed before the post-chunking phases run, adding a new crawl source kind, or modifying the narrowing-announcement / retrieval-selection display.
+//! Do not edit here for: blob-source construction at the command boundary (see commands/crawl.rs), the post-chunking phase pipeline (see crawl/phases.rs), lock primitives (see engine/storage/locks.rs), or completion/warning summary rendering (see summary.rs).
 
 use std::collections::BTreeSet;
 use std::path::PathBuf;
@@ -9,9 +9,8 @@ use std::time::Instant;
 use anyhow::{Result, anyhow};
 
 use crate::app::config::Config;
-use crate::app::crawl::phases::format_selection_for_display;
 use crate::app::crawl::types::CrawlSourceMetadata;
-use crate::app::util::stderr_lock_progress;
+use crate::app::lock_progress::stderr_lock_progress;
 use crate::app::{resolve_database_path, validate_config_path};
 use crate::engine::crawl_config::{CompiledCrawlConfig, load_compiled_crawl_config};
 use crate::engine::git_ops::resolve_commit_oid;
@@ -148,5 +147,157 @@ fn normalize_retrieval(retrieval: Vec<RetrievalMethod>) -> BTreeSet<RetrievalMet
     } else {
         // Set semantics: --retrieval vector --retrieval vector collapses to {Vector}
         retrieval.into_iter().collect()
+    }
+}
+
+/// Formats the retrieval selection for display in the crawl preamble.
+///
+/// Returns a string like "(fts, vector)", "(fts only)", "(vector only)",
+/// or "(no retrieval methods)" for empty selection.
+pub fn format_selection_for_display(selection: &BTreeSet<RetrievalMethod>) -> String {
+    format!(
+        "({})",
+        crate::engine::retrieval::format_selection(selection)
+    )
+}
+
+/// Prints the selection-narrowing announcement if applicable.
+///
+/// This should be called after the previous label metadata has been read,
+/// which happens after storage is opened. The announcement prints separately
+/// from the main preamble (which prints before storage is open).
+pub fn print_narrowing_announcement(
+    writer: &mut dyn std::io::Write,
+    previous_selection: &BTreeSet<RetrievalMethod>,
+    new_selection: &BTreeSet<RetrievalMethod>,
+) {
+    // Only print if this is a strict narrowing (previous is a strict superset of new)
+    if previous_selection.is_superset(new_selection) && previous_selection != new_selection {
+        let has_fts = new_selection.contains(&RetrievalMethod::Fts);
+        let has_vector = new_selection.contains(&RetrievalMethod::Vector);
+
+        match (has_fts, has_vector) {
+            (true, false) => {
+                writeln!(writer).unwrap();
+                writeln!(
+                    writer,
+                    "👉 This crawl narrows retrieval selection to fts only, no vector."
+                )
+                .unwrap();
+                writeln!(
+                    writer,
+                    "   Any vector data from a previous crawl is preserved and will be reused"
+                )
+                .unwrap();
+                writeln!(writer, "   if you re-add vector to the selection.").unwrap();
+            }
+            (false, true) => {
+                writeln!(writer).unwrap();
+                writeln!(
+                    writer,
+                    "👉 This crawl narrows retrieval selection to vector only, no fts."
+                )
+                .unwrap();
+                writeln!(
+                    writer,
+                    "   Any fts data from a previous crawl is preserved and will be reused"
+                )
+                .unwrap();
+                writeln!(writer, "   if you re-add fts to the selection.").unwrap();
+            }
+            // Empty selection or other narrowing combinations are not expected in practice,
+            // but if they occur, we don't print a misleading message.
+            _ => {}
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_selection(methods: &[RetrievalMethod]) -> BTreeSet<RetrievalMethod> {
+        methods.iter().cloned().collect()
+    }
+
+    #[test]
+    fn test_format_selection_both_methods() {
+        let selection = make_selection(&[RetrievalMethod::Fts, RetrievalMethod::Vector]);
+        assert_eq!(format_selection_for_display(&selection), "(fts, vector)");
+    }
+
+    #[test]
+    fn test_format_selection_fts_only() {
+        let selection = make_selection(&[RetrievalMethod::Fts]);
+        assert_eq!(format_selection_for_display(&selection), "(fts only)");
+    }
+
+    #[test]
+    fn test_format_selection_vector_only() {
+        let selection = make_selection(&[RetrievalMethod::Vector]);
+        assert_eq!(format_selection_for_display(&selection), "(vector only)");
+    }
+
+    #[test]
+    fn test_format_selection_empty() {
+        let selection: BTreeSet<RetrievalMethod> = BTreeSet::new();
+        assert_eq!(
+            format_selection_for_display(&selection),
+            "(no retrieval methods)"
+        );
+    }
+
+    #[test]
+    fn test_narrowing_announcement_fts_only() {
+        // Previous: both methods, New: fts only -> should print narrowing announcement
+        let previous = make_selection(&[RetrievalMethod::Fts, RetrievalMethod::Vector]);
+        let new = make_selection(&[RetrievalMethod::Fts]);
+        let mut output = Vec::new();
+        print_narrowing_announcement(&mut output, &previous, &new);
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.contains("narrows retrieval selection to fts only"));
+        assert!(output.contains("vector data from a previous crawl is preserved"));
+    }
+
+    #[test]
+    fn test_narrowing_announcement_vector_only() {
+        // Previous: both methods, New: vector only -> should print narrowing announcement
+        let previous = make_selection(&[RetrievalMethod::Fts, RetrievalMethod::Vector]);
+        let new = make_selection(&[RetrievalMethod::Vector]);
+        let mut output = Vec::new();
+        print_narrowing_announcement(&mut output, &previous, &new);
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.contains("narrows retrieval selection to vector only"));
+        assert!(output.contains("fts data from a previous crawl is preserved"));
+    }
+
+    #[test]
+    fn test_narrowing_announcement_no_narrowing_same() {
+        // Previous and new are the same -> no announcement
+        let previous = make_selection(&[RetrievalMethod::Fts, RetrievalMethod::Vector]);
+        let new = make_selection(&[RetrievalMethod::Fts, RetrievalMethod::Vector]);
+        let mut output = Vec::new();
+        print_narrowing_announcement(&mut output, &previous, &new);
+        assert!(output.is_empty());
+    }
+
+    #[test]
+    fn test_narrowing_announcement_no_narrowing_widening() {
+        // Previous: fts only, New: both -> widening, not narrowing
+        let previous = make_selection(&[RetrievalMethod::Fts]);
+        let new = make_selection(&[RetrievalMethod::Fts, RetrievalMethod::Vector]);
+        let mut output = Vec::new();
+        print_narrowing_announcement(&mut output, &previous, &new);
+        assert!(output.is_empty());
+    }
+
+    #[test]
+    fn test_narrowing_announcement_first_crawl() {
+        // Previous: empty (first crawl), New: both -> no narrowing announcement
+        let previous: BTreeSet<RetrievalMethod> = BTreeSet::new();
+        let new = make_selection(&[RetrievalMethod::Fts, RetrievalMethod::Vector]);
+        let mut output = Vec::new();
+        print_narrowing_announcement(&mut output, &previous, &new);
+        assert!(output.is_empty());
     }
 }

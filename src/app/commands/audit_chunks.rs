@@ -5,7 +5,7 @@
 use anyhow::Result;
 use std::path::PathBuf;
 
-use crate::app::format_count;
+use crate::app::number_format::format_count;
 use crate::engine::partitioner::{ChunkQualityReport, PartitionConfig, partition_typescript};
 
 pub fn run_audit_chunks(count: usize, dir: String) -> Result<()> {

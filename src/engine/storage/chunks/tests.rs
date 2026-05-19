@@ -1,9 +1,14 @@
 //! Purpose: Test suite for chunks storage operations.
 //! Edit here when: Adding or modifying ChunkStorage tests.
-//! Do not edit here for: Production storage code — edit chunks/mod.rs.
+//! Do not edit here for: Production storage code — edit storage.rs.
+//! Size note: 1258 production lines. 25 tests averaging 42 lines each due to per-test LanceDB setup. The file's edit intent mirrors storage.rs (operations against the chunks table); no clean split below the test-function level. Revisit at 1358.
 
-use super::*;
+use super::storage::*;
+use std::sync::Arc;
+
+use crate::engine::schema::VECTOR_DIMENSION;
 use crate::engine::schema::chunks_schema;
+use crate::engine::storage::ChunkRow;
 use lancedb::connect;
 use tempfile::TempDir;
 
@@ -262,7 +267,7 @@ async fn test_truncate() {
 
     storage.truncate().await.unwrap();
 
-    let count = storage.table.count_rows(None).await.unwrap();
+    let count = storage.table().count_rows(None).await.unwrap();
     assert_eq!(count, 0);
 }
 

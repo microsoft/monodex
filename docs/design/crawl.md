@@ -2,7 +2,7 @@
 
 This document expands on the crawl pipeline introduced in [architecture.md](./architecture.md). The same named steps are used as section headings here, with operational detail per step. After the steps, two longer sections cover the package index and working-directory mode in depth, followed by a section on partial-crawl semantics.
 
-The relevant source files are `src/app/commands/crawl.rs` (top-level command handler), `src/app/crawl/phases.rs` (the per-phase functions corresponding to the steps below), `src/app/crawl/pipeline.rs` (parallel embedding and storage writes inside the file-processing step), and `src/engine/git_ops/` (Git tree enumeration, blob reading, working-directory walk).
+The relevant source files are `src/app/commands/crawl.rs` (top-level command handler), `src/app/crawl/phases.rs` (the per-phase functions corresponding to the steps below), `src/app/crawl/pipeline.rs` (parallel embedding and storage writes inside the file-processing step), `src/app/crawl/preamble.rs` (shared crawl-preamble preparation for both entry points, plus startup-time retrieval-selection messaging), and `src/engine/git_ops/` (Git tree enumeration, blob reading, working-directory walk).
 
 ## Step 1: Label upsert
 
@@ -43,7 +43,7 @@ Lookup happens later, during file processing: given a file at `libraries/lib1/sr
 3. `libraries`
 4. `""`
 
-The first match wins, reproducing the "nearest ancestor `package.json` governs the file" rule. The lookup helper is `PackageIndex::find_package_name` in `src/engine/git_ops/mod.rs`.
+The first match wins, reproducing the "nearest ancestor `package.json` governs the file" rule. The lookup helper is `PackageIndex::find_package_name` in `src/engine/git_ops/package_index.rs`.
 
 ## Step 4: File processing
 
@@ -86,7 +86,7 @@ The phase reads the label's chunks from LanceDB (via `get_chunks_for_label`) and
 
 After `commit()` succeeds, the manifest at `<database-dir>/fts/<catalog>/<label>/manifest.json` is written with the `FTS_SCHEMA_ID` and `FTS_TOKENIZER_ID` constants the index was built with. The manifest stores only compatibility metadata; it does not track row_ids.
 
-**Schema and tokenizer ID mismatch.** The schema and tokenizer behavior are versioned by `FTS_SCHEMA_ID` and `FTS_TOKENIZER_ID` constants in `src/engine/util.rs`. Mismatch is detected via the manifest's stored IDs, not by introspecting Tantivy's on-disk schema:
+**Schema and tokenizer ID mismatch.** The schema and tokenizer behavior are versioned by `FTS_SCHEMA_ID` and `FTS_TOKENIZER_ID` constants in `src/engine/identity.rs`. Mismatch is detected via the manifest's stored IDs, not by introspecting Tantivy's on-disk schema:
 
 - If the manifest's IDs do not match the current constants: delete the per-label FTS directory and rebuild from scratch. The intent is to recover automatically from version bumps.
 - If Tantivy fails to open with the manifest's IDs matching, or if the manifest is unreadable while Tantivy state exists: error out with a clear message. This is corruption and should reach a human, not be papered over by a silent rebuild.

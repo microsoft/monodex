@@ -2,7 +2,7 @@
 //! Edit here when: Adding or modifying tests for the vector-preservation invariant.
 //! Do not edit here for: Production storage code (see `engine/storage/chunks/`); other storage tests (see `tests/label_add.rs`).
 
-mod common;
+mod fixtures;
 
 use monodex::engine::{Chunk, identifier::LabelId, storage::ChunkRow};
 
@@ -53,7 +53,7 @@ fn test_chunk(
 #[tokio::test]
 async fn test_upsert_without_vectors_preserves_vector() {
     // Create test storage
-    let (_db_dir, chunk_storage) = common::create_test_storage().await;
+    let (_db_dir, chunk_storage) = fixtures::create_test_storage().await;
 
     let catalog = "test-catalog";
     let label = "test-label";
@@ -158,7 +158,7 @@ async fn test_upsert_without_vectors_preserves_vector() {
 #[tokio::test]
 async fn test_fts_only_clears_partial_vectors() {
     // Create test storage
-    let (_db_dir, chunk_storage) = common::create_test_storage().await;
+    let (_db_dir, chunk_storage) = fixtures::create_test_storage().await;
 
     let catalog = "test-catalog";
     let label = "test-label";

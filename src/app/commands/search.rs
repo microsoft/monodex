@@ -1,12 +1,13 @@
 //! Purpose: Handler for the `search` command — resolve label context, dispatch retrieval methods, fuse results, and build the render model.
 //! Edit here when: Changing search orchestration, label-context resolution, retrieval dispatch, RRF fusion, or render-model construction.
-//! Do not edit here for: Search output formatting or the `>`-prefixed line shape (see `app/search.rs`), vector search logic (see `engine/storage/chunks/mod.rs`), embedding (see `engine/parallel_embedder.rs`), FTS search (see `engine/fts/search.rs`).
+//! Do not edit here for: Search output formatting or the `>`-prefixed line shape (see `app/search.rs`), vector search logic (see `engine/storage/chunks/storage.rs`), embedding (see `engine/parallel_embedder.rs`), FTS search (see `engine/fts/search.rs`).
+//! Size note: 612 production lines. Search orchestration is one edit intent (label resolution, decision-rule evaluation, retrieval-method dispatch, RRF fusion, chunk hydration); no clean split below the function level. Revisit at 712.
 
 use std::io::Write;
 
 use crate::app::{
-    Config, format_source_pointer, resolve_database_path, resolve_label_context,
-    search::{self, EndMarker, Preamble, SearchRenderModel, SearchWarning},
+    Config, resolve_database_path, resolve_label_context,
+    search::{self, EndMarker, Preamble, SearchRenderModel, SearchWarning, format_source_pointer},
 };
 use crate::engine::identifier::LabelId;
 use crate::engine::storage::ChunkRow;
@@ -615,7 +616,7 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
-    use crate::app::commands::test_helpers::{
+    use crate::app::commands::test_fixtures::{
         create_test_db_with_chunks, test_chunk_row, test_label_metadata_row, write_minimal_config,
     };
     use crate::paths::Paths;

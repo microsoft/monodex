@@ -356,7 +356,7 @@ mod tests {
     use super::*;
     use crate::engine::fts::manifest::{FtsManifest, ManifestRead};
     use crate::engine::identifier::LabelId;
-    use crate::engine::util::{FTS_SCHEMA_ID, FTS_TOKENIZER_ID};
+    use crate::engine::identity::{FTS_SCHEMA_ID, FTS_TOKENIZER_ID};
     use tempfile::TempDir;
 
     fn make_label_id(catalog: &str, label: &str) -> LabelId {
@@ -436,7 +436,7 @@ mod tests {
     #[test]
     fn test_open_existing_stale_on_id_mismatch() {
         use crate::engine::fts::manifest::write_manifest;
-        use crate::engine::util::FTS_TOKENIZER_ID;
+        use crate::engine::identity::FTS_TOKENIZER_ID;
 
         let temp_dir = TempDir::new().unwrap();
         let db_path = temp_dir.path();

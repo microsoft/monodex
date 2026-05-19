@@ -1,6 +1,6 @@
 //! Purpose: gix-based reading of Git commit trees — enumerate files, read blobs, build the package index for a resolved commit.
 //! Edit here when: Changing how files or blobs are read from commit objects, or how the package index is built from a commit tree.
-//! Do not edit here for: The `BlobSource` trait or `PackageIndex` type (see `mod.rs`), working-directory subprocess code (see `working_dir.rs`).
+//! Do not edit here for: The `BlobSource` trait (see `blob_source.rs`), `PackageIndex` type (see `package_index.rs`), working-directory subprocess code (see `working_dir.rs`).
 
 use anyhow::{Result, anyhow};
 use gix::ObjectId;
@@ -124,7 +124,7 @@ pub fn build_package_index_for_commit(
             && let Ok(blob) = obj.try_into_blob()
             && let Some(name) = extract_package_name_from_bytes(&blob.data)
         {
-            index.package_name_by_dir.insert(dir_path, name);
+            index.insert_package_name(dir_path, name);
         }
     }
 

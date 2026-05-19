@@ -15,9 +15,9 @@ use crate::engine::fts::indexing::index_chunks_for_fts;
 use crate::engine::fts::manifest::{FtsManifest, ManifestRead, read_manifest, write_manifest};
 use crate::engine::fts::search::{FtsSearchOutcome, fts_search};
 use crate::engine::identifier::LabelId;
+use crate::engine::identity::{FTS_SCHEMA_ID, FTS_TOKENIZER_ID};
 use crate::engine::schema::{chunks_schema, label_metadata_schema};
 use crate::engine::storage::{ChunkRow, ChunkStorage, Database, META_FILE, MetaFile};
-use crate::engine::util::{FTS_SCHEMA_ID, FTS_TOKENIZER_ID};
 
 // =============================================================================
 // Test helpers

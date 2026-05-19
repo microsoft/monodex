@@ -1,6 +1,6 @@
 //! Purpose: Test suite for the `git_ops` module.
 //! Edit here when: Adding or modifying tests for commit reading, working-directory enumeration, or the package index.
-//! Do not edit here for: Production code changes — edit the relevant submodule (`mod.rs`, `commit.rs`, `working_dir.rs`).
+//! Do not edit here for: Production code changes — edit the relevant submodule (`blob_source.rs`, `package_index.rs`, `commit.rs`, `working_dir.rs`).
 
 use super::*;
 use std::path::PathBuf;
@@ -47,13 +47,11 @@ fn test_build_package_index() {
 #[test]
 fn test_find_package_name_uses_repo_relative_paths() {
     let mut index = PackageIndex::new();
-    index.package_name_by_dir.insert(
+    index.insert_package_name(
         "libraries/node-core-library".to_string(),
         "@rushstack/node-core-library".to_string(),
     );
-    index
-        .package_name_by_dir
-        .insert("".to_string(), "root-package".to_string());
+    index.insert_package_name("".to_string(), "root-package".to_string());
 
     assert_eq!(
         index.find_package_name("libraries/node-core-library/src/JsonFile.ts"),
@@ -105,7 +103,7 @@ fn test_nested_package_directory_key_round_trip() {
     assert_eq!(dir_path, "libraries/node-core-library");
 
     let mut index = PackageIndex::new();
-    index.package_name_by_dir.insert(
+    index.insert_package_name(
         dir_path.to_string(),
         "@rushstack/node-core-library".to_string(),
     );
@@ -364,7 +362,7 @@ fn test_repo_with_dot_basename_produces_output() {
         build_package_index_for_working_dir(&dot_repo_path).expect("Failed to build package index");
     // The index is empty since there's no package.json, but it shouldn't error
     assert!(
-        package_index.package_name_by_dir.is_empty(),
+        package_index.is_empty(),
         "Package index should be empty (no package.json in test repo)"
     );
 }
@@ -437,17 +435,17 @@ fn test_package_json_exact_filename_matching() {
 
     // Verify: only real package.json files are in the index
     assert_eq!(
-        package_index.package_name_by_dir.get(""),
-        Some(&"real-package".to_string()),
+        package_index.get_package_name(""),
+        Some("real-package"),
         "Root package.json should be indexed"
     );
     assert_eq!(
-        package_index.package_name_by_dir.get("subdir"),
-        Some(&"subdir-real".to_string()),
+        package_index.get_package_name("subdir"),
+        Some("subdir-real"),
         "subdir/package.json should be indexed"
     );
     assert_eq!(
-        package_index.package_name_by_dir.len(),
+        package_index.len(),
         2,
         "Only 2 package.json files should be indexed, not the *-package.json files"
     );
@@ -606,15 +604,15 @@ fn test_untracked_package_json_resolved_in_working_dir_package_index() {
 
     // The untracked package must be resolved
     assert_eq!(
-        package_index.package_name_by_dir.get("untracked-pkg"),
-        Some(&"untracked-package".to_string()),
+        package_index.get_package_name("untracked-pkg"),
+        Some("untracked-package"),
         "untracked-pkg/package.json should be indexed with its correct name"
     );
 
     // The tracked package must also be present (sanity check)
     assert_eq!(
-        package_index.package_name_by_dir.get("tracked-pkg"),
-        Some(&"tracked-package".to_string()),
+        package_index.get_package_name("tracked-pkg"),
+        Some("tracked-package"),
         "tracked-pkg/package.json should be indexed"
     );
 }

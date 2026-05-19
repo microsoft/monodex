@@ -40,7 +40,7 @@ The fact that `relative_path` is part of `file_id` matters: identical content at
 
 The fact that `catalog` is part of `file_id` matters too: identical content at the same path in two different catalogs produces distinct `file_id` values, and therefore distinct rows. Catalogs are sovereign units; cross-catalog content sharing is not a feature, and the writer-lock layer relies on this isolation to permit parallel writers against different catalogs.
 
-The `embedder_id` and `chunker_id` constants live in `src/engine/util.rs`. Bumping either invalidates reuse. Change them when chunking or embedding behavior changes in a way that should force re-indexing.
+The `embedder_id` and `chunker_id` constants live in `src/engine/identity.rs`. Bumping either invalidates reuse. Change them when chunking or embedding behavior changes in a way that should force re-indexing.
 
 ### Sentinel-based incremental crawl
 
@@ -88,7 +88,7 @@ See [search.md](./search.md) for the full decision rules, RRF mechanics, the can
 
 Catalog and label names follow strict syntax rules: catalogs are kebab-case, labels are Git-like. Reserved characters (`:`, `@`, `+`, `#`) are forbidden in both. Validation lives in `src/engine/identifier.rs`. The full grammar, including planned typed-label and cross-catalog reference forms, is in [label_ids.md](./label_ids.md).
 
-Four versioning constants live in `src/engine/util.rs` and govern when on-disk state must be rebuilt. `EMBEDDER_ID` and `CHUNKER_ID` participate in `file_id`; bumping either invalidates chunk reuse across crawls. `FTS_SCHEMA_ID` and `FTS_TOKENIZER_ID` do not participate in `file_id`; bumping either invalidates FTS state but leaves vector state untouched, so a tokenizer tweak does not force re-embedding. Treat all four as load-bearing: changes to them invalidate cached state and force expensive rebuild work.
+Four versioning constants live in `src/engine/identity.rs` and govern when on-disk state must be rebuilt. `EMBEDDER_ID` and `CHUNKER_ID` participate in `file_id`; bumping either invalidates chunk reuse across crawls. `FTS_SCHEMA_ID` and `FTS_TOKENIZER_ID` do not participate in `file_id`; bumping either invalidates FTS state but leaves vector state untouched, so a tokenizer tweak does not force re-embedding. Treat all four as load-bearing: changes to them invalidate cached state and force expensive rebuild work.
 
 ## Filesystem footprint
 
@@ -112,28 +112,38 @@ Application-layer code, CLI-specific. Not reusable as a library.
 - `config.rs`: Load and validate `monodex-config.json` (catalogs, database path, embedding-model knobs). Contains the `Config` and `DatabaseConfig` structs and the resolver that picks the database path.
 - `context.rs`: Persist and resolve the default catalog/label set by `monodex use`. Owns the `DefaultContext` struct and read/write to `<config-folder>/monodex-state.json`.
 - `search.rs`: Search-output renderer. Takes a `&mut dyn Write` and emits preamble, warnings, results, debug continuations, and end-of-results sentinels in a fixed order. The single-writer routing is what makes search-time output testable from byte buffers; see [search.md](../design/search.md) for the output-ordering rule.
-- `util.rs`: Formatting and display helpers: timestamps, durations, byte sizes, terminal sanitization for search output, chunk-selector parsing, and `format_source_pointer` for warning remediation strings.
+- `chunk_display.rs`: Chunk-display rendering: format a chunk record as a multi-line display block for search results and `view` output.
+- `chunk_selector.rs`: Parse chunk-selector strings (`:N`, `:N-M`, `:N-end`) from CLI arguments into `ChunkSelector` values.
+- `lock_progress.rs`: Stderr progress messaging while waiting for a writer lock.
+- `number_format.rs`: User-facing integer-count formatting (thousands separators for chunk counts, file counts, byte totals).
+- `terminal_output.rs`: Terminal-safe output rendering: sanitization of strings containing user-controlled bytes.
 
 ### src/app/commands/
 
-One file per CLI subcommand handler. Most are thin: parse args, call into the engine, format output.
+CLI subcommand handlers, each in its own file or subdirectory. Most are thin: parse args, call into the engine, format output.
 
 - `audit_chunks.rs`: `audit-chunks`: sample TypeScript files from a directory and report aggregate chunk-quality scores. AST-only mode.
 - `crawl.rs`: `crawl`: enumerate files (commit tree or working dir), drive the embed/upload pipeline, run label reassignment after success.
 - `debug_fts.rs`: `debug-fts`: print tokens for a chunk and optionally explain query ranking. Diagnostic for FTS tokenization issues.
 - `dump_chunks.rs`: `dump-chunks`: visualize partitioner output for a single file. Supports debug, visualize, and with-fallback modes.
-- `init_db/`: `init-db`: create or validate a database directory, write the LanceDB tables, create the empty `fts/` directory, write `monodex-meta.json`, and handle `--delete-everything`.
 - `purge.rs`: `purge`: delete chunks, label metadata, and FTS state for a catalog, or truncate/reinitialize database-scoped state for `--all`. Operates at catalog or database scope only; there is no per-label purge.
 - `search.rs`: `search`: resolve label context, evaluate retrieval-method decision rules, collect vector/FTS hits, fuse via RRF when multiple methods are active, hydrate chunks, and pass a render model to `app/search.rs`. See [search.md](../design/search.md) for decision rules and output format.
 - `use_cmd.rs`: `use`: set or display default catalog/label context. Named `use_cmd` because `use` is a Rust keyword.
 - `view.rs`: `view`: retrieve chunks by `file_id` with selector syntax (`:N`, `:N-M`, `:N-end`, or absent for the whole file). Reconstructs files from chunks.
 
+### src/app/commands/init_db/
+
+- `run.rs`: Implementation of the `init-db` command (database-state classification, deletion, creation, validation, logging).
+
 ### src/app/crawl/
 
 Crawl-pipeline orchestration shared between command handlers.
 
-- `phases.rs`: Per-phase functions corresponding to the named steps of the crawl pipeline (label upsert, file classification, chunk-new-files, label cleanup, FTS phase, finalization, summary). The handlers in `commands/crawl.rs` call into these in order.
+- `phases.rs`: Per-phase functions corresponding to the named steps of the crawl pipeline (label upsert, file classification, chunk-new-files, label cleanup, FTS phase, finalization). The handlers in `commands/crawl.rs` call into these in order.
 - `pipeline.rs`: Coordinate parallel embedding and LanceDB writes via crossbeam channels and rayon. Also owns the FTS-only NULL-vector upsert path used when vector is not in the current crawl's selection. Tracks per-chunk embedding failures, ETA/progress output, and memory-warning checks.
+- `preamble.rs`: Shared crawl-preamble preparation for the commit and working-directory entry points, plus startup-time retrieval-selection messaging.
+- `progress_format.rs`: Crawl progress/time display vocabulary: timestamps for log lines, ETA strings, duration formatting.
+- `summary.rs`: Crawl completion and warning summary rendering (write_summary, print_warning_summary, etc.).
 - `types.rs`: Crawl-phase state shared across command handlers: `PhaseResults`, `CrawlSourceMetadata`, and the `CrawlFailures` tracker. Embedding failures are tracked per-chunk; structural errors abort immediately.
 - `warning.rs`: Render in-flight crawl warnings to stdout/stderr. Distinct from `engine/warning.rs`, which defines the warning types.
 
@@ -147,13 +157,12 @@ Reusable indexing engine. Does not depend on `src/app/`.
 - `fusion.rs`: Reciprocal rank fusion (RRF) for hybrid retrieval. Pure algorithm: takes per-method ranked lists of `MethodHit`s and produces fused `FusedHit`s with per-method `RankedContribution` provenance. No I/O, no storage coupling. See [search.md](./search.md) for the algorithm and tiebreak rule.
 - `identifier.rs`: Validate catalog and label syntax. Owns the `LabelId` type, qualified-form parsing/composition, and identifier error reporting.
 - `markdown_partitioner.rs`: Custom markdown parser that splits at headings, fenced code blocks, block quotes, and paragraphs. Generates breadcrumbs from heading hierarchy.
-- `package_lookup.rs`: Filesystem-only fallback that walks up to find the nearest `package.json` and extracts its `name`. Used only by `dump-chunks`; the main crawl path resolves packages from the package index.
 - `parallel_embedder.rs`: Pool of ONNX sessions for parallel embedding generation. Each session uses limited intra-op threads; pool size and threads are auto-tuned from RAM and core count via `system_info`.
 - `retrieval.rs`: `RetrievalMethod` enum (`Fts`, `Vector` — alphabetical so derived `Ord` is alphabetical) and the `format_selection` helper used by the search and crawl preambles. The CLI's `--retrieval` flag and the `label_metadata` table's per-method columns both reference this type.
 - `schema.rs`: Arrow schema definitions for the `chunks` and `label_metadata` LanceDB tables. Holds `MONODEX_SCHEMA_VERSION`, which must be bumped on any change to column shape; see [monodex_files.md](./monodex_files.md) for the rationale.
 - `search_decision.rs`: Pure function `decide(metadata, requested) -> Decision`. Computes the active subset, applies the decision table, returns a structured `Decision` outcome (`SingleMethod`, `Hybrid`, `Error`) with structured `DecisionWarning`s. No I/O, no backend dispatch; unit-testable in isolation. The orchestrator translates `DecisionWarning`s into pre-formatted `SearchWarning`s before passing them to the renderer.
 - `system_info.rs`: Detect total RAM, cgroup limits, CPU cores. Implements the `"auto"` heuristic for embedding-model `modelInstances` and `threadsPerInstance`. Cgroup-aware so containerized installs warn correctly.
-- `util.rs`: Hash utilities: `compute_file_id` (xxhash of embedder/chunker/catalog/blob/path), `compute_row_id`, `compute_hash`. Holds the four versioning constants: `EMBEDDER_ID` and `CHUNKER_ID` (participate in `file_id`; bumping forces re-vectorization), `FTS_SCHEMA_ID` and `FTS_TOKENIZER_ID` (do not participate in `file_id`; bumping invalidates only FTS state).
+- `identity.rs`: Hash utilities: `compute_file_id` (xxhash of embedder/chunker/catalog/blob/path), `compute_row_id`, `compute_hash`. Holds the four versioning constants: `EMBEDDER_ID` and `CHUNKER_ID` (participate in `file_id`; bumping forces re-vectorization), `FTS_SCHEMA_ID` and `FTS_TOKENIZER_ID` (do not participate in `file_id`; bumping invalidates only FTS state).
 - `warning.rs`: `CrawlWarning` enum for in-flight crawl events and `DecisionWarning` enum for search-decision events translated to `SearchWarning` by the app layer.
 - `working_dir_sentinel.rs`: Generate per-crawl-unique sentinel strings for working-directory crawls.
 
@@ -175,7 +184,8 @@ Keep the direct `tantivy` dependency aligned with the version resolved through L
 
 Git-aware enumeration and blob reading. The `BlobSource` trait abstracts over commit and working-directory crawl sources so the crawl pipeline can stay free of mode-branching.
 
-- `mod.rs`: Public `BlobSource` trait, `FileEntry`, `PackageIndex`, the two `BlobSource` implementations, and `package.json` name extraction.
+- `blob_source.rs`: The `BlobSource` trait, `FileEntry`, and the two `BlobSource` implementations (`CommitBlobSource`, `WorkingDirBlobSource`).
+- `package_index.rs`: `PackageIndex` lookup structure and `package.json` name extraction.
 - `commit.rs`: gix-based commit-tree enumeration, blob reading, and per-commit package-index construction.
 - `working_dir.rs`: Subprocess-based working-tree reading. Shells out to `git ls-files` / `git status` / `git hash-object` (Git ≥ 2.35.0) so blob IDs match commit-mode IDs after `.gitattributes` and clean filters apply.
 
@@ -199,12 +209,14 @@ LanceDB storage layer. Typed operations on the two tables.
 - `locks.rs`: OS-level file-locking primitives (database, catalog, commit mutex) backing the writer-lock taxonomy. Watchdog thread for long-acquisition progress reporting. See [concurrency.md](./concurrency.md).
 - `predicate.rs`: LanceDB SQL predicate builders (`eq_str`, `in_quoted_strs`, etc.) used across the storage layer. Callers must pre-validate inputs: catalog names by `validate_catalog`, label IDs by `LabelId::parse`.
 - `rows.rs`: Plain-Rust `ChunkRow` and `LabelMetadataRow` types with conversion to/from Arrow `RecordBatch`. The rest of the engine deals only in these row types, never in raw Arrow.
+- `arrow.rs`: Typed Arrow readers and query-collect helpers shared across storage submodules, sitting below the table-specific files.
 
 ### src/engine/storage/chunks/
 
 Sub-module for chunk-table operations, separated from the rest of `storage/` because it's larger than the others and has its own tests file.
 
-- `mod.rs`: Upsert-with-vectors, upsert-without-vectors, vector search, label-membership add/remove, per-file chunk lookup, sentinel checks, row-id hydration, deletion, truncation; see [crawl.md](./crawl.md) for the vector-presence invariant.
+- `storage.rs`: Chunk-table read and write operations: upsert with and without vectors, vector search, label-membership add/remove, per-file chunk lookup, sentinel checks, row-id hydration, deletion, truncation; see [crawl.md](./crawl.md) for the vector-presence invariant.
+- `arrow_encoding.rs`: Arrow `RecordBatch` encoding and decoding for chunk rows; sits below `storage.rs` and above the shared `engine/storage/arrow.rs` typed readers.
 
 ## All markdown files in this repo
 

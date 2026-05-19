@@ -2,7 +2,7 @@
 //! Edit here when: Adding or modifying end-to-end multi-label crawl tests.
 //! Do not edit here for: Production crawl code (see `app/commands/crawl.rs`, `app/crawl/`, `engine/git_ops/`); per-module unit tests (see the relevant module's `tests.rs` or inline `#[cfg(test)]` block).
 
-mod common;
+mod fixtures;
 
 use std::collections::HashSet;
 
@@ -51,7 +51,7 @@ fn test_chunk(
 #[tokio::test]
 async fn test_label_add_makes_chunks_searchable() {
     // Create test storage
-    let (_db_dir, chunk_storage) = common::create_test_storage().await;
+    let (_db_dir, chunk_storage) = fixtures::create_test_storage().await;
 
     // Create test chunks with known vectors
     let catalog = "test-catalog";
@@ -162,7 +162,7 @@ async fn test_label_add_makes_chunks_searchable() {
 #[tokio::test]
 async fn test_incomplete_file_is_recrawled() {
     // Create test storage
-    let (_db_dir, chunk_storage) = common::create_test_storage().await;
+    let (_db_dir, chunk_storage) = fixtures::create_test_storage().await;
 
     let catalog = "test-catalog";
     let label = "main";

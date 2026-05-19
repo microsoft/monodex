@@ -1,6 +1,6 @@
 //! Purpose: Define plain-Rust row types that the rest of the engine deals in. The storage module handles conversion to/from Arrow RecordBatches internally.
 //! Edit here when: Adding/removing/modifying fields in ChunkRow or LabelMetadataRow.
-//! Do not edit here for: Arrow schema definitions (see schema.rs), storage operations (see chunks/mod.rs, labels.rs).
+//! Do not edit here for: Arrow schema definitions (see schema.rs), storage operations (see chunks/storage.rs, labels.rs).
 
 use anyhow::{Result, anyhow};
 
@@ -110,7 +110,7 @@ impl ChunkRow {
 
         // Validate row_id matches computed value from file_id and chunk_ordinal
         let expected_row_id =
-            crate::engine::util::compute_row_id(&self.file_id, self.chunk_ordinal as usize);
+            crate::engine::identity::compute_row_id(&self.file_id, self.chunk_ordinal as usize);
         if self.row_id != expected_row_id {
             return Err(anyhow!(
                 "ChunkRow row_id '{}' does not match expected '{}' for file_id '{}' and chunk_ordinal {}",

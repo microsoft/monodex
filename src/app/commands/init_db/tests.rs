@@ -1,9 +1,17 @@
-use super::*;
-use crate::app::commands::test_helpers::write_minimal_config;
+//! Purpose: Test suite for init-db command behavior.
+//! Edit here when: Adding or modifying tests for init-db command.
+//! Do not edit here for: init-db implementation (see `run.rs`).
+
+use super::run::*;
+use crate::app::commands::test_fixtures::write_minimal_config;
 use crate::app::config::load_config;
 use crate::paths::Paths;
+use std::fs;
 use std::io::Write;
+use std::path::Path;
 use tempfile::TempDir;
+
+use crate::engine::storage::{Database, META_FILE, MetaFile};
 
 /// Helper to create a config file with a custom database path.
 fn write_config_with_db_path(config_path: &Path, db_path: &str) {

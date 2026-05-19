@@ -1,8 +1,9 @@
 //! Purpose: Handler for the `purge` command — delete all chunks for a catalog or for the entire database.
 //! Edit here when: Modifying purge behavior, scope, or confirmation flow.
-//! Do not edit here for: Storage delete operations (see `engine/storage/chunks/mod.rs`, `engine/storage/labels.rs`).
+//! Do not edit here for: Storage delete operations (see `engine/storage/chunks/storage.rs`, `engine/storage/labels.rs`).
 
-use crate::app::util::{format_count, stderr_lock_progress};
+use crate::app::lock_progress::stderr_lock_progress;
+use crate::app::number_format::format_count;
 use crate::app::{Config, resolve_database_path};
 use crate::engine::identifier;
 use crate::engine::storage::{
@@ -104,7 +105,7 @@ mod tests {
     use crate::engine::storage::{Database as StorageDatabase, META_FILE};
     use tempfile::TempDir;
 
-    use crate::app::commands::test_helpers::{
+    use crate::app::commands::test_fixtures::{
         create_test_db_with_chunks, test_chunk_row_with_catalog,
         test_label_metadata_row_with_parts, write_minimal_config,
     };

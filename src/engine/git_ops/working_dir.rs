@@ -1,6 +1,6 @@
 //! Purpose: Subprocess-based reading of the working directory using the `git` CLI to compute Git-compatible blob IDs that respect `.gitattributes` and clean filters.
 //! Edit here when: Changing the `git ls-files` / `git status` / `git hash-object` orchestration, the dirty-path detection, batching strategy, or the minimum-Git-version check.
-//! Do not edit here for: The `BlobSource` trait or `PackageIndex` type (see `mod.rs`), gix-based commit reading (see `commit.rs`).
+//! Do not edit here for: The `BlobSource` trait (see `blob_source.rs`), `PackageIndex` type (see `package_index.rs`), gix-based commit reading (see `commit.rs`).
 //!
 //! The working-tree view includes tracked files at their current working-tree contents
 //! (including local modifications), plus untracked non-ignored files reported by `git status -u`.
@@ -347,7 +347,7 @@ pub fn build_package_index_for_working_dir(repo_path: &Path) -> Result<PackageIn
         if let Ok(content) = read_working_file_content(repo_path, relative_path)
             && let Some(name) = extract_package_name_from_bytes(&content)
         {
-            index.package_name_by_dir.insert(dir_path, name);
+            index.insert_package_name(dir_path, name);
         }
     })?;
     Ok(index)

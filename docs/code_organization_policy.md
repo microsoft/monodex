@@ -31,6 +31,8 @@ The thresholds apply when making a non-trivial addition to a file, not when only
 
 **Hard ceiling:** no file exceeds 2000 lines total (everything in the file, not the production-only count used above). At this size the file is too large to navigate as one unit regardless of edit intent, so the edit-intent test does not apply and footer-noting is not an option. Raise it as a reorganization signal per "When the local rules don't fit" below.
 
+**Optional header element: size note.** A file at or over a review or split-or-flag threshold may stay in place if its module header carries a `Size note:` line stating the current line count and a one-sentence justification. Revisit when the file grows another 100 lines past the count recorded in the note. The hard ceiling does not admit a size note (see above).
+
 ### Test before splitting
 
 Name each proposed file and complete this sentence for it:
@@ -40,7 +42,6 @@ Name each proposed file and complete this sentence for it:
 The split is valid only if all of the following hold:
 
 - The two answers are different kinds of work, not the same work described two ways. "Predicate construction" and "predicate validation" are the same work. "Predicate primitives" and "label metadata storage" are different work.
-- Neither answer is "helpers", "shared logic", "misc", or "utilities".
 - Each answer names a change visible in existing code, tests, docs, or the current task: not a hypothetical future change.
 
 If any of these fails, do not split. Note the situation in the footer instead.
@@ -86,7 +87,7 @@ This section can be omitted when there is nothing to flag.
 - **New storage operation** → pick the `engine/storage/` submodule by operation family: `database.rs` for connection/open, `chunks/` for chunk operations, `labels.rs` for label metadata. If a family outgrows a single file per the edit-intent test, split it into its own subdirectory (as `chunks/` already shows).
 - **New partitioner heuristic** → `split_search.rs` for split-point logic, `node_analysis.rs` for AST node properties, `scoring.rs` for quality measurement.
 - **New config field** → `app/config.rs` for app-level config, `engine/crawl_config.rs` for crawl filtering rules.
-- **Shared utility** → `engine/util.rs` for engine-wide, `app/util.rs` for app-wide formatting/display. Only for helpers with multiple real call sites.
+- **Shared utility** → name it for what it actually holds, narrowest accurate name. Rename when contents change.
 
 ## Module header comments
 
@@ -107,7 +108,7 @@ This codebase does not pursue 100% line coverage. Several specific decisions ref
 - **Pure decision logic is extracted and unit-tested; effectful orchestration is covered by integration tests at real seams.** `engine/search_decision.rs` is a pure function with focused unit tests. `app/commands/crawl.rs`'s `run_crawl_async` orchestrator is covered by `tests/active_labels_preserve.rs`, `tests/label_add.rs`, and `tests/vector_preserve.rs` running against real LanceDB, not against mocked storage.
 - **Some short predicates carry one test per named input category.** `should_skip_label_cleanup` in `app/commands/crawl.rs` is a three-term boolean with four tests, one per failure category.
 - **Stable user-facing output is snapshot-tested rather than asserted with substring batteries.** A snapshot diff is reviewable as a single user-experience change.
-- **State invariants are checked at construction with `assert!` / `debug_assert!`.** `file_id` and `row_id` derivation in `engine/util.rs` and identifier validation in `engine/identifier.rs` are the examples. The test suite does not duplicate these checks across input combinations.
+- **State invariants are checked at construction with `assert!` / `debug_assert!`.** `file_id` and `row_id` derivation in `engine/identity.rs` and identifier validation in `engine/identifier.rs` are the examples. The test suite does not duplicate these checks across input combinations.
 - **Bug-fix PRs add a regression test when the bug class is plausibly re-introducible on future edits.** A miswritten conditional caught by review does not need its own test; a subtle ordering bug in a phase-gating predicate does.
 
 ## Test placement
@@ -151,7 +152,7 @@ There is no fixed threshold. The judgment is relative: tag the largest contribut
 
 ## Banned patterns
 
-- No files named `helpers.rs`, `common.rs`, or `misc.rs`.
+- No semantically vapid filenames. `utilities.rs`, `helpers.rs`, `common.rs`, `misc.rs` are free to write and tell the next reader nothing; half the codebase is "utilities" of some sort. The work of naming is finding what the functions actually have in common, and that shared trait is usually a better name: `formatting.rs` if the trait is formatting, `test_mocks.rs` or `test_fixtures.rs` if the trait is test setup. `test_helpers.rs` is acceptable only when no narrower trait is visible. Pick the narrowest accurate name today; rename when contents change.
 - No wildcard re-exports (`pub use submodule::*`). List re-exports explicitly.
 - No putting unrelated items together just because they're small.
 - No structural splits in the same change as feature or fix work. Splits are their own change unless explicitly authorized by the maintainer or the planned reorganization being applied.
