@@ -1,7 +1,7 @@
 //! Purpose: Test suite for chunks storage operations.
 //! Edit here when: Adding or modifying ChunkStorage tests.
 //! Do not edit here for: Production storage code — edit storage.rs.
-//! Size note: 1261 lines. 26 tests averaging ~48 lines each due to per-test LanceDB setup. A read/write axis exists but mirrors a latent split in storage.rs (735 prod lines); deferring this split until storage.rs is split so the test and production splits stay aligned. Revisit at 1361.
+//! Size note: 1258 production lines. 25 tests averaging 42 lines each due to per-test LanceDB setup. The file's edit intent mirrors storage.rs (operations against the chunks table); no clean split below the test-function level. Revisit at 1358.
 
 use super::storage::*;
 use std::sync::Arc;
