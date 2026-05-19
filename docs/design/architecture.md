@@ -211,6 +211,7 @@ LanceDB storage layer. Typed operations on the two tables.
 - `locks.rs`: OS-level file-locking primitives (database, catalog, commit mutex) backing the writer-lock taxonomy. Watchdog thread for long-acquisition progress reporting. See [concurrency.md](./concurrency.md).
 - `predicate.rs`: LanceDB SQL predicate builders (`eq_str`, `in_quoted_strs`, etc.) used across the storage layer. Callers must pre-validate inputs: catalog names by `validate_catalog`, label IDs by `LabelId::parse`.
 - `rows.rs`: Plain-Rust `ChunkRow` and `LabelMetadataRow` types with conversion to/from Arrow `RecordBatch`. The rest of the engine deals only in these row types, never in raw Arrow.
+- `arrow.rs`: Typed Arrow readers and query-collect helpers shared across storage submodules, sitting below the table-specific files.
 
 ### src/engine/storage/chunks/
 

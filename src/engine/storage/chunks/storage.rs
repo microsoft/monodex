@@ -7,6 +7,7 @@
 //!   or label membership updates.
 //! Do not edit here for: Row types (see rows.rs), label metadata operations (see labels.rs),
 //!   database open logic (see database.rs), Arrow encoding/decoding (see arrow_encoding.rs).
+//! Size note: 735 production lines. Chunk-table read and write operations against a shared ChunkStorage handle; a write/read split would fragment the file's central edit intent (operations against the chunks table). Revisit at 835.
 
 use anyhow::{Result, anyhow};
 use arrow_array::{Array, FixedSizeListArray, RecordBatchIterator};
