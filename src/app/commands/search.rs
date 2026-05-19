@@ -615,7 +615,7 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
-    use crate::app::commands::test_helpers::{
+    use crate::app::commands::test_fixtures::{
         create_test_db_with_chunks, test_chunk_row, test_label_metadata_row, write_minimal_config,
     };
     use crate::paths::Paths;

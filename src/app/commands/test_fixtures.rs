@@ -1,7 +1,7 @@
-//! Shared test helpers for command tests.
+//! Shared test fixtures for command tests.
 //!
 //! Purpose: Reduce duplication of test setup code across command handlers.
-//! Edit here when: Adding new test utilities shared across commands.
+//! Edit here when: Adding new test fixtures shared across commands.
 //! Do not edit here for: Test logic specific to a single command.
 
 use std::fs::{self, File};

@@ -1,4 +1,4 @@
-//! Purpose: CLI command handlers — one file per subcommand, plus a shared test-helpers module.
+//! Purpose: CLI command handlers — one file per subcommand, plus a shared test-fixtures module.
 //! Edit here when: Adding a new command file or modifying command dispatch wiring.
 //! Do not edit here for: CLI argument definitions (see `../cli.rs`), individual command logic (see the per-command file).
 
@@ -13,7 +13,7 @@ pub mod use_cmd;
 pub mod view;
 
 #[cfg(test)]
-mod test_helpers;
+mod test_fixtures;
 
 // Re-export command entry points
 pub use audit_chunks::run_audit_chunks;

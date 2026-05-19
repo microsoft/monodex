@@ -105,7 +105,7 @@ mod tests {
     use crate::engine::storage::{Database as StorageDatabase, META_FILE};
     use tempfile::TempDir;
 
-    use crate::app::commands::test_helpers::{
+    use crate::app::commands::test_fixtures::{
         create_test_db_with_chunks, test_chunk_row_with_catalog,
         test_label_metadata_row_with_parts, write_minimal_config,
     };

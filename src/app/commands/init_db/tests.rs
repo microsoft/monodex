@@ -1,5 +1,5 @@
 use super::*;
-use crate::app::commands::test_helpers::write_minimal_config;
+use crate::app::commands::test_fixtures::write_minimal_config;
 use crate::app::config::load_config;
 use crate::paths::Paths;
 use std::io::Write;
