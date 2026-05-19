@@ -11,7 +11,6 @@ pub mod git_ops;
 pub mod identifier;
 pub mod identity;
 pub mod markdown_partitioner;
-pub mod package_lookup;
 pub mod parallel_embedder;
 pub mod partitioner;
 pub mod retrieval;
