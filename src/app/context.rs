@@ -12,7 +12,7 @@ use crate::engine::identifier::{LabelId, validate_catalog, validate_label};
 use crate::paths::Paths;
 
 // =============================================================================
-// Timestamp helpers (moved from util.rs)
+// Timestamp helpers
 // =============================================================================
 
 /// Format current time as UTC RFC 3339 string (e.g., "2024-01-15T10:30:00Z").

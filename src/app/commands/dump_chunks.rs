@@ -1,6 +1,6 @@
 //! Purpose: Handler for the `dump-chunks` command — visualize partitioner output for a single file.
-//! Edit here when: Modifying chunk visualization, debug/visualize/with-fallback modes, or quality reporting in the command.
-//! Do not edit here for: Chunking algorithm (see `engine/partitioner/`).
+//! Edit here when: Modifying chunk visualization, debug/visualize/with-fallback modes, quality reporting in the command, or package-name fallback for working-tree files.
+//! Do not edit here for: Chunking algorithm (see `engine/partitioner/`), Git-aware package-index construction (see `engine/git_ops/package_index.rs`).
 
 use std::path::Path;
 
@@ -169,7 +169,7 @@ pub fn run_dump_chunks(
 }
 
 // =============================================================================
-// Package-name fallback (folded from engine/package_lookup.rs)
+// Package-name fallback
 //
 // Filesystem-only package-name lookup that walks up to find the nearest
 // `package.json`. Used only by this command.

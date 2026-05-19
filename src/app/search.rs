@@ -28,7 +28,7 @@ use std::collections::HashMap;
 use super::chunk_display::format_chunk_report;
 
 // =============================================================================
-// Source pointer formatting (moved from util.rs)
+// Source pointer formatting
 // =============================================================================
 
 /// Format source pointer for remediation messages.

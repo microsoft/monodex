@@ -120,7 +120,7 @@ Application-layer code, CLI-specific. Not reusable as a library.
 
 ### src/app/commands/
 
-One file per CLI subcommand handler. Most are thin: parse args, call into the engine, format output.
+CLI subcommand handlers, each in its own file or subdirectory. Most are thin: parse args, call into the engine, format output.
 
 - `audit_chunks.rs`: `audit-chunks`: sample TypeScript files from a directory and report aggregate chunk-quality scores. AST-only mode.
 - `crawl.rs`: `crawl`: enumerate files (commit tree or working dir), drive the embed/upload pipeline, run label reassignment after success.
@@ -132,8 +132,6 @@ One file per CLI subcommand handler. Most are thin: parse args, call into the en
 - `view.rs`: `view`: retrieve chunks by `file_id` with selector syntax (`:N`, `:N-M`, `:N-end`, or absent for the whole file). Reconstructs files from chunks.
 
 ### src/app/commands/init_db/
-
-init-db command broken out into its own directory because `run.rs` is too large for a single-file command handler.
 
 - `run.rs`: Implementation of the `init-db` command (database-state classification, deletion, creation, validation, logging).
 
