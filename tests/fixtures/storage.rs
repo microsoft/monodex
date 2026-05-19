@@ -1,6 +1,6 @@
-//! Purpose: Shared test utilities for integration tests.
-//! Edit here when: Adding or modifying test utilities used across multiple integration test files.
-//! Do not edit here for: Test cases themselves (those belong in the specific `tests/*.rs` files); production code.
+//! Purpose: Shared LanceDB storage fixtures for integration tests.
+//! Edit here when: Adding or modifying storage setup helpers for integration tests.
+//! Do not edit here for: Git-repo fixtures (see `git.rs`), test cases (see `tests/*.rs`).
 
 use std::sync::Arc;
 
@@ -17,6 +17,7 @@ use monodex::engine::{
 /// Returns a tuple of (TempDir, ChunkStorage). The TempDir must be kept
 /// alive for the duration of the test to prevent the temporary directory
 /// from being deleted.
+#[allow(dead_code)]
 pub async fn create_test_storage() -> (tempfile::TempDir, ChunkStorage) {
     let tmp_dir = tempfile::TempDir::new().unwrap();
     let db_path = tmp_dir.path().join("test_db");

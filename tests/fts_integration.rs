@@ -6,140 +6,15 @@
 //! See the "Quick CI tier" section of
 //! `docs/code_organization_policy.md` for the policy.
 
+mod fixtures;
+
 use std::collections::BTreeSet;
 use std::fs;
-use std::path::Path;
 use std::process::Command;
 
 use monodex::app::commands::init_db::run_init_db;
 use monodex::app::commands::search::run_search;
-use monodex::app::config::Config;
 use monodex::engine::retrieval::RetrievalMethod;
-
-/// Generate a unique temp directory with a prefix to avoid path reuse collisions.
-///
-/// On macOS, temp directory paths can be reused rapidly after deletion, which can
-/// cause race conditions where a new test sees stale data from a previous test.
-/// Using a unique prefix ensures each test gets a truly distinct path.
-fn unique_temp_dir() -> tempfile::TempDir {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    static COUNTER: AtomicU64 = AtomicU64::new(0);
-    let id = COUNTER.fetch_add(1, Ordering::SeqCst);
-    tempfile::Builder::new()
-        .prefix(&format!("monodex-test-{}-", id))
-        .tempdir()
-        .expect("Failed to create temp directory")
-}
-
-/// Create a minimal Git repo with test files and return the commit OID.
-fn create_test_git_repo(repo_path: &Path) -> String {
-    // Initialize git repo
-    let git_init = Command::new("git")
-        .args(["init"])
-        .current_dir(repo_path)
-        .output()
-        .expect("Failed to run git init");
-    assert!(git_init.status.success(), "git init failed");
-
-    // Configure local user
-    Command::new("git")
-        .args(["config", "user.name", "Test User"])
-        .current_dir(repo_path)
-        .output()
-        .expect("Failed to set user.name");
-    Command::new("git")
-        .args(["config", "user.email", "test@example.com"])
-        .current_dir(repo_path)
-        .output()
-        .expect("Failed to set user.email");
-
-    // Create a TypeScript file
-    let ts_file = repo_path.join("src").join("example.ts");
-    fs::create_dir_all(ts_file.parent().unwrap()).unwrap();
-    fs::write(
-        &ts_file,
-        r#"// Example TypeScript file for testing
-export function getUserProfile(userId: string): UserProfile | null {
-  if (!userId) {
-    return null;
-  }
-  return database.query(userId);
-}
-
-export function parseUserInput(input: string): string[] {
-  return input.split(' ').filter(s => s.length > 0);
-}
-"#,
-    )
-    .expect("Failed to write test file");
-
-    // Create a markdown file
-    let md_file = repo_path.join("README.md");
-    fs::write(
-        &md_file,
-        r#"# Test Project
-
-This is a test project for Monodex FTS integration testing.
-
-## Features
-
-- User profile management
-- Input parsing utilities
-"#,
-    )
-    .expect("Failed to write markdown file");
-
-    // Git add and commit
-    Command::new("git")
-        .args(["add", "."])
-        .current_dir(repo_path)
-        .output()
-        .expect("Failed to run git add");
-
-    let git_commit = Command::new("git")
-        .args(["commit", "-m", "Initial commit"])
-        .current_dir(repo_path)
-        .output()
-        .expect("Failed to run git commit");
-    assert!(git_commit.status.success(), "git commit failed");
-
-    // Get the commit OID
-    let git_rev_parse = Command::new("git")
-        .args(["rev-parse", "HEAD"])
-        .current_dir(repo_path)
-        .output()
-        .expect("Failed to run git rev-parse");
-    assert!(git_rev_parse.status.success(), "git rev-parse failed");
-
-    String::from_utf8_lossy(&git_rev_parse.stdout)
-        .trim()
-        .to_string()
-}
-
-/// Create a test config with a catalog pointing to the given repo path.
-fn create_test_config(monodex_home: &Path, catalog_name: &str, repo_path: &Path) -> Config {
-    let config_path = monodex_home.join("monodex-config.json");
-    fs::create_dir_all(monodex_home).unwrap();
-
-    let config_content = format!(
-        r#"{{
-  "catalogs": {{
-    "{}": {{
-      "type": "monorepo",
-      "path": "{}"
-    }}
-  }}
-}}"#,
-        catalog_name,
-        repo_path.to_str().unwrap().replace('\\', "\\\\")
-    );
-
-    fs::write(&config_path, &config_content).expect("Failed to write config");
-
-    // Use the proper load_config path to get a Config with Paths
-    let paths = monodex::paths::Paths::for_test(monodex_home.to_path_buf());
-    monodex::app::config::load_config(paths).expect("Failed to load config")
-}
 
 // =============================================================================
 // Test 1: End-to-end test for crawl-then-search
@@ -156,14 +31,15 @@ fn create_test_config(monodex_home: &Path, catalog_name: &str, repo_path: &Path)
 fn test_crawl_then_search__quick_excluded() {
     let (_monodex_home, _repo_dir) = {
         // Set up temp directories
-        let monodex_home = unique_temp_dir();
-        let repo_dir = unique_temp_dir();
+        let monodex_home = fixtures::unique_temp_dir();
+        let repo_dir = fixtures::unique_temp_dir();
 
         // Create test git repo
-        let commit_oid = create_test_git_repo(repo_dir.path());
+        let commit_oid = fixtures::create_test_git_repo(repo_dir.path());
 
         // Create config pointing to the repo
-        let config = create_test_config(monodex_home.path(), "test-catalog", repo_dir.path());
+        let config =
+            fixtures::create_test_config(monodex_home.path(), "test-catalog", repo_dir.path());
 
         // Run init-db
         run_init_db(&config, false).expect("init-db failed");
@@ -260,14 +136,15 @@ fn test_crawl_then_search__quick_excluded() {
 fn test_selection_narrowing__quick_excluded() {
     let (_monodex_home, _repo_dir) = {
         // Set up temp directories
-        let monodex_home = unique_temp_dir();
-        let repo_dir = unique_temp_dir();
+        let monodex_home = fixtures::unique_temp_dir();
+        let repo_dir = fixtures::unique_temp_dir();
 
         // Create test git repo
-        let commit_oid = create_test_git_repo(repo_dir.path());
+        let commit_oid = fixtures::create_test_git_repo(repo_dir.path());
 
         // Create config pointing to the repo
-        let config = create_test_config(monodex_home.path(), "test-catalog", repo_dir.path());
+        let config =
+            fixtures::create_test_config(monodex_home.path(), "test-catalog", repo_dir.path());
 
         // Run init-db
         run_init_db(&config, false).expect("init-db failed");
@@ -361,14 +238,15 @@ fn test_selection_narrowing__quick_excluded() {
 fn test_selection_widening__quick_excluded() {
     let (_monodex_home, _repo_dir) = {
         // Set up temp directories
-        let monodex_home = unique_temp_dir();
-        let repo_dir = unique_temp_dir();
+        let monodex_home = fixtures::unique_temp_dir();
+        let repo_dir = fixtures::unique_temp_dir();
 
         // Create test git repo
-        let commit_oid = create_test_git_repo(repo_dir.path());
+        let commit_oid = fixtures::create_test_git_repo(repo_dir.path());
 
         // Create config pointing to the repo
-        let config = create_test_config(monodex_home.path(), "test-catalog", repo_dir.path());
+        let config =
+            fixtures::create_test_config(monodex_home.path(), "test-catalog", repo_dir.path());
 
         // Run init-db
         run_init_db(&config, false).expect("init-db failed");
@@ -484,14 +362,15 @@ fn test_selection_widening__quick_excluded() {
 fn test_first_time_crawl_fts_only__quick_excluded() {
     let (_monodex_home, _repo_dir) = {
         // Set up temp directories
-        let monodex_home = unique_temp_dir();
-        let repo_dir = unique_temp_dir();
+        let monodex_home = fixtures::unique_temp_dir();
+        let repo_dir = fixtures::unique_temp_dir();
 
         // Create test git repo
-        let commit_oid = create_test_git_repo(repo_dir.path());
+        let commit_oid = fixtures::create_test_git_repo(repo_dir.path());
 
         // Create config pointing to the repo
-        let config = create_test_config(monodex_home.path(), "test-catalog", repo_dir.path());
+        let config =
+            fixtures::create_test_config(monodex_home.path(), "test-catalog", repo_dir.path());
 
         // Run init-db
         run_init_db(&config, false).expect("init-db failed");
@@ -570,14 +449,15 @@ fn test_first_time_crawl_fts_only__quick_excluded() {
 fn test_purge_cleanup__quick_excluded() {
     let (_monodex_home, _repo_dir) = {
         // Set up temp directories
-        let monodex_home = unique_temp_dir();
-        let repo_dir = unique_temp_dir();
+        let monodex_home = fixtures::unique_temp_dir();
+        let repo_dir = fixtures::unique_temp_dir();
 
         // Create test git repo
-        let commit_oid = create_test_git_repo(repo_dir.path());
+        let commit_oid = fixtures::create_test_git_repo(repo_dir.path());
 
         // Create config pointing to the repo
-        let config = create_test_config(monodex_home.path(), "test-catalog", repo_dir.path());
+        let config =
+            fixtures::create_test_config(monodex_home.path(), "test-catalog", repo_dir.path());
 
         // Run init-db
         run_init_db(&config, false).expect("init-db failed");
@@ -666,14 +546,15 @@ fn test_purge_cleanup__quick_excluded() {
 fn test_schema_mismatch_error__quick_excluded() {
     let (_monodex_home, _repo_dir) = {
         // Set up temp directories
-        let monodex_home = unique_temp_dir();
-        let repo_dir = unique_temp_dir();
+        let monodex_home = fixtures::unique_temp_dir();
+        let repo_dir = fixtures::unique_temp_dir();
 
         // Create test git repo (unused - we just need a repo for config)
-        let _commit_oid = create_test_git_repo(repo_dir.path());
+        let _commit_oid = fixtures::create_test_git_repo(repo_dir.path());
 
         // Create config pointing to the repo
-        let config = create_test_config(monodex_home.path(), "test-catalog", repo_dir.path());
+        let config =
+            fixtures::create_test_config(monodex_home.path(), "test-catalog", repo_dir.path());
 
         // Run init-db first
         run_init_db(&config, false).expect("init-db failed");
@@ -724,14 +605,15 @@ fn test_schema_mismatch_error__quick_excluded() {
 fn test_fts_query_parse_error__quick_excluded() {
     let (_monodex_home, _repo_dir) = {
         // Set up temp directories
-        let monodex_home = unique_temp_dir();
-        let repo_dir = unique_temp_dir();
+        let monodex_home = fixtures::unique_temp_dir();
+        let repo_dir = fixtures::unique_temp_dir();
 
         // Create test git repo
-        let commit_oid = create_test_git_repo(repo_dir.path());
+        let commit_oid = fixtures::create_test_git_repo(repo_dir.path());
 
         // Create config pointing to the repo
-        let config = create_test_config(monodex_home.path(), "test-catalog", repo_dir.path());
+        let config =
+            fixtures::create_test_config(monodex_home.path(), "test-catalog", repo_dir.path());
 
         // Run init-db
         run_init_db(&config, false).expect("init-db failed");
@@ -799,14 +681,15 @@ fn test_fts_query_parse_error__quick_excluded() {
 fn test_multi_method_explicit_search__quick_excluded() {
     let (_monodex_home, _repo_dir) = {
         // Set up temp directories
-        let monodex_home = unique_temp_dir();
-        let repo_dir = unique_temp_dir();
+        let monodex_home = fixtures::unique_temp_dir();
+        let repo_dir = fixtures::unique_temp_dir();
 
         // Create test git repo
-        let commit_oid = create_test_git_repo(repo_dir.path());
+        let commit_oid = fixtures::create_test_git_repo(repo_dir.path());
 
         // Create config pointing to the repo
-        let config = create_test_config(monodex_home.path(), "test-catalog", repo_dir.path());
+        let config =
+            fixtures::create_test_config(monodex_home.path(), "test-catalog", repo_dir.path());
 
         // Run init-db
         run_init_db(&config, false).expect("init-db failed");
@@ -860,14 +743,15 @@ fn test_multi_method_explicit_search__quick_excluded() {
 fn test_multi_method_search_shows_preamble__quick_excluded() {
     let (_monodex_home, _repo_dir) = {
         // Set up temp directories
-        let monodex_home = unique_temp_dir();
-        let repo_dir = unique_temp_dir();
+        let monodex_home = fixtures::unique_temp_dir();
+        let repo_dir = fixtures::unique_temp_dir();
 
         // Create test git repo
-        let commit_oid = create_test_git_repo(repo_dir.path());
+        let commit_oid = fixtures::create_test_git_repo(repo_dir.path());
 
         // Create config pointing to the repo
-        let config = create_test_config(monodex_home.path(), "test-catalog", repo_dir.path());
+        let config =
+            fixtures::create_test_config(monodex_home.path(), "test-catalog", repo_dir.path());
 
         // Run init-db
         run_init_db(&config, false).expect("init-db failed");
@@ -956,14 +840,15 @@ fn test_multi_method_search_shows_preamble__quick_excluded() {
 fn test_cross_label_active_labels_preserved__quick_excluded() {
     let (_monodex_home, _repo_dir) = {
         // Set up temp directories
-        let monodex_home = unique_temp_dir();
-        let repo_dir = unique_temp_dir();
+        let monodex_home = fixtures::unique_temp_dir();
+        let repo_dir = fixtures::unique_temp_dir();
 
         // Create test git repo
-        let commit_oid = create_test_git_repo(repo_dir.path());
+        let commit_oid = fixtures::create_test_git_repo(repo_dir.path());
 
         // Create config pointing to the repo
-        let config = create_test_config(monodex_home.path(), "test-catalog", repo_dir.path());
+        let config =
+            fixtures::create_test_config(monodex_home.path(), "test-catalog", repo_dir.path());
 
         // Run init-db
         run_init_db(&config, false).expect("init-db failed");
@@ -1051,14 +936,15 @@ fn test_cross_label_active_labels_preserved__quick_excluded() {
 fn test_working_dir_remediation_message__quick_excluded() {
     let (_monodex_home, _repo_dir) = {
         // Set up temp directories
-        let monodex_home = unique_temp_dir();
-        let repo_dir = unique_temp_dir();
+        let monodex_home = fixtures::unique_temp_dir();
+        let repo_dir = fixtures::unique_temp_dir();
 
         // Create test git repo (we crawl working-dir, but need git for the repo structure)
-        let _commit_oid = create_test_git_repo(repo_dir.path());
+        let _commit_oid = fixtures::create_test_git_repo(repo_dir.path());
 
         // Create config pointing to the repo
-        let config = create_test_config(monodex_home.path(), "test-catalog", repo_dir.path());
+        let config =
+            fixtures::create_test_config(monodex_home.path(), "test-catalog", repo_dir.path());
 
         // Run init-db
         run_init_db(&config, false).expect("init-db failed");
@@ -1136,14 +1022,15 @@ fn test_working_dir_remediation_message__quick_excluded() {
 fn test_fts_parse_error_under_hybrid__quick_excluded() {
     let (_monodex_home, _repo_dir) = {
         // Set up temp directories
-        let monodex_home = unique_temp_dir();
-        let repo_dir = unique_temp_dir();
+        let monodex_home = fixtures::unique_temp_dir();
+        let repo_dir = fixtures::unique_temp_dir();
 
         // Create test git repo
-        let commit_oid = create_test_git_repo(repo_dir.path());
+        let commit_oid = fixtures::create_test_git_repo(repo_dir.path());
 
         // Create config pointing to the repo
-        let config = create_test_config(monodex_home.path(), "test-catalog", repo_dir.path());
+        let config =
+            fixtures::create_test_config(monodex_home.path(), "test-catalog", repo_dir.path());
 
         // Run init-db
         run_init_db(&config, false).expect("init-db failed");
@@ -1204,14 +1091,15 @@ fn test_fts_parse_error_under_hybrid__quick_excluded() {
 fn test_fts_noindex_degradation_under_hybrid__quick_excluded() {
     let (_monodex_home, _repo_dir) = {
         // Set up temp directories
-        let monodex_home = unique_temp_dir();
-        let repo_dir = unique_temp_dir();
+        let monodex_home = fixtures::unique_temp_dir();
+        let repo_dir = fixtures::unique_temp_dir();
 
         // Create test git repo
-        let commit_oid = create_test_git_repo(repo_dir.path());
+        let commit_oid = fixtures::create_test_git_repo(repo_dir.path());
 
         // Create config pointing to the repo
-        let config = create_test_config(monodex_home.path(), "test-catalog", repo_dir.path());
+        let config =
+            fixtures::create_test_config(monodex_home.path(), "test-catalog", repo_dir.path());
 
         // Run init-db
         run_init_db(&config, false).expect("init-db failed");
@@ -1283,8 +1171,8 @@ fn test_fts_noindex_degradation_under_hybrid__quick_excluded() {
 fn test_empty_corpus__quick_excluded() {
     let (_monodex_home, _repo_dir) = {
         // Set up temp directories
-        let monodex_home = unique_temp_dir();
-        let repo_dir = unique_temp_dir();
+        let monodex_home = fixtures::unique_temp_dir();
+        let repo_dir = fixtures::unique_temp_dir();
 
         // Create a git repo with only ignored files (no .ts, .js, .md, etc.)
         let git_init = Command::new("git")
@@ -1336,7 +1224,8 @@ fn test_empty_corpus__quick_excluded() {
             .to_string();
 
         // Create config pointing to the repo
-        let config = create_test_config(monodex_home.path(), "test-catalog", repo_dir.path());
+        let config =
+            fixtures::create_test_config(monodex_home.path(), "test-catalog", repo_dir.path());
 
         // Run init-db
         run_init_db(&config, false).expect("init-db failed");
@@ -1398,14 +1287,15 @@ fn test_empty_corpus__quick_excluded() {
 fn test_end_of_results_sentinel__quick_excluded() {
     let (_monodex_home, _repo_dir) = {
         // Set up temp directories
-        let monodex_home = unique_temp_dir();
-        let repo_dir = unique_temp_dir();
+        let monodex_home = fixtures::unique_temp_dir();
+        let repo_dir = fixtures::unique_temp_dir();
 
         // Create test git repo (small corpus)
-        let commit_oid = create_test_git_repo(repo_dir.path());
+        let commit_oid = fixtures::create_test_git_repo(repo_dir.path());
 
         // Create config pointing to the repo
-        let config = create_test_config(monodex_home.path(), "test-catalog", repo_dir.path());
+        let config =
+            fixtures::create_test_config(monodex_home.path(), "test-catalog", repo_dir.path());
 
         // Run init-db
         run_init_db(&config, false).expect("init-db failed");
@@ -1473,14 +1363,15 @@ fn test_end_of_results_sentinel__quick_excluded() {
 fn test_crawl_then_vector_search__quick_excluded() {
     let (_monodex_home, _repo_dir) = {
         // Set up temp directories
-        let monodex_home = unique_temp_dir();
-        let repo_dir = unique_temp_dir();
+        let monodex_home = fixtures::unique_temp_dir();
+        let repo_dir = fixtures::unique_temp_dir();
 
         // Create test git repo
-        let commit_oid = create_test_git_repo(repo_dir.path());
+        let commit_oid = fixtures::create_test_git_repo(repo_dir.path());
 
         // Create config pointing to the repo
-        let config = create_test_config(monodex_home.path(), "test-catalog", repo_dir.path());
+        let config =
+            fixtures::create_test_config(monodex_home.path(), "test-catalog", repo_dir.path());
 
         // Run init-db
         run_init_db(&config, false).expect("init-db failed");
@@ -1543,14 +1434,15 @@ fn test_crawl_then_vector_search__quick_excluded() {
 fn test_first_time_crawl_vector_only__quick_excluded() {
     let (_monodex_home, _repo_dir) = {
         // Set up temp directories
-        let monodex_home = unique_temp_dir();
-        let repo_dir = unique_temp_dir();
+        let monodex_home = fixtures::unique_temp_dir();
+        let repo_dir = fixtures::unique_temp_dir();
 
         // Create test git repo
-        let commit_oid = create_test_git_repo(repo_dir.path());
+        let commit_oid = fixtures::create_test_git_repo(repo_dir.path());
 
         // Create config pointing to the repo
-        let config = create_test_config(monodex_home.path(), "test-catalog", repo_dir.path());
+        let config =
+            fixtures::create_test_config(monodex_home.path(), "test-catalog", repo_dir.path());
 
         // Run init-db
         run_init_db(&config, false).expect("init-db failed");
@@ -1610,8 +1502,8 @@ fn test_non_utf8_file_emits_warning__quick_excluded() {
 
     let (_monodex_home, _repo_dir) = {
         // Set up temp directories
-        let monodex_home = unique_temp_dir();
-        let repo_dir = unique_temp_dir();
+        let monodex_home = fixtures::unique_temp_dir();
+        let repo_dir = fixtures::unique_temp_dir();
 
         // Initialize git repo
         let git_init = Command::new("git")
@@ -1676,7 +1568,8 @@ fn test_non_utf8_file_emits_warning__quick_excluded() {
             .to_string();
 
         // Create config pointing to the repo
-        let config = create_test_config(monodex_home.path(), "test-catalog", repo_dir.path());
+        let config =
+            fixtures::create_test_config(monodex_home.path(), "test-catalog", repo_dir.path());
 
         // Run init-db
         run_init_db(&config, false).expect("init-db failed");
@@ -1748,11 +1641,11 @@ fn test_hybrid_search_degrades_on_stale_fts__quick_excluded() {
     use monodex::engine::fts::{FtsIndex, FtsManifest};
     use monodex::engine::identity::FTS_TOKENIZER_ID;
 
-    let monodex_home = unique_temp_dir();
-    let repo_dir = unique_temp_dir();
+    let monodex_home = fixtures::unique_temp_dir();
+    let repo_dir = fixtures::unique_temp_dir();
 
     // Create a Git repo with a TypeScript file
-    create_test_git_repo(repo_dir.path());
+    fixtures::create_test_git_repo(repo_dir.path());
 
     // Get the commit OID
     let git_rev_parse = Command::new("git")
@@ -1765,7 +1658,7 @@ fn test_hybrid_search_degrades_on_stale_fts__quick_excluded() {
         .to_string();
 
     // Create config
-    let config = create_test_config(monodex_home.path(), "test-catalog", repo_dir.path());
+    let config = fixtures::create_test_config(monodex_home.path(), "test-catalog", repo_dir.path());
 
     // Run init-db
     run_init_db(&config, false).expect("init-db failed");
@@ -1841,11 +1734,11 @@ fn test_fts_only_search_stale_warning_no_results__quick_excluded() {
     use monodex::engine::identity::FTS_TOKENIZER_ID;
     use monodex::engine::retrieval::RetrievalMethod;
 
-    let monodex_home = unique_temp_dir();
-    let repo_dir = unique_temp_dir();
+    let monodex_home = fixtures::unique_temp_dir();
+    let repo_dir = fixtures::unique_temp_dir();
 
     // Create a Git repo with a TypeScript file
-    create_test_git_repo(repo_dir.path());
+    fixtures::create_test_git_repo(repo_dir.path());
 
     // Get the commit OID
     let git_rev_parse = Command::new("git")
@@ -1858,7 +1751,7 @@ fn test_fts_only_search_stale_warning_no_results__quick_excluded() {
         .to_string();
 
     // Create config
-    let config = create_test_config(monodex_home.path(), "test-catalog", repo_dir.path());
+    let config = fixtures::create_test_config(monodex_home.path(), "test-catalog", repo_dir.path());
 
     // Run init-db
     run_init_db(&config, false).expect("init-db failed");
@@ -1935,11 +1828,11 @@ fn test_fts_only_search_unreadable_manifest_warning__quick_excluded() {
     use monodex::engine::identifier::LabelId;
     use monodex::engine::retrieval::RetrievalMethod;
 
-    let monodex_home = unique_temp_dir();
-    let repo_dir = unique_temp_dir();
+    let monodex_home = fixtures::unique_temp_dir();
+    let repo_dir = fixtures::unique_temp_dir();
 
     // Create a Git repo with a TypeScript file
-    create_test_git_repo(repo_dir.path());
+    fixtures::create_test_git_repo(repo_dir.path());
 
     // Get the commit OID
     let git_rev_parse = Command::new("git")
@@ -1952,7 +1845,7 @@ fn test_fts_only_search_unreadable_manifest_warning__quick_excluded() {
         .to_string();
 
     // Create config
-    let config = create_test_config(monodex_home.path(), "test-catalog", repo_dir.path());
+    let config = fixtures::create_test_config(monodex_home.path(), "test-catalog", repo_dir.path());
 
     // Run init-db
     run_init_db(&config, false).expect("init-db failed");
