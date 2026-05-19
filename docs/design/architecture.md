@@ -132,8 +132,10 @@ One file per CLI subcommand handler. Most are thin: parse args, call into the en
 
 Crawl-pipeline orchestration shared between command handlers.
 
-- `phases.rs`: Per-phase functions corresponding to the named steps of the crawl pipeline (label upsert, file classification, chunk-new-files, label cleanup, FTS phase, finalization, summary). The handlers in `commands/crawl.rs` call into these in order.
+- `phases.rs`: Per-phase functions corresponding to the named steps of the crawl pipeline (label upsert, file classification, chunk-new-files, label cleanup, FTS phase, finalization). The handlers in `commands/crawl.rs` call into these in order.
 - `pipeline.rs`: Coordinate parallel embedding and LanceDB writes via crossbeam channels and rayon. Also owns the FTS-only NULL-vector upsert path used when vector is not in the current crawl's selection. Tracks per-chunk embedding failures, ETA/progress output, and memory-warning checks.
+- `preamble.rs`: Shared crawl-preamble preparation for the commit and working-directory entry points, plus startup-time retrieval-selection messaging.
+- `summary.rs`: Crawl completion and warning summary rendering (write_summary, print_warning_summary, etc.).
 - `types.rs`: Crawl-phase state shared across command handlers: `PhaseResults`, `CrawlSourceMetadata`, and the `CrawlFailures` tracker. Embedding failures are tracked per-chunk; structural errors abort immediately.
 - `warning.rs`: Render in-flight crawl warnings to stdout/stderr. Distinct from `engine/warning.rs`, which defines the warning types.
 
@@ -204,7 +206,8 @@ LanceDB storage layer. Typed operations on the two tables.
 
 Sub-module for chunk-table operations, separated from the rest of `storage/` because it's larger than the others and has its own tests file.
 
-- `mod.rs`: Upsert-with-vectors, upsert-without-vectors, vector search, label-membership add/remove, per-file chunk lookup, sentinel checks, row-id hydration, deletion, truncation; see [crawl.md](./crawl.md) for the vector-presence invariant.
+- `storage.rs`: Chunk-table read and write operations: upsert with and without vectors, vector search, label-membership add/remove, per-file chunk lookup, sentinel checks, row-id hydration, deletion, truncation; see [crawl.md](./crawl.md) for the vector-presence invariant.
+- `arrow_encoding.rs`: Arrow `RecordBatch` encoding and decoding for chunk rows; sits below `storage.rs` and above the shared `engine/storage/arrow.rs` typed readers.
 
 ## All markdown files in this repo
 
