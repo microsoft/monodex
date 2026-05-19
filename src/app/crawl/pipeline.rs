@@ -14,9 +14,10 @@ use std::sync::mpsc;
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
+use crate::app::crawl::progress_format::{format_duration, format_eta, log_timestamp};
+use crate::app::number_format::format_count;
 use crate::app::{
-    CrawlFailures, EmbeddingModelConfig, format_count, format_duration, format_eta, log_timestamp,
-    print_memory_warning, resolve_embedding_config,
+    CrawlFailures, EmbeddingModelConfig, print_memory_warning, resolve_embedding_config,
 };
 use crate::engine::storage::{ChunkRow, ChunkStorage, StorageProgressEvent};
 use crate::engine::{Chunk, ParallelEmbedder};

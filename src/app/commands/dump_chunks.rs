@@ -4,7 +4,7 @@
 
 use std::path::Path;
 
-use crate::app::format_count;
+use crate::app::number_format::format_count;
 use crate::engine::SMALL_CHUNK_CHARS;
 use crate::engine::git_ops::extract_package_name_from_bytes;
 use crate::engine::partitioner::{

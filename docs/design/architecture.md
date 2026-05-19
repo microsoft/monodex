@@ -112,7 +112,11 @@ Application-layer code, CLI-specific. Not reusable as a library.
 - `config.rs`: Load and validate `monodex-config.json` (catalogs, database path, embedding-model knobs). Contains the `Config` and `DatabaseConfig` structs and the resolver that picks the database path.
 - `context.rs`: Persist and resolve the default catalog/label set by `monodex use`. Owns the `DefaultContext` struct and read/write to `<config-folder>/monodex-state.json`.
 - `search.rs`: Search-output renderer. Takes a `&mut dyn Write` and emits preamble, warnings, results, debug continuations, and end-of-results sentinels in a fixed order. The single-writer routing is what makes search-time output testable from byte buffers; see [search.md](../design/search.md) for the output-ordering rule.
-- `util.rs`: Formatting and display helpers: timestamps, durations, byte sizes, terminal sanitization for search output, chunk-selector parsing, and `format_source_pointer` for warning remediation strings.
+- `chunk_display.rs`: Chunk-display rendering: format a chunk record as a multi-line display block for search results and `view` output.
+- `chunk_selector.rs`: Parse chunk-selector strings (`:N`, `:N-M`, `:N-end`) from CLI arguments into `ChunkSelector` values.
+- `lock_progress.rs`: Stderr progress messaging while waiting for a writer lock.
+- `number_format.rs`: User-facing integer-count formatting (thousands separators for chunk counts, file counts, byte totals).
+- `terminal_output.rs`: Terminal-safe output rendering: sanitization of strings containing user-controlled bytes.
 
 ### src/app/commands/
 
@@ -135,6 +139,7 @@ Crawl-pipeline orchestration shared between command handlers.
 - `phases.rs`: Per-phase functions corresponding to the named steps of the crawl pipeline (label upsert, file classification, chunk-new-files, label cleanup, FTS phase, finalization). The handlers in `commands/crawl.rs` call into these in order.
 - `pipeline.rs`: Coordinate parallel embedding and LanceDB writes via crossbeam channels and rayon. Also owns the FTS-only NULL-vector upsert path used when vector is not in the current crawl's selection. Tracks per-chunk embedding failures, ETA/progress output, and memory-warning checks.
 - `preamble.rs`: Shared crawl-preamble preparation for the commit and working-directory entry points, plus startup-time retrieval-selection messaging.
+- `progress_format.rs`: Crawl progress/time display vocabulary: timestamps for log lines, ETA strings, duration formatting.
 - `summary.rs`: Crawl completion and warning summary rendering (write_summary, print_warning_summary, etc.).
 - `types.rs`: Crawl-phase state shared across command handlers: `PhaseResults`, `CrawlSourceMetadata`, and the `CrawlFailures` tracker. Embedding failures are tracked per-chunk; structural errors abort immediately.
 - `warning.rs`: Render in-flight crawl warnings to stdout/stderr. Distinct from `engine/warning.rs`, which defines the warning types.

@@ -9,7 +9,7 @@ use std::collections::{BTreeSet, HashSet};
 use std::sync::Arc;
 
 use crate::app::crawl::types::PhaseResults;
-use crate::app::format_count;
+use crate::app::number_format::format_count;
 use crate::engine::{
     TARGET_CHARS,
     chunker::{ChunkContext, chunk_content},
@@ -471,7 +471,8 @@ pub async fn run_fts_phase(
     is_commit_mode: bool,
     debug: bool,
 ) -> Result<()> {
-    use crate::app::util::{format_count, format_duration};
+    use crate::app::crawl::progress_format::format_duration;
+    use crate::app::number_format::format_count;
     use std::time::Instant;
 
     println!("🔶 FTS indexing...");

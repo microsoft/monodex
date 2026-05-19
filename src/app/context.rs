@@ -8,9 +8,58 @@
 
 use anyhow::anyhow;
 
-use crate::app::util::utc_rfc3339_timestamp;
 use crate::engine::identifier::{LabelId, validate_catalog, validate_label};
 use crate::paths::Paths;
+
+// =============================================================================
+// Timestamp helpers (moved from util.rs)
+// =============================================================================
+
+/// Format current time as UTC RFC 3339 string (e.g., "2024-01-15T10:30:00Z").
+/// Used for machine-readable timestamps like the context file's `set_at` field.
+fn utc_rfc3339_timestamp() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+
+    // Convert to calendar time (UTC)
+    let days = now / 86400;
+    let secs_today = now % 86400;
+
+    // Calculate date from days since 1970-01-01
+    // Using the algorithm from: https://en.wikipedia.org/wiki/Julian_day
+    let (year, month, day) = days_to_ymd(days as i64);
+
+    let hour = (secs_today / 3600) as u8;
+    let minute = ((secs_today % 3600) / 60) as u8;
+    let second = (secs_today % 60) as u8;
+
+    format!(
+        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
+        year, month, day, hour, minute, second
+    )
+}
+
+/// Convert days since 1970-01-01 to year, month, day.
+/// Based on the Julian day algorithm.
+fn days_to_ymd(days: i64) -> (i16, u8, u8) {
+    // Julian day number for 1970-01-01 is 2440588
+    let jd = days + 2440588;
+
+    // Algorithm from Richards (2012)
+    let f = jd + 1401 + (((4 * jd + 274277) / 146097) * 3) / 4 - 38;
+    let e = 4 * f + 3;
+    let g = (e % 1461) / 4;
+    let h = 5 * g + 2;
+    let day = ((h % 153) / 5) + 1;
+    let month = ((h / 153 + 2) % 12) + 1;
+    let year = e / 1461 - 4716 + (12 + 2 - month) / 12;
+
+    (year as i16, month as u8, day as u8)
+}
 
 /// Default context for commands
 #[derive(Debug, serde::Serialize, serde::Deserialize, Clone)]

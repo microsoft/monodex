@@ -5,8 +5,8 @@
 use std::io::Write;
 
 use crate::app::{
-    Config, format_source_pointer, resolve_database_path, resolve_label_context,
-    search::{self, EndMarker, Preamble, SearchRenderModel, SearchWarning},
+    Config, resolve_database_path, resolve_label_context,
+    search::{self, EndMarker, Preamble, SearchRenderModel, SearchWarning, format_source_pointer},
 };
 use crate::engine::identifier::LabelId;
 use crate::engine::storage::ChunkRow;

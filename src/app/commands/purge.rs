@@ -2,7 +2,8 @@
 //! Edit here when: Modifying purge behavior, scope, or confirmation flow.
 //! Do not edit here for: Storage delete operations (see `engine/storage/chunks/storage.rs`, `engine/storage/labels.rs`).
 
-use crate::app::util::{format_count, stderr_lock_progress};
+use crate::app::lock_progress::stderr_lock_progress;
+use crate::app::number_format::format_count;
 use crate::app::{Config, resolve_database_path};
 use crate::engine::identifier;
 use crate::engine::storage::{

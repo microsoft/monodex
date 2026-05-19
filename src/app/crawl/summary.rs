@@ -10,7 +10,8 @@
 
 use std::collections::HashSet;
 
-use crate::app::{format_count, format_duration};
+use crate::app::crawl::progress_format::format_duration;
+use crate::app::number_format::format_count;
 
 fn write_summary_counts(
     out: &mut impl std::io::Write,

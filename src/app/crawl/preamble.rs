@@ -10,7 +10,7 @@ use anyhow::{Result, anyhow};
 
 use crate::app::config::Config;
 use crate::app::crawl::types::CrawlSourceMetadata;
-use crate::app::util::stderr_lock_progress;
+use crate::app::lock_progress::stderr_lock_progress;
 use crate::app::{resolve_database_path, validate_config_path};
 use crate::engine::crawl_config::{CompiledCrawlConfig, load_compiled_crawl_config};
 use crate::engine::git_ops::resolve_commit_oid;

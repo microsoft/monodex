@@ -2,13 +2,17 @@
 //! Edit here when: Adding or modifying CLI commands, user-facing config, or the high-level crawl orchestration.
 //! Do not edit here for: Engine internals (see `engine/`).
 
+mod chunk_display;
+mod chunk_selector;
 pub mod cli;
 pub mod commands;
 pub mod config;
 pub mod context;
 pub mod crawl;
+mod lock_progress;
+mod number_format;
 pub mod search;
-pub mod util;
+mod terminal_output;
 
 pub use cli::{Cli, Commands, CrawlSourceArgs};
 pub use config::{
@@ -19,8 +23,3 @@ pub use context::{
     DefaultContext, load_default_context, resolve_label_context, save_default_context,
 };
 pub use crawl::{CrawlFailures, run_embed_upload_pipeline, run_upsert_without_vectors};
-pub use util::{
-    ChunkSelector, format_chunk_report, format_count, format_duration, format_eta,
-    format_source_pointer, log_timestamp, parse_chunk_selector, sanitize_for_terminal,
-    utc_rfc3339_timestamp,
-};

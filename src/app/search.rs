@@ -1,8 +1,8 @@
 //! Search output rendering infrastructure.
 //!
 //! Purpose: Unified rendering for search results, warnings, and metadata.
-//! Edit here when: Changing search output format, adding warning types, modifying preamble.
-//! Do not edit here for: Retrieval dispatch (see commands/search.rs), fusion algorithm (see engine/fusion.rs).
+//! Edit here when: Changing search output format, adding warning types, modifying preamble, source-pointer formatting for warning remediation strings.
+//! Do not edit here for: Retrieval dispatch (see commands/search.rs), fusion algorithm (see engine/fusion.rs), chunk display (see app/chunk_display.rs).
 //!
 //! ## Output ordering rule
 //!
@@ -25,7 +25,30 @@ use crate::engine::{
 
 use std::collections::HashMap;
 
-use super::util::format_source_pointer;
+use super::chunk_display::format_chunk_report;
+
+// =============================================================================
+// Source pointer formatting (moved from util.rs)
+// =============================================================================
+
+/// Format source pointer for remediation messages.
+///
+/// Produces a `--commit <oid>` or `--working-dir` argument string suitable for
+/// suggested crawl commands in error/warning messages.
+pub fn format_source_pointer(row: &crate::engine::storage::LabelMetadataRow) -> String {
+    use crate::engine::storage::{SOURCE_KIND_GIT_COMMIT, SOURCE_KIND_WORKING_DIRECTORY};
+
+    match row.source_kind.as_str() {
+        SOURCE_KIND_GIT_COMMIT => row
+            .vector_source
+            .as_ref()
+            .or(row.fts_source.as_ref())
+            .map(|s| format!("--commit {}", s))
+            .unwrap_or_else(|| "--commit <commit>".to_string()),
+        SOURCE_KIND_WORKING_DIRECTORY => "--working-dir".to_string(),
+        _ => "[source]".to_string(),
+    }
+}
 
 // =============================================================================
 // Warning types
@@ -212,7 +235,7 @@ fn render_result_header<W: Write>(
     let marker = build_provenance_marker(&hit.contributors);
 
     // Build breadcrumb report
-    let breadcrumb_report = super::util::format_chunk_report(
+    let breadcrumb_report = format_chunk_report(
         chunk.breadcrumb.as_deref(),
         chunk.split_part_ordinal.zip(chunk.split_part_count),
         &chunk.chunk_kind,

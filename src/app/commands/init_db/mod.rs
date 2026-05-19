@@ -10,7 +10,7 @@ use std::fs;
 use std::path::Path;
 
 use crate::app::config::{Config, resolve_database_path};
-use crate::app::util::stderr_lock_progress;
+use crate::app::lock_progress::stderr_lock_progress;
 use crate::engine::schema::{
     CHUNKS_TABLE, LABEL_METADATA_TABLE, chunks_schema, label_metadata_schema,
 };
