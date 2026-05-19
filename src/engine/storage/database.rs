@@ -1,6 +1,6 @@
 //! Purpose: Open a LanceDB dataset, validate schema version, expose table handles.
 //! Edit here when: Changing database open logic, schema version validation, or table handle access.
-//! Do not edit here for: Row types (see rows.rs), chunk operations (see chunks/mod.rs), label operations (see labels.rs).
+//! Do not edit here for: Row types (see rows.rs), chunk operations (see chunks/storage.rs), label operations (see labels.rs).
 
 use anyhow::{Result, anyhow, bail};
 use lancedb::connection::Connection;

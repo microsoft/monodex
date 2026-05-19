@@ -1,9 +1,13 @@
 //! Purpose: Test suite for chunks storage operations.
 //! Edit here when: Adding or modifying ChunkStorage tests.
-//! Do not edit here for: Production storage code — edit chunks/mod.rs.
+//! Do not edit here for: Production storage code — edit storage.rs.
 
-use super::*;
+use super::storage::*;
+use std::sync::Arc;
+
+use crate::engine::schema::VECTOR_DIMENSION;
 use crate::engine::schema::chunks_schema;
+use crate::engine::storage::ChunkRow;
 use lancedb::connect;
 use tempfile::TempDir;
 
@@ -262,7 +266,7 @@ async fn test_truncate() {
 
     storage.truncate().await.unwrap();
 
-    let count = storage.table.count_rows(None).await.unwrap();
+    let count = storage.table().count_rows(None).await.unwrap();
     assert_eq!(count, 0);
 }
 

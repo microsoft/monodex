@@ -1,6 +1,6 @@
 //! Purpose: Typed Arrow readers and query-collect helpers shared by storage submodules.
 //! Edit here when: changing how storage code reads typed values from Arrow batches or collects LanceDB query batches into typed rows.
-//! Do not edit here for: row type definitions (see rows.rs), SQL predicate builders (see predicate.rs), or table-specific operations (see chunks/mod.rs, labels.rs).
+//! Do not edit here for: row type definitions (see rows.rs), SQL predicate builders (see predicate.rs), or table-specific operations (see chunks/storage.rs, labels.rs). For chunk-row Arrow encoding and decoding, see chunks/arrow_encoding.rs.
 
 use anyhow::{Result, anyhow};
 use arrow_array::{

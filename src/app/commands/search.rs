@@ -1,6 +1,6 @@
 //! Purpose: Handler for the `search` command — resolve label context, dispatch retrieval methods, fuse results, and build the render model.
 //! Edit here when: Changing search orchestration, label-context resolution, retrieval dispatch, RRF fusion, or render-model construction.
-//! Do not edit here for: Search output formatting or the `>`-prefixed line shape (see `app/search.rs`), vector search logic (see `engine/storage/chunks/mod.rs`), embedding (see `engine/parallel_embedder.rs`), FTS search (see `engine/fts/search.rs`).
+//! Do not edit here for: Search output formatting or the `>`-prefixed line shape (see `app/search.rs`), vector search logic (see `engine/storage/chunks/storage.rs`), embedding (see `engine/parallel_embedder.rs`), FTS search (see `engine/fts/search.rs`).
 
 use std::io::Write;
 

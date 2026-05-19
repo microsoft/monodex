@@ -3,7 +3,7 @@
 //! Purpose: Centralize the vocabulary of filter expressions used across the storage layer.
 //!
 //! Edit here when: Adding new predicate patterns, changing sanitization rules.
-//! Do not edit here for: Storage operations themselves (see chunks/mod.rs, labels.rs),
+//! Do not edit here for: Storage operations themselves (see chunks/storage.rs, labels.rs),
 //!   or validation logic (see engine/identifier.rs).
 //!
 //! Validation contract: Callers must pass already-validated values. Catalog names
