@@ -31,6 +31,8 @@ The thresholds apply when making a non-trivial addition to a file, not when only
 
 **Hard ceiling:** no file exceeds 2000 lines total (everything in the file, not the production-only count used above). At this size the file is too large to navigate as one unit regardless of edit intent, so the edit-intent test does not apply and footer-noting is not an option. Raise it as a reorganization signal per "When the local rules don't fit" below.
 
+**Optional header element: size note.** A file at or over a review or split-or-flag threshold may stay in place if its module header carries a `Size note:` line stating the current line count and a one-sentence justification. Revisit when the file grows another 100 lines past the count recorded in the note. The hard ceiling does not admit a size note (see above).
+
 ### Test before splitting
 
 Name each proposed file and complete this sentence for it:
