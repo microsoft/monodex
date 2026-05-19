@@ -186,7 +186,8 @@ Keep the direct `tantivy` dependency aligned with the version resolved through L
 
 Git-aware enumeration and blob reading. The `BlobSource` trait abstracts over commit and working-directory crawl sources so the crawl pipeline can stay free of mode-branching.
 
-- `mod.rs`: Public `BlobSource` trait, `FileEntry`, `PackageIndex`, the two `BlobSource` implementations, and `package.json` name extraction.
+- `blob_source.rs`: The `BlobSource` trait, `FileEntry`, and the two `BlobSource` implementations (`CommitBlobSource`, `WorkingDirBlobSource`).
+- `package_index.rs`: `PackageIndex` lookup structure and `package.json` name extraction.
 - `commit.rs`: gix-based commit-tree enumeration, blob reading, and per-commit package-index construction.
 - `working_dir.rs`: Subprocess-based working-tree reading. Shells out to `git ls-files` / `git status` / `git hash-object` (Git ≥ 2.35.0) so blob IDs match commit-mode IDs after `.gitattributes` and clean filters apply.
 
