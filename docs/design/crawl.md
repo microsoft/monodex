@@ -86,7 +86,7 @@ The phase reads the label's chunks from LanceDB (via `get_chunks_for_label`) and
 
 After `commit()` succeeds, the manifest at `<database-dir>/fts/<catalog>/<label>/manifest.json` is written with the `FTS_SCHEMA_ID` and `FTS_TOKENIZER_ID` constants the index was built with. The manifest stores only compatibility metadata; it does not track row_ids.
 
-**Schema and tokenizer ID mismatch.** The schema and tokenizer behavior are versioned by `FTS_SCHEMA_ID` and `FTS_TOKENIZER_ID` constants in `src/engine/util.rs`. Mismatch is detected via the manifest's stored IDs, not by introspecting Tantivy's on-disk schema:
+**Schema and tokenizer ID mismatch.** The schema and tokenizer behavior are versioned by `FTS_SCHEMA_ID` and `FTS_TOKENIZER_ID` constants in `src/engine/identity.rs`. Mismatch is detected via the manifest's stored IDs, not by introspecting Tantivy's on-disk schema:
 
 - If the manifest's IDs do not match the current constants: delete the per-label FTS directory and rebuild from scratch. The intent is to recover automatically from version bumps.
 - If Tantivy fails to open with the manifest's IDs matching, or if the manifest is unreadable while Tantivy state exists: error out with a clear message. This is corruption and should reach a human, not be papered over by a silent rebuild.

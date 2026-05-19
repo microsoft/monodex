@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use std::path::Path;
 
-use crate::engine::util::{FTS_SCHEMA_ID, FTS_TOKENIZER_ID};
+use crate::engine::identity::{FTS_SCHEMA_ID, FTS_TOKENIZER_ID};
 
 /// The result of reading a manifest file.
 ///

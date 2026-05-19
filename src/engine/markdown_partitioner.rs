@@ -12,8 +12,8 @@ pub fn partition_markdown(
     file_path: &str,
     catalog: &str,
 ) -> Result<Vec<super::partitioner::PartitionedChunk>, super::partitioner::PartitionError> {
+    use super::identity::compute_hash;
     use super::partitioner::PartitionedChunk;
-    use super::util::compute_hash;
 
     let lines: Vec<&str> = source.lines().collect();
     let mut chunks = Vec::new();

@@ -1,6 +1,6 @@
 //! Purpose: App-wide formatting and display utilities — timestamps, durations, byte sizes, terminal-output sanitization for `>`-prefixed search lines, chunk selector parsing.
 //! Edit here when: Adding or modifying user-facing formatting helpers, or chunk selector parsing logic.
-//! Do not edit here for: Engine-wide utilities (see `engine/util.rs`), view command output (see `app/commands/view.rs`).
+//! Do not edit here for: Engine-wide utilities (see `engine/identity.rs`), view command output (see `app/commands/view.rs`).
 
 /// Get current timestamp for logging (HH:MM:SS format)
 /// Format current time as HH:MM:SS for progress-log use.

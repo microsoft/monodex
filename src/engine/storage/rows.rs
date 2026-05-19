@@ -110,7 +110,7 @@ impl ChunkRow {
 
         // Validate row_id matches computed value from file_id and chunk_ordinal
         let expected_row_id =
-            crate::engine::util::compute_row_id(&self.file_id, self.chunk_ordinal as usize);
+            crate::engine::identity::compute_row_id(&self.file_id, self.chunk_ordinal as usize);
         if self.row_id != expected_row_id {
             return Err(anyhow!(
                 "ChunkRow row_id '{}' does not match expected '{}' for file_id '{}' and chunk_ordinal {}",

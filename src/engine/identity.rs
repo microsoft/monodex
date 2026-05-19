@@ -1,4 +1,4 @@
-//! Purpose: Identity constants and hash utilities for chunk and file identification.
+//! Purpose: Identity and version stamps for content addressing.
 //! Edit here when: Adding new identity constants (e.g., FTS_SCHEMA_ID) or changing hash algorithms.
 //! Do not edit here for: Chunking logic (use chunker.rs), storage operations (use storage/), general utilities (use appropriate module).
 //!

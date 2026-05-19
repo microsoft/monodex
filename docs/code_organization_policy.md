@@ -86,7 +86,7 @@ This section can be omitted when there is nothing to flag.
 - **New storage operation** → pick the `engine/storage/` submodule by operation family: `database.rs` for connection/open, `chunks/` for chunk operations, `labels.rs` for label metadata. If a family outgrows a single file per the edit-intent test, split it into its own subdirectory (as `chunks/` already shows).
 - **New partitioner heuristic** → `split_search.rs` for split-point logic, `node_analysis.rs` for AST node properties, `scoring.rs` for quality measurement.
 - **New config field** → `app/config.rs` for app-level config, `engine/crawl_config.rs` for crawl filtering rules.
-- **Shared utility** → `engine/util.rs` for engine-wide, `app/util.rs` for app-wide formatting/display. Only for helpers with multiple real call sites.
+- **Shared utility** → small generic-utility files are tolerated as a holding pen until their contents grow large or coherent enough to earn a specific name. `app/util.rs` is the current example. When such a file's contents reach a size where one or more focused names would describe them better, split it into those focused names (e.g. as a holding pen grows, "formatting" and "parsing" might emerge as the two real edit intents that earn their own files). Engine-wide helpers similarly go in files named for what they actually hold (`identity.rs` for identity and version-stamp helpers); a future engine-wide holding pen is allowed if needed, but is expected to graduate to focused names over time.
 
 ## Module header comments
 
@@ -107,7 +107,7 @@ This codebase does not pursue 100% line coverage. Several specific decisions ref
 - **Pure decision logic is extracted and unit-tested; effectful orchestration is covered by integration tests at real seams.** `engine/search_decision.rs` is a pure function with focused unit tests. `app/commands/crawl.rs`'s `run_crawl_async` orchestrator is covered by `tests/active_labels_preserve.rs`, `tests/label_add.rs`, and `tests/vector_preserve.rs` running against real LanceDB, not against mocked storage.
 - **Some short predicates carry one test per named input category.** `should_skip_label_cleanup` in `app/commands/crawl.rs` is a three-term boolean with four tests, one per failure category.
 - **Stable user-facing output is snapshot-tested rather than asserted with substring batteries.** A snapshot diff is reviewable as a single user-experience change.
-- **State invariants are checked at construction with `assert!` / `debug_assert!`.** `file_id` and `row_id` derivation in `engine/util.rs` and identifier validation in `engine/identifier.rs` are the examples. The test suite does not duplicate these checks across input combinations.
+- **State invariants are checked at construction with `assert!` / `debug_assert!`.** `file_id` and `row_id` derivation in `engine/identity.rs` and identifier validation in `engine/identifier.rs` are the examples. The test suite does not duplicate these checks across input combinations.
 - **Bug-fix PRs add a regression test when the bug class is plausibly re-introducible on future edits.** A miswritten conditional caught by review does not need its own test; a subtle ordering bug in a phase-gating predicate does.
 
 ## Test placement

@@ -40,7 +40,7 @@ The fact that `relative_path` is part of `file_id` matters: identical content at
 
 The fact that `catalog` is part of `file_id` matters too: identical content at the same path in two different catalogs produces distinct `file_id` values, and therefore distinct rows. Catalogs are sovereign units; cross-catalog content sharing is not a feature, and the writer-lock layer relies on this isolation to permit parallel writers against different catalogs.
 
-The `embedder_id` and `chunker_id` constants live in `src/engine/util.rs`. Bumping either invalidates reuse. Change them when chunking or embedding behavior changes in a way that should force re-indexing.
+The `embedder_id` and `chunker_id` constants live in `src/engine/identity.rs`. Bumping either invalidates reuse. Change them when chunking or embedding behavior changes in a way that should force re-indexing.
 
 ### Sentinel-based incremental crawl
 
@@ -88,7 +88,7 @@ See [search.md](./search.md) for the full decision rules, RRF mechanics, the can
 
 Catalog and label names follow strict syntax rules: catalogs are kebab-case, labels are Git-like. Reserved characters (`:`, `@`, `+`, `#`) are forbidden in both. Validation lives in `src/engine/identifier.rs`. The full grammar, including planned typed-label and cross-catalog reference forms, is in [label_ids.md](./label_ids.md).
 
-Four versioning constants live in `src/engine/util.rs` and govern when on-disk state must be rebuilt. `EMBEDDER_ID` and `CHUNKER_ID` participate in `file_id`; bumping either invalidates chunk reuse across crawls. `FTS_SCHEMA_ID` and `FTS_TOKENIZER_ID` do not participate in `file_id`; bumping either invalidates FTS state but leaves vector state untouched, so a tokenizer tweak does not force re-embedding. Treat all four as load-bearing: changes to them invalidate cached state and force expensive rebuild work.
+Four versioning constants live in `src/engine/identity.rs` and govern when on-disk state must be rebuilt. `EMBEDDER_ID` and `CHUNKER_ID` participate in `file_id`; bumping either invalidates chunk reuse across crawls. `FTS_SCHEMA_ID` and `FTS_TOKENIZER_ID` do not participate in `file_id`; bumping either invalidates FTS state but leaves vector state untouched, so a tokenizer tweak does not force re-embedding. Treat all four as load-bearing: changes to them invalidate cached state and force expensive rebuild work.
 
 ## Filesystem footprint
 
@@ -155,7 +155,7 @@ Reusable indexing engine. Does not depend on `src/app/`.
 - `schema.rs`: Arrow schema definitions for the `chunks` and `label_metadata` LanceDB tables. Holds `MONODEX_SCHEMA_VERSION`, which must be bumped on any change to column shape; see [monodex_files.md](./monodex_files.md) for the rationale.
 - `search_decision.rs`: Pure function `decide(metadata, requested) -> Decision`. Computes the active subset, applies the decision table, returns a structured `Decision` outcome (`SingleMethod`, `Hybrid`, `Error`) with structured `DecisionWarning`s. No I/O, no backend dispatch; unit-testable in isolation. The orchestrator translates `DecisionWarning`s into pre-formatted `SearchWarning`s before passing them to the renderer.
 - `system_info.rs`: Detect total RAM, cgroup limits, CPU cores. Implements the `"auto"` heuristic for embedding-model `modelInstances` and `threadsPerInstance`. Cgroup-aware so containerized installs warn correctly.
-- `util.rs`: Hash utilities: `compute_file_id` (xxhash of embedder/chunker/catalog/blob/path), `compute_row_id`, `compute_hash`. Holds the four versioning constants: `EMBEDDER_ID` and `CHUNKER_ID` (participate in `file_id`; bumping forces re-vectorization), `FTS_SCHEMA_ID` and `FTS_TOKENIZER_ID` (do not participate in `file_id`; bumping invalidates only FTS state).
+- `identity.rs`: Hash utilities: `compute_file_id` (xxhash of embedder/chunker/catalog/blob/path), `compute_row_id`, `compute_hash`. Holds the four versioning constants: `EMBEDDER_ID` and `CHUNKER_ID` (participate in `file_id`; bumping forces re-vectorization), `FTS_SCHEMA_ID` and `FTS_TOKENIZER_ID` (do not participate in `file_id`; bumping invalidates only FTS state).
 - `warning.rs`: `CrawlWarning` enum for in-flight crawl events and `DecisionWarning` enum for search-decision events translated to `SearchWarning` by the app layer.
 - `working_dir_sentinel.rs`: Generate per-crawl-unique sentinel strings for working-directory crawls.
 

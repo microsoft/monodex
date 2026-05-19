@@ -9,6 +9,7 @@ pub mod fts;
 pub mod fusion;
 pub mod git_ops;
 pub mod identifier;
+pub mod identity;
 pub mod markdown_partitioner;
 pub mod package_lookup;
 pub mod parallel_embedder;
@@ -18,7 +19,6 @@ pub mod schema;
 pub mod search_decision;
 pub mod storage;
 pub mod system_info;
-pub mod util;
 pub mod warning;
 pub mod working_dir_sentinel;
 

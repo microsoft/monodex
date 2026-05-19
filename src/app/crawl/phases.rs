@@ -149,9 +149,9 @@ pub async fn classify_files(
     let mut existing_file_ids: HashSet<String> = HashSet::new();
 
     for file_entry in files {
-        let file_id = crate::engine::util::compute_file_id(
-            crate::engine::util::EMBEDDER_ID,
-            crate::engine::util::CHUNKER_ID,
+        let file_id = crate::engine::identity::compute_file_id(
+            crate::engine::identity::EMBEDDER_ID,
+            crate::engine::identity::CHUNKER_ID,
             catalog_name,
             &file_entry.blob_id,
             &file_entry.relative_path,

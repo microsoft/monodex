@@ -6,7 +6,7 @@ The choice of chunking is fundamental, not just an implementation detail. The sa
 
 ## Embedding runtime and the chunk-size budget
 
-Chunk size is determined by the embedding model. The current model is `jinaai/jina-embeddings-v2-base-code`, identified internally as `jina-embeddings-v2-base-code:v1` (see `EMBEDDER_ID` in `src/engine/util.rs`).
+Chunk size is determined by the embedding model. The current model is `jinaai/jina-embeddings-v2-base-code`, identified internally as `jina-embeddings-v2-base-code:v1` (see `EMBEDDER_ID` in `src/engine/identity.rs`).
 
 | Property   | Value                                                            |
 | ---------- | ---------------------------------------------------------------- |

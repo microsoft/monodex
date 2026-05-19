@@ -3,9 +3,9 @@
 //! Do not edit here for: Changing which files to crawl (use crawl_config.rs), embedding model changes (use parallel_embedder.rs).
 
 use super::crawl_config::ChunkingStrategy;
+use super::identity::{CHUNKER_ID, EMBEDDER_ID, compute_file_id, compute_hash, compute_row_id};
 use super::markdown_partitioner::partition_markdown;
 use super::partitioner::{PartitionConfig, PartitionedChunk, partition_typescript};
-use super::util::{CHUNKER_ID, EMBEDDER_ID, compute_file_id, compute_hash, compute_row_id};
 use anyhow::Result;
 
 /// Represents a chunk of code or documentation

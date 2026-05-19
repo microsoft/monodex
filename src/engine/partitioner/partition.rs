@@ -3,7 +3,7 @@
 //! Do not edit here for: Split-point search (see `split_search.rs`), AST node analysis (see `node_analysis.rs`), chunk types (see `types.rs`).
 
 use crate::engine::breadcrumb::encode_path_component;
-use crate::engine::util::compute_hash;
+use crate::engine::identity::compute_hash;
 use tree_sitter::{Language, Parser};
 
 use super::node_analysis::{extract_imports_end_line, get_chunk_metadata, get_lines_text};

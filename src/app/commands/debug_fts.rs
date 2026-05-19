@@ -13,8 +13,8 @@ use crate::app::{
 };
 use crate::engine::fts::index::FtsIndex;
 use crate::engine::fts::tokenizer::tokenize_text;
+use crate::engine::identity::compute_row_id;
 use crate::engine::storage::Database;
-use crate::engine::util::compute_row_id;
 
 /// Maximum number of tokens to display in output.
 const MAX_TOKENS_DISPLAY: usize = 100;

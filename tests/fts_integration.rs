@@ -1746,7 +1746,7 @@ fn test_non_utf8_file_emits_warning__quick_excluded() {
 #[allow(non_snake_case)]
 fn test_hybrid_search_degrades_on_stale_fts__quick_excluded() {
     use monodex::engine::fts::{FtsIndex, FtsManifest};
-    use monodex::engine::util::FTS_TOKENIZER_ID;
+    use monodex::engine::identity::FTS_TOKENIZER_ID;
 
     let monodex_home = unique_temp_dir();
     let repo_dir = unique_temp_dir();
@@ -1838,8 +1838,8 @@ fn test_hybrid_search_degrades_on_stale_fts__quick_excluded() {
 #[allow(non_snake_case)]
 fn test_fts_only_search_stale_warning_no_results__quick_excluded() {
     use monodex::engine::fts::{FtsIndex, FtsManifest};
+    use monodex::engine::identity::FTS_TOKENIZER_ID;
     use monodex::engine::retrieval::RetrievalMethod;
-    use monodex::engine::util::FTS_TOKENIZER_ID;
 
     let monodex_home = unique_temp_dir();
     let repo_dir = unique_temp_dir();
