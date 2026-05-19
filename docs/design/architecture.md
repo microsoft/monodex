@@ -126,11 +126,16 @@ One file per CLI subcommand handler. Most are thin: parse args, call into the en
 - `crawl.rs`: `crawl`: enumerate files (commit tree or working dir), drive the embed/upload pipeline, run label reassignment after success.
 - `debug_fts.rs`: `debug-fts`: print tokens for a chunk and optionally explain query ranking. Diagnostic for FTS tokenization issues.
 - `dump_chunks.rs`: `dump-chunks`: visualize partitioner output for a single file. Supports debug, visualize, and with-fallback modes.
-- `init_db/`: `init-db`: create or validate a database directory, write the LanceDB tables, create the empty `fts/` directory, write `monodex-meta.json`, and handle `--delete-everything`.
 - `purge.rs`: `purge`: delete chunks, label metadata, and FTS state for a catalog, or truncate/reinitialize database-scoped state for `--all`. Operates at catalog or database scope only; there is no per-label purge.
 - `search.rs`: `search`: resolve label context, evaluate retrieval-method decision rules, collect vector/FTS hits, fuse via RRF when multiple methods are active, hydrate chunks, and pass a render model to `app/search.rs`. See [search.md](../design/search.md) for decision rules and output format.
 - `use_cmd.rs`: `use`: set or display default catalog/label context. Named `use_cmd` because `use` is a Rust keyword.
 - `view.rs`: `view`: retrieve chunks by `file_id` with selector syntax (`:N`, `:N-M`, `:N-end`, or absent for the whole file). Reconstructs files from chunks.
+
+### src/app/commands/init_db/
+
+init-db command broken out into its own directory because `run.rs` is too large for a single-file command handler.
+
+- `run.rs`: Implementation of the `init-db` command (database-state classification, deletion, creation, validation, logging).
 
 ### src/app/crawl/
 
