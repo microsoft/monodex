@@ -125,12 +125,13 @@ pub fn fuse(
 
     // Sort with tiebreak
     fused_hits.sort_by(|a, b| {
-        // Level 1: RRF score descending
-        if (a.rrf_score - b.rrf_score).abs() > f32::EPSILON {
-            return b
-                .rrf_score
-                .partial_cmp(&a.rrf_score)
-                .unwrap_or(std::cmp::Ordering::Equal);
+        // Level 1: RRF score descending (exact comparison)
+        let score_order = b
+            .rrf_score
+            .partial_cmp(&a.rrf_score)
+            .unwrap_or(std::cmp::Ordering::Equal);
+        if score_order != std::cmp::Ordering::Equal {
+            return score_order;
         }
 
         // Level 2: Best contributing rank ascending (lower is better)

@@ -172,6 +172,11 @@ impl ParallelEmbedder {
             .map(|i| (0..seq_len).map(|j| data[j * HIDDEN_SIZE + i]).sum::<f32>() / seq_len as f32)
             .collect();
 
+        // L2 normalization is omitted intentionally. The only consumer is vector_search
+        // with DistanceType::Cosine, which is scale-invariant. Adding an ANN index or
+        // switching to L2/dot-product distance would require normalizing the returned
+        // vector here.
+
         Ok(embedding)
     }
 }
