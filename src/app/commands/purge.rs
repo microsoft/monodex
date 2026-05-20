@@ -60,12 +60,12 @@ async fn run_purge_all_async(db_path: &std::path::Path) -> anyhow::Result<()> {
     chunk_storage.truncate().await?;
     label_storage.truncate().await?;
 
-    // Delete and recreate FTS directory (always recreate, even if absent)
-    let fts_dir = db_path.join("fts");
-    if fts_dir.exists() {
-        std::fs::remove_dir_all(&fts_dir)?;
+    // Delete and recreate FTS folder (always recreate, even if absent)
+    let fts_folder = db_path.join("fts");
+    if fts_folder.exists() {
+        std::fs::remove_dir_all(&fts_folder)?;
     }
-    std::fs::create_dir_all(&fts_dir)?;
+    std::fs::create_dir_all(&fts_folder)?;
 
     println!("✅ Database purged successfully");
     Ok(())
@@ -85,10 +85,10 @@ async fn run_purge_catalog_async(
     let chunks_deleted = chunk_storage.delete_by_catalog(catalog_name).await?;
     let labels_deleted = label_storage.delete_by_catalog(catalog_name).await?;
 
-    // Delete FTS directory for this catalog
-    let fts_catalog_dir = db_path.join("fts").join(catalog_name);
-    if fts_catalog_dir.exists() {
-        std::fs::remove_dir_all(&fts_catalog_dir)?;
+    // Delete FTS folder for this catalog
+    let fts_catalog_folder = db_path.join("fts").join(catalog_name);
+    if fts_catalog_folder.exists() {
+        std::fs::remove_dir_all(&fts_catalog_folder)?;
     }
 
     println!(

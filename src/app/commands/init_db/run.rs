@@ -378,8 +378,9 @@ async fn create_database(db_path: &Path) -> Result<()> {
         .map_err(|e| anyhow!("Failed to create label_metadata table: {}", e))?;
 
     // Create fts folder for Tantivy indexes (populated lazily per label)
-    let fts_dir = db_path.join("fts");
-    std::fs::create_dir_all(&fts_dir).map_err(|e| anyhow!("Failed to create fts folder: {}", e))?;
+    let fts_folder = db_path.join("fts");
+    std::fs::create_dir_all(&fts_folder)
+        .map_err(|e| anyhow!("Failed to create fts folder: {}", e))?;
 
     // Write meta file using shared implementation (with fsync)
     let meta = MetaFile::new();

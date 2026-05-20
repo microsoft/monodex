@@ -2,7 +2,7 @@
 //!
 //! Purpose: Export crawl submodules and public surface for command handlers.
 //! Edit here when: Adding or removing crawl submodules, or changing the public surface
-//! re-exported from this directory.
+//! re-exported from this folder.
 //! Do not edit here for: Phase orchestration (see `phases.rs`), embed/upload pipeline
 //! (see `pipeline.rs`), crawl types (see `types.rs`), warning handling (see `warning.rs`),
 //! shared preamble setup (see `preamble.rs`), summary/warning rendering (see `summary.rs`),

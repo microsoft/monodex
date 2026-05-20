@@ -177,7 +177,7 @@ mod tests {
 
     // Note: Full integration tests require a real LanceDB setup which is complex.
     // The core logic is tested via unit tests in the manifest and index modules.
-    // End-to-end tests for indexing are in the tests/ directory.
+    // End-to-end tests for indexing are in the tests/ folder.
 
     #[test]
     fn test_tokenize_text_produces_tokens() {

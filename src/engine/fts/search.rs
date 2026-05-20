@@ -37,7 +37,7 @@ pub struct FtsHit {
 pub enum FtsSearchOutcome {
     /// Search ran successfully. Vec may be empty (no matches).
     Found(Vec<FtsHit>),
-    /// FTS directory does not exist for this label.
+    /// FTS folder does not exist for this label.
     /// Caller decides whether to warn or silently return empty.
     NoIndex,
     /// FTS index exists but is stale (manifest mismatch).

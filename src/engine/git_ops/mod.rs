@@ -1,5 +1,5 @@
 //! Purpose: Git-aware enumeration and blob reading for crawl sources.
-//! Edit here when: Adding or renaming git_ops submodules, or changing the public surface re-exported from this directory.
+//! Edit here when: Adding or renaming git_ops submodules, or changing the public surface re-exported from this folder.
 //! Do not edit here for: the `BlobSource` trait or `FileEntry` (see `blob_source.rs`), package-index lookup and extraction (see `package_index.rs`), gix-based commit traversal (see `commit.rs`), subprocess-based working-tree reading (see `working_dir.rs`).
 
 pub mod commit;

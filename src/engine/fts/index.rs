@@ -95,7 +95,7 @@ impl FtsIndex {
     /// # Returns
     /// An `FtsIndex` wrapper with the index and field handles.
     pub fn open_or_create(db_path: &Path, label_id: &LabelId) -> Result<Self> {
-        let index_dir = fts_index_dir(db_path, label_id);
+        let index_dir = fts_index_folder(db_path, label_id);
 
         // Step 1: Read the manifest first
         let manifest_path = index_dir.join("manifest.json");
@@ -202,7 +202,7 @@ impl FtsIndex {
     /// * `db_path` - Path to the Monodex database root
     /// * `label_id` - The label identifier
     pub fn open_existing(db_path: &Path, label_id: &LabelId) -> Result<FtsOpenExistingOutcome> {
-        let index_dir = fts_index_dir(db_path, label_id);
+        let index_dir = fts_index_folder(db_path, label_id);
 
         // Step 1: Check if folder exists with Tantivy state
         if !has_tantivy_state(&index_dir) {
@@ -315,7 +315,7 @@ impl FtsIndex {
 /// Compute the FTS index folder path for a label.
 ///
 /// The path is: `<db>/fts/<catalog>/<label>/`
-pub fn fts_index_dir(db_path: &Path, label_id: &LabelId) -> PathBuf {
+pub fn fts_index_folder(db_path: &Path, label_id: &LabelId) -> PathBuf {
     db_path
         .join("fts")
         .join(label_id.catalog())
@@ -370,7 +370,7 @@ mod tests {
         let _fts_index = FtsIndex::open_or_create(db_path, &label_id).unwrap();
 
         // Verify folder was created
-        let expected_dir = fts_index_dir(db_path, &label_id);
+        let expected_dir = fts_index_folder(db_path, &label_id);
         assert!(expected_dir.exists());
 
         // Verify meta.json exists (Tantivy creates it)
@@ -402,12 +402,12 @@ mod tests {
     }
 
     #[test]
-    fn test_fts_index_dir_path() {
+    fn test_fts_index_folder_path() {
         let temp_dir = TempDir::new().unwrap();
         let db_path = temp_dir.path();
         let label_id = make_label_id("my-catalog", "my-label");
 
-        let dir = fts_index_dir(db_path, &label_id);
+        let dir = fts_index_folder(db_path, &label_id);
         assert_eq!(dir, db_path.join("fts").join("my-catalog").join("my-label"));
     }
 
@@ -445,7 +445,7 @@ mod tests {
         drop(fts_index);
 
         // Write a manifest with mismatched schema ID
-        let manifest_path = fts_index_dir(db_path, &label_id).join("manifest.json");
+        let manifest_path = fts_index_folder(db_path, &label_id).join("manifest.json");
         let bad_manifest = FtsManifest {
             fts_schema_id: "old-schema-id".to_string(),
             fts_tokenizer_id: FTS_TOKENIZER_ID.to_string(),
@@ -474,7 +474,7 @@ mod tests {
         drop(fts_index);
 
         // Delete the manifest but leave Tantivy state
-        let manifest_path = fts_index_dir(db_path, &label_id).join("manifest.json");
+        let manifest_path = fts_index_folder(db_path, &label_id).join("manifest.json");
         std::fs::remove_file(&manifest_path).unwrap();
 
         // Open existing should return Stale
@@ -502,7 +502,7 @@ mod tests {
         drop(fts_index);
 
         // Corrupt the manifest
-        let manifest_path = fts_index_dir(db_path, &label_id).join("manifest.json");
+        let manifest_path = fts_index_folder(db_path, &label_id).join("manifest.json");
         std::fs::write(&manifest_path, "not valid json").unwrap();
 
         // Open existing should return Stale
@@ -543,7 +543,7 @@ mod tests {
         let label_id = make_label_id("test-catalog", "test-label");
 
         // Create the FTS folder but no Tantivy state
-        let index_dir = fts_index_dir(db_path, &label_id);
+        let index_dir = fts_index_folder(db_path, &label_id);
         std::fs::create_dir_all(&index_dir).unwrap();
 
         let result = FtsIndex::open_existing(db_path, &label_id).unwrap();
@@ -568,7 +568,7 @@ mod tests {
         drop(fts_index);
 
         // Delete the manifest but leave Tantivy state
-        let manifest_path = fts_index_dir(db_path, &label_id).join("manifest.json");
+        let manifest_path = fts_index_folder(db_path, &label_id).join("manifest.json");
         std::fs::remove_file(&manifest_path).unwrap();
 
         // Open or create should rebuild (delete and recreate)
@@ -601,7 +601,7 @@ mod tests {
         drop(fts_index);
 
         // Overwrite manifest with mismatched schema ID
-        let manifest_path = fts_index_dir(db_path, &label_id).join("manifest.json");
+        let manifest_path = fts_index_folder(db_path, &label_id).join("manifest.json");
         let bad_manifest = serde_json::json!({
             "fts_schema_id": "bad-schema-id",
             "fts_tokenizer_id": FTS_TOKENIZER_ID

@@ -8,10 +8,10 @@ use std::io;
 use tantivy::TantivyError;
 use tantivy::directory::error::{OpenDirectoryError, OpenReadError};
 
-/// Returns true if the Tantivy error indicates a directory or file that does not exist.
+/// Returns true if the Tantivy error indicates a folder or file that does not exist.
 ///
 /// This is the load-bearing piece of the lock-free reader contract: when a concurrent
-/// `purge --catalog` removes the FTS directory after a reader has opened it, the reader
+/// `purge --catalog` removes the FTS folder after a reader has opened it, the reader
 /// should gracefully return `NoIndex` rather than propagating an error.
 ///
 /// # Arguments

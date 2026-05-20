@@ -32,7 +32,7 @@ pub async fn create_test_db_with_chunks(
     chunks: Vec<ChunkRow>,
     labels: Vec<LabelMetadataRow>,
 ) {
-    // Create database directory
+    // Create database folder
     fs::create_dir_all(db_path).unwrap();
 
     // Create LanceDB tables
@@ -51,7 +51,7 @@ pub async fn create_test_db_with_chunks(
         .await
         .expect("Failed to create label_metadata table");
 
-    // Create fts directory for Tantivy indexes
+    // Create fts folder for Tantivy indexes
     fs::create_dir_all(db_path.join("fts")).unwrap();
 
     // Write meta file

@@ -46,12 +46,12 @@ pub struct CrawlConfig {
     pub file_types: HashMap<String, String>,
 
     /// Glob patterns for paths to exclude from crawling
-    /// Directory patterns (ending in "/") match any path under that directory
+    /// Folder patterns (ending in "/") match any path under that folder
     #[serde(rename = "patternsToExclude")]
     pub patterns_to_exclude: Vec<String>,
 
     /// Glob patterns that override exclusion (higher precedence)
-    /// Directory patterns (ending in "/") match any path under that directory
+    /// Folder patterns (ending in "/") match any path under that folder
     #[serde(rename = "patternsToKeep")]
     pub patterns_to_keep: Vec<String>,
 }
@@ -62,16 +62,16 @@ pub struct CompiledCrawlConfig {
     /// Original config
     pub config: CrawlConfig,
 
-    /// Compiled exclusion patterns (non-directory patterns)
+    /// Compiled exclusion patterns (non-folder patterns)
     exclude_set: GlobSet,
 
-    /// Compiled keep patterns (non-directory patterns)
+    /// Compiled keep patterns (non-folder patterns)
     keep_set: GlobSet,
 
-    /// Directory prefixes for exclusion (patterns ending in "/")
+    /// Folder prefixes for exclusion (patterns ending in "/")
     exclude_dirs: Vec<String>,
 
-    /// Directory prefixes for keep (patterns ending in "/")
+    /// Folder prefixes for keep (patterns ending in "/")
     keep_dirs: Vec<String>,
 }
 
@@ -138,18 +138,18 @@ impl CrawlConfig {
         })
     }
 
-    /// Compile a list of patterns into a GlobSet and directory list.
+    /// Compile a list of patterns into a GlobSet and folder list.
     ///
     /// Returns `(glob_set, dirs)` where:
-    /// - `glob_set` matches non-directory patterns
-    /// - `dirs` contains directory patterns (ending in `/`) for prefix matching
+    /// - `glob_set` matches non-folder patterns
+    /// - `dirs` contains folder patterns (ending in `/`) for prefix matching
     fn compile_patterns(patterns: &[String]) -> Result<(GlobSet, Vec<String>)> {
         let mut builder = GlobSetBuilder::new();
         let mut dirs = Vec::new();
 
         for pattern in patterns {
             if pattern.ends_with('/') {
-                // Directory pattern: store as prefix matcher
+                // Folder pattern: store as prefix matcher
                 dirs.push(pattern.clone());
             } else {
                 builder.add(Glob::new(pattern)?);
@@ -195,17 +195,17 @@ impl CompiledCrawlConfig {
         self.matches_patterns(&self.keep_set, &self.keep_dirs, path)
     }
 
-    /// Shared logic for matching against a GlobSet and directory list.
+    /// Shared logic for matching against a GlobSet and folder list.
     fn matches_patterns(&self, glob_set: &GlobSet, dirs: &[String], path: &str) -> bool {
         // Check glob patterns
         if glob_set.is_match(path) {
             return true;
         }
-        // Check directory prefixes
+        // Check folder prefixes
         for dir in dirs {
-            // Directory patterns match if:
-            // 1. Path starts with the directory (e.g., "lib/example.ts" matches "lib/")
-            // 2. Path contains the directory with leading slash (e.g., "path/to/lib/file.ts" matches "lib/")
+            // Folder patterns match if:
+            // 1. Path starts with the folder (e.g., "lib/example.ts" matches "lib/")
+            // 2. Path contains the folder with leading slash (e.g., "path/to/lib/file.ts" matches "lib/")
             if path.starts_with(dir) || path.contains(&format!("/{}", dir)) {
                 return true;
             }

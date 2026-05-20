@@ -118,7 +118,7 @@ fn acquire_file_lock(lockfile_path: &Path, mode: LockMode) -> Result<FileLockGua
 
 /// Acquires a shared lock on the database.
 ///
-/// Creates the lock directory if needed. Blocks until the lock is available.
+/// Creates the lock folder if needed. Blocks until the lock is available.
 /// Emits progress messages via the callback if waiting takes longer than
 /// [`FIRST_MESSAGE_THRESHOLD`].
 pub fn acquire_database_shared(
@@ -133,7 +133,7 @@ pub fn acquire_database_shared(
 
 /// Acquires an exclusive lock on the database.
 ///
-/// Creates the lock directory if needed. Blocks until the lock is available.
+/// Creates the lock folder if needed. Blocks until the lock is available.
 /// Emits progress messages via the callback if waiting takes longer than
 /// [`FIRST_MESSAGE_THRESHOLD`].
 pub fn acquire_database_exclusive(
@@ -148,12 +148,12 @@ pub fn acquire_database_exclusive(
 
 /// Acquires an exclusive lock for a catalog.
 ///
-/// Creates the lock directory if needed. Blocks until the lock is available.
+/// Creates the lock folder if needed. Blocks until the lock is available.
 /// Emits progress messages via the callback if waiting takes longer than
 /// [`FIRST_MESSAGE_THRESHOLD`].
 ///
 /// # Arguments
-/// * `db_path` - Path to the database directory
+/// * `db_path` - Path to the database folder
 /// * `catalog` - Catalog name (must be validated by caller as path-safe)
 /// * `progress` - Callback for progress messages during wait
 pub fn acquire_catalog_lock(
@@ -172,7 +172,7 @@ pub fn acquire_catalog_lock(
 
 /// Acquires the commit mutex.
 ///
-/// Creates the lock directory if needed. Blocks until the lock is available.
+/// Creates the lock folder if needed. Blocks until the lock is available.
 /// No progress callback; commit-mutex contention is expected to be millisecond-scale.
 pub fn acquire_commit_mutex(db_path: &Path) -> Result<CommitMutex> {
     let lockfile_path = db_path.join("locks").join("commit.lock");
@@ -183,7 +183,7 @@ pub fn acquire_commit_mutex(db_path: &Path) -> Result<CommitMutex> {
 // Internal Helpers
 // ============================================================================
 
-/// Ensures the parent directory for a lockfile exists.
+/// Ensures the parent folder for a lockfile exists.
 fn ensure_lock_dir(lockfile_path: &Path) -> Result<()> {
     if let Some(parent) = lockfile_path.parent() {
         fs::create_dir_all(parent)?;

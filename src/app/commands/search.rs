@@ -346,7 +346,7 @@ async fn run_single_method_search<W: Write>(
                     // Handle NoIndex case
                     let source_pointer = format_source_pointer(label_metadata);
                     let warning = if label_metadata.fts_complete {
-                        // FTS was complete but directory is gone
+                        // FTS was complete but folder is gone
                         SearchWarning::FtsNoIndexNoFallback {
                             label: preamble.label.clone(),
                             source_pointer,
@@ -508,7 +508,7 @@ async fn run_hybrid_search<W: Write>(
                     // Incomplete - warning already emitted via decision_warnings
                     // Don't add to method_results, skip FTS
                 } else {
-                    // Complete but directory is gone - degrade with warning
+                    // Complete but folder is gone - degrade with warning
                     let source_pointer = format_source_pointer(label_metadata);
                     search_warnings.push(SearchWarning::FtsNoIndexDegrade {
                         label: preamble.label.clone(),
