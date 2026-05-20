@@ -5,10 +5,9 @@
 use std::path::Path;
 
 use crate::app::number_format::format_count;
-use crate::engine::SMALL_CHUNK_CHARS;
-use crate::engine::git_ops::extract_package_name_from_bytes;
-use crate::engine::partitioner::{
-    ChunkQualityReport, PartitionConfig, PartitionDebug, partition_typescript,
+use crate::engine::{
+    ChunkQualityReport, PartitionConfig, PartitionDebug, SMALL_CHUNK_CHARS,
+    extract_package_name_from_bytes, partition_typescript,
 };
 
 /// Run chunking diagnostics on a TypeScript file

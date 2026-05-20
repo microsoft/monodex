@@ -11,22 +11,18 @@ use std::cell::Cell;
 use std::collections::{BTreeSet, HashSet};
 use std::sync::Arc;
 
-use crate::app::crawl::phases::{
+use crate::app::crawl::{
+    ChunkingOutput, CrawlInput, CrawlPreamble, CrawlSourceMetadata, PhaseResults,
     add_label_to_existing_files, build_package_index, chunk_new_files, classify_files,
-    enumerate_files, filter_files, open_storage, run_fts_phase, run_label_cleanup,
-    update_final_metadata, write_in_progress_metadata,
+    create_warning_sink, enumerate_files, filter_files, open_storage, prepare_crawl_preamble,
+    print_narrowing_announcement, print_summary, print_warning_summary, run_fts_phase,
+    run_label_cleanup, update_final_metadata, write_in_progress_metadata,
 };
-use crate::app::crawl::preamble::{
-    CrawlInput, CrawlPreamble, prepare_crawl_preamble, print_narrowing_announcement,
-};
-use crate::app::crawl::summary::{print_summary, print_warning_summary};
-use crate::app::crawl::types::{CrawlSourceMetadata, PhaseResults};
-use crate::app::crawl::warning::create_warning_sink;
 use crate::app::{Config, run_embed_upload_pipeline, run_upsert_without_vectors};
-use crate::engine::git_ops::{BlobSource, CommitBlobSource, WorkingDirBlobSource};
 use crate::engine::identifier::LabelId;
 use crate::engine::retrieval::RetrievalMethod;
 use crate::engine::storage::{SOURCE_KIND_GIT_COMMIT, read_selection};
+use crate::engine::{BlobSource, CommitBlobSource, CompiledCrawlConfig, WorkingDirBlobSource};
 
 /// Report from the post-chunking phases, used by print_summary.
 ///
@@ -260,7 +256,7 @@ async fn run_crawl_async(
     label: &str,
     repo_path: &std::path::Path,
     label_id: &LabelId,
-    crawl_config: &crate::engine::crawl_config::CompiledCrawlConfig,
+    crawl_config: &CompiledCrawlConfig,
     db_path: &std::path::Path,
     total_start: std::time::Instant,
     debug: bool,
@@ -350,7 +346,7 @@ async fn run_crawl_async(
     let has_existing_file_failures = !label_add_output.failures.is_empty();
 
     // Destructure chunking_output so warning_files survives the helper call.
-    let crate::app::crawl::phases::ChunkingOutput {
+    let ChunkingOutput {
         chunks,
         touched_file_ids,
         warning_files,

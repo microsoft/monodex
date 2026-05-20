@@ -10,7 +10,7 @@
 /// # Example
 ///
 /// ```
-/// use monodex::engine::breadcrumb::encode_path_component;
+/// use monodex::engine::encode_path_component;
 ///
 /// assert_eq!(encode_path_component("weird:file.ts"), "weird%3Afile.ts");
 /// assert_eq!(encode_path_component("@scope/pkg"), "%40scope/pkg");

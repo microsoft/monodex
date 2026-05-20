@@ -10,14 +10,12 @@ use crate::app::{
     search::{self, EndMarker, Preamble, SearchRenderModel, SearchWarning, format_source_pointer},
 };
 use crate::engine::identifier::LabelId;
+use crate::engine::retrieval::format_selection;
 use crate::engine::storage::ChunkRow;
+use crate::engine::storage::{Database, ScoredChunkRow};
 use crate::engine::{
-    ParallelConfig, ParallelEmbedder, RetrievalMethod,
-    fts::{FtsSearchOutcome, fts_search},
-    fusion::{FusedHit, MethodHit, RankedContribution, fuse},
-    retrieval::format_selection,
-    search_decision::{Decision, decide},
-    storage::{Database, ScoredChunkRow},
+    Decision, DecisionError, FtsSearchOutcome, FusedHit, MethodHit, ParallelConfig,
+    ParallelEmbedder, RankedContribution, RetrievalMethod, decide, fts_search, fuse,
 };
 use anyhow::anyhow;
 use std::collections::{BTreeSet, HashMap};
@@ -247,12 +245,12 @@ pub fn run_search<W: Write>(
 
 /// Format a decision error into a user-facing error message.
 fn format_decision_error(
-    err: &crate::engine::search_decision::DecisionError,
+    err: &DecisionError,
     metadata: &crate::engine::storage::LabelMetadataRow,
     label: &str,
     debug: bool,
 ) -> String {
-    use crate::engine::search_decision::DecisionError;
+    use DecisionError;
     let source_pointer = format_source_pointer(metadata);
 
     match err {
@@ -729,7 +727,7 @@ mod tests {
     #[test]
     fn test_format_decision_error_empty_selection() {
         let metadata = make_test_metadata();
-        let err = crate::engine::search_decision::DecisionError::EmptySelection;
+        let err = DecisionError::EmptySelection;
         let result = format_decision_error(&err, &metadata, "main", false);
         assert_eq!(
             result,
@@ -747,9 +745,7 @@ mod tests {
         incomplete_methods.insert(RetrievalMethod::Fts);
         incomplete_methods.insert(RetrievalMethod::Vector);
 
-        let err = crate::engine::search_decision::DecisionError::AllInSelectionIncomplete {
-            incomplete_methods,
-        };
+        let err = DecisionError::AllInSelectionIncomplete { incomplete_methods };
         let result = format_decision_error(&err, &metadata, "main", false);
 
         // Default form should NOT contain schema details
@@ -774,9 +770,7 @@ mod tests {
         incomplete_methods.insert(RetrievalMethod::Fts);
         incomplete_methods.insert(RetrievalMethod::Vector);
 
-        let err = crate::engine::search_decision::DecisionError::AllInSelectionIncomplete {
-            incomplete_methods,
-        };
+        let err = DecisionError::AllInSelectionIncomplete { incomplete_methods };
         let result = format_decision_error(&err, &metadata, "main", true);
 
         // Debug form SHOULD contain schema details
@@ -794,7 +788,7 @@ mod tests {
     #[test]
     fn test_format_decision_error_sources_disagree() {
         let metadata = make_test_metadata();
-        let err = crate::engine::search_decision::DecisionError::SourcesDisagree {
+        let err = DecisionError::SourcesDisagree {
             vector_source: "commit-a".to_string(),
             fts_source: "commit-b".to_string(),
         };
@@ -816,7 +810,7 @@ mod tests {
         let mut methods: BTreeSet<RetrievalMethod> = BTreeSet::new();
         methods.insert(RetrievalMethod::Fts);
 
-        let err = crate::engine::search_decision::DecisionError::MethodNotInSelection { methods };
+        let err = DecisionError::MethodNotInSelection { methods };
         let result = format_decision_error(&err, &metadata, "main", false);
 
         assert!(result.contains(
@@ -837,7 +831,7 @@ mod tests {
         methods.insert(RetrievalMethod::Fts);
         methods.insert(RetrievalMethod::Vector);
 
-        let err = crate::engine::search_decision::DecisionError::MethodNotInSelection { methods };
+        let err = DecisionError::MethodNotInSelection { methods };
         let result = format_decision_error(&err, &metadata, "main", false);
 
         assert!(

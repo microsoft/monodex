@@ -55,5 +55,8 @@ jobs:
       - name: Clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
+      - name: Check facade integrity
+        run: ./scripts/check-facades.sh
+
       - name: Test
         run: cargo test --workspace --locked
