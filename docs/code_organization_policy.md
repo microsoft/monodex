@@ -145,14 +145,29 @@ There is no fixed threshold. The judgment is relative: tag the largest contribut
 
 ## Naming
 
+### File and directory names
+
 - Command handlers: named after the CLI subcommand (`purge.rs`, `search.rs`). Use `use_cmd.rs` for `use` (reserved keyword).
 - Engine submodule directories: named after the concept (`partitioner/`, `storage/`).
 - Type-only files: `types.rs` or `models.rs`.
 - Test files: `tests.rs` (singular).
+- No semantically vapid filenames. `utilities.rs`, `helpers.rs`, `common.rs`, `misc.rs` are free to write and tell the next reader nothing; half the codebase is "utilities" of some sort. The work of naming is finding what the functions actually have in common, and that shared trait is usually a better name: `formatting.rs` if the trait is formatting, `test_mocks.rs` or `test_fixtures.rs` if the trait is test setup. `test_helpers.rs` is acceptable only when no narrower trait is visible. Pick the narrowest accurate name today; rename when contents change.
+
+### Folder vs directory
+
+Prefer "folder" in identifiers, prose, doc comments, error messages, and clap help text.
+
+The cases that stay "directory":
+
+- **Established compounds**, in their established meaning: "working directory" when it means the Git enlistment folder or `std::env::current_dir()`; "current directory" / "current working directory" for `std::env::current_dir()`; "root directory" for a filesystem root; "home directory" for `$HOME`.
+- **Vendor and standard-library API surface**: type names, trait names, function names, error variants, and terms-of-art from third-party documentation. `std::fs::read_dir`, `std::fs::create_dir_all`, Tantivy's `Directory` trait, `MmapDirectory`, `OpenDirectoryError`, LanceDB's "directory-based table format" all stay as-is; renaming them would prevent readers from finding the underlying documentation.
+
+The two cases above identify objects that keep the word "directory". Prose specifically describing one of those objects inherits the word, so the sentence agrees with the symbol it names. A doc comment on `MmapDirectory::open` says "opens the directory at the given path"; a sentence about a function called `parse_working_directory_arg` says "parses the working directory argument." This is a derived rule, not a third independent criterion.
+
+Counter-examples: a loop variable iterating folders is `current_folder`, not `current_directory` (the first rule requires the literal `current_dir()` meaning). A test fixture holding a `TempDir` may keep `_tmp_dir`; it mirrors the crate's type, not a Monodex concept.
 
 ## Banned patterns
 
-- No semantically vapid filenames. `utilities.rs`, `helpers.rs`, `common.rs`, `misc.rs` are free to write and tell the next reader nothing; half the codebase is "utilities" of some sort. The work of naming is finding what the functions actually have in common, and that shared trait is usually a better name: `formatting.rs` if the trait is formatting, `test_mocks.rs` or `test_fixtures.rs` if the trait is test setup. `test_helpers.rs` is acceptable only when no narrower trait is visible. Pick the narrowest accurate name today; rename when contents change.
 - No wildcard re-exports (`pub use submodule::*`). List re-exports explicitly.
 - No putting unrelated items together just because they're small.
 - No structural splits in the same change as feature or fix work. Splits are their own change unless explicitly authorized by the maintainer or the planned reorganization being applied.
