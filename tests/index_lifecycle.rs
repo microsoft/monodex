@@ -432,8 +432,8 @@ fn test_first_time_crawl_fts_only__quick_excluded() {
 // =============================================================================
 
 /// Test purge cleanup:
-/// - After a crawl producing FTS state, purge --catalog X removes FTS directory
-/// - purge --all removes entire fts/ directory
+/// - After a crawl producing FTS state, purge --catalog X removes FTS folder
+/// - purge --all removes entire fts/ folder
 #[test]
 #[allow(non_snake_case)]
 fn test_purge_cleanup__quick_excluded() {
@@ -467,20 +467,20 @@ fn test_purge_cleanup__quick_excluded() {
         let db_path = monodex::app::resolve_database_path(&config).unwrap();
         let fts_catalog_path = db_path.join("fts").join("test-catalog");
 
-        // Verify FTS directory exists after crawl
+        // Verify FTS folder exists after crawl
         assert!(
             fts_catalog_path.exists(),
-            "FTS catalog directory should exist after crawl"
+            "FTS catalog folder should exist after crawl"
         );
 
         // Test purge --catalog
         monodex::app::commands::purge::run_purge(&config, Some("test-catalog"), false, false)
             .expect("purge --catalog failed");
 
-        // Verify FTS catalog directory is gone after purge --catalog
+        // Verify FTS catalog folder is gone after purge --catalog
         assert!(
             !fts_catalog_path.exists(),
-            "FTS catalog directory should be gone after purge --catalog"
+            "FTS catalog folder should be gone after purge --catalog"
         );
 
         // Crawl again to recreate FTS state
@@ -494,21 +494,21 @@ fn test_purge_cleanup__quick_excluded() {
         )
         .expect("second crawl failed");
 
-        // Verify FTS directory exists again
+        // Verify FTS folder exists again
         assert!(
             fts_catalog_path.exists(),
-            "FTS catalog directory should exist after second crawl"
+            "FTS catalog folder should exist after second crawl"
         );
 
         // Test purge --all
         monodex::app::commands::purge::run_purge(&config, None, true, false)
             .expect("purge --all failed");
 
-        // Verify entire FTS directory exists and is empty after purge --all
+        // Verify entire FTS folder exists and is empty after purge --all
         let fts_path = db_path.join("fts");
         assert!(
             fts_path.exists(),
-            "FTS directory should exist after purge --all (implementation recreates it)"
+            "FTS folder should exist after purge --all (implementation recreates it)"
         );
         let entries: Vec<_> = std::fs::read_dir(&fts_path)
             .unwrap()
@@ -516,7 +516,7 @@ fn test_purge_cleanup__quick_excluded() {
             .collect();
         assert!(
             entries.is_empty(),
-            "FTS directory should be empty after purge --all"
+            "FTS folder should be empty after purge --all"
         );
 
         (monodex_home, repo_dir)
@@ -786,12 +786,12 @@ fn test_first_time_crawl_vector_only__quick_excluded() {
         )
         .expect("crawl failed");
 
-        // Verify: FTS directory should not exist
+        // Verify: FTS folder should not exist
         let db_path = monodex::app::resolve_database_path(&config).unwrap();
-        let fts_dir = db_path.join("fts").join("test-catalog").join("main");
+        let fts_folder = db_path.join("fts").join("test-catalog").join("main");
         assert!(
-            !fts_dir.exists(),
-            "FTS directory should not exist after vector-only crawl"
+            !fts_folder.exists(),
+            "FTS folder should not exist after vector-only crawl"
         );
 
         // Search with --retrieval vector should succeed

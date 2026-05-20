@@ -233,6 +233,6 @@ Every `.md` file in the repo, with a one-line description. Add an entry when add
 - [`docs/design/crawl.md`](./crawl.md): Crawl pipeline in detail: package index implementation, working-directory identity model, label reassignment, FTS phase reconciliation, per-file vector-presence invariant.
 - [`docs/design/search.md`](./search.md): Search-side behavior: retrieval methods, decision rules, RRF fusion, tokenizer, output format, debug-fts.
 - [`docs/design/chunker.md`](./chunker.md): Chunking algorithms: TypeScript AST partitioning (the "two worlds model"), markdown splitting, quality markers and scoring.
-- [`docs/design/concurrency.md`](./concurrency.md): Writer lock taxonomy (database, catalog, commit mutex), reader-lock-free contract, interaction with LanceDB MVCC and Tantivy's per-directory locks.
+- [`docs/design/concurrency.md`](./concurrency.md): Writer lock taxonomy (database, catalog, commit mutex), reader-lock-free contract, interaction with LanceDB MVCC and Tantivy's per-folder locks.
 - [`docs/design/monodex_files.md`](./monodex_files.md): Inventory of files monodex reads or writes: config-folder state, repo-local config files monodex reads from the indexed repo, editor-consumed schemas, init templates.
 - [`schemas/editing.md`](../../schemas/editing.md): Cross-reference back to the Rust structs that mirror these schemas, plus a policy reminder that these files are publicly published artifacts.
