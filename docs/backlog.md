@@ -60,6 +60,18 @@ For official feature requests, create a GitHub issue. If an issue needs higher p
 
 (severity=architecture-consequential, work=large)
 
+<a id="BL102"></a>
+
+**BL102 Smarter preview-line selection for search results.** `render_preview_lines` in `src/app/search.rs` and the equivalent loop in `view.rs` emit the first three chunk-text lines, each `> `-prefixed. Two problems: the first three lines aren't necessarily the most informative (a function whose match is on line 12 shows only the signature), and long minified lines blow past terminal width for no benefit. The work: (1) pick the best three lines by heuristic - for FTS hits, lines containing the matched tokens; for vector-only hits, fall back to lines near the symbol-declaration line (available via `chunk_type` / symbol metadata) or to first three. (2) Per-line truncation with ellipsis above some width (say 200 chars). Free side effect: the truncation/sanitization step closes the terminal-injection vector currently inherent in `println!("> {}", line)` (raw chunk bytes can contain ANSI escapes or bare `\r`), making the README's "preventing injection attacks" claim accurate by construction. Design call needed for the heuristic; truncation is mechanical.
+
+(severity=quality, work=medium)
+
+<a id="BL103"></a>
+
+**BL103 Crawler robustness for pathological filesystem inputs.** Monodex is a crawler, not a compiler, and should tolerate the full range of legal-on-disk content. Known pathological inputs that currently abort or misbehave: filenames containing newlines (`git_hash_object_batch` in `src/engine/git_ops/working_dir.rs` joins paths with `\n` for `git hash-object --stdin-paths`, which is line-delimited with no `-z` variant; a newline-containing filename produces a count mismatch and aborts the whole working-dir crawl), NUL bytes in filenames (untested), symlink cycles (untested), files larger than RAM (untested), non-UTF-8 byte sequences in file content (behavior depends on chunker). Policy this item commits to: enumerate, classify, and for each class either skip-with-warning or process correctly. The newline-filename case is the immediate motivator; the broader sweep is what makes the fix worth doing more than once.
+
+(severity=robustness, work=small)
+
 ## Good ideas
 
 Items with at least one non-obvious insight worth recording, but no commitment to ship.
@@ -111,6 +123,12 @@ Items with at least one non-obvious insight worth recording, but no commitment t
 **BL57 Vector indexing (ANN).** Vector search is currently a brute-force scan over the chunks table. Acceptable at current scale on a developer laptop; if it stops being acceptable, LanceDB supports IVF and HNSW via `Table::create_index`. Worth knowing the option exists before reaching for harder optimizations.
 
 (severity=performance, work=small)
+
+<a id="BL104"></a>
+
+**BL104 Batch the per-row writes in `remove_label_from_chunks`.** The label-reassignment cleanup phase at the end of every successful crawl does one LanceDB write per orphaned chunk (`src/engine/storage/chunks/storage.rs:706` and `:710`) while holding the commit mutex for the whole loop. Fine for typical crawls; pathological for large refactors (directory renames, package moves, mass file deletions) where orphans run into the thousands and the held mutex blocks other writers for the duration. The work splits cleanly: bulk-delete rows that go to zero `active_label_ids` via `delete` with a `row_id IN (...)` predicate in `UPSERT_BATCH_SIZE` chunks; apply non-empty label-list shrinks via `merge_insert` (LanceDB's `update` is per-predicate, not vectorized over different per-row values, so `merge_insert` is the natural batched primitive). Adjacent to but distinct from BL52 (orphan GC): BL52 reclaims rows whose `active_label_ids` is already empty; this gets them to empty more efficiently.
+
+(severity=performance, work=medium)
 
 <a id="BL60"></a>
 

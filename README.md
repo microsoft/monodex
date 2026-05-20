@@ -82,7 +82,7 @@ The intended integration today is via the CLI; agents shell out to `monodex sear
    monodex view --id 700a4ba232fe9ddc
    ```
 
-**Output format:** Search results prefix code lines with `>`, making them easy to distinguish from your own output and preventing injection attacks.
+**Output format:** Code lines are `>`-prefixed to frame chunk content distinctly from result headers and other CLI output.
 
 ## Prerequisites
 
