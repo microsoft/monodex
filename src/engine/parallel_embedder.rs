@@ -148,8 +148,17 @@ impl ParallelEmbedder {
         let ids = encoding.get_ids();
         let attention_mask = encoding.get_attention_mask();
 
-        // Truncate if needed
-        let seq_len = ids.len().min(MAX_LENGTH);
+        // Truncate if needed, with warning
+        let token_count = ids.len();
+        if token_count > MAX_LENGTH {
+            eprintln!(
+                "Warning: embedding input truncated from {} to {} tokens ({} discarded)",
+                token_count,
+                MAX_LENGTH,
+                token_count - MAX_LENGTH
+            );
+        }
+        let seq_len = token_count.min(MAX_LENGTH);
 
         // Create input tensors
         let input_ids: Vec<i64> = ids[..seq_len].iter().map(|&id| id as i64).collect();

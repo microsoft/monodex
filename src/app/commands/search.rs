@@ -106,13 +106,13 @@ pub async fn collect_fts(
 ///
 /// Single-method results become `FusedHit`s with exactly one contributor.
 /// The RRF score is set to 0.0 (unused for single-method ordering).
-fn make_single_method_fused_hit(hit: MethodHit, method: RetrievalMethod) -> FusedHit {
+fn make_single_method_fused_hit(hit: MethodHit, method: RetrievalMethod, rank: usize) -> FusedHit {
     FusedHit {
         row_id: hit.row_id,
         rrf_score: 0.0,
         contributors: vec![RankedContribution {
             method,
-            rank: 1, // Rank doesn't matter for single-method display
+            rank,
             backend_score: hit.backend_score,
         }],
     }
@@ -428,7 +428,8 @@ async fn run_single_method_search<W: Write>(
     let fused_hits: Vec<FusedHit> = collected
         .hits
         .into_iter()
-        .map(|hit| make_single_method_fused_hit(hit, method))
+        .enumerate()
+        .map(|(i, hit)| make_single_method_fused_hit(hit, method, i + 1))
         .collect();
 
     // Hydrate chunks
