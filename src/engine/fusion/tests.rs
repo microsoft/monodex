@@ -286,6 +286,56 @@ fn test_level_3_tiebreak_with_tied_best_rank() {
 }
 
 #[test]
+fn test_exact_score_comparison_within_epsilon() {
+    // Test that RRF scores very close together (within f32::EPSILON) are still
+    // ordered correctly by their exact values, not treated as equal.
+    //
+    // Case from spot-check: (fts=4, vec=32) vs (fts=1, vec=39)
+    // RRF score for (4, 32): 1/(60+4) + 1/(60+32) = 1/64 + 1/92 ≈ 0.02649456
+    // RRF score for (1, 39): 1/(60+1) + 1/(60+39) = 1/61 + 1/99 ≈ 0.02649445
+    // Gap: ~1.12e-7, which is below f32::EPSILON (~1.19e-7)
+    //
+    // The (fts=4, vec=32) row should come first because its score is higher.
+    let fts_hits = vec![
+        hit("x", None),     // rank 1
+        hit("y", None),     // rank 2
+        hit("z", None),     // rank 3
+        hit("row_a", None), // rank 4
+    ];
+    let vector_hits: Vec<MethodHit> = (1..=39)
+        .map(|i| {
+            if i == 32 {
+                hit("row_a", None) // row_a at rank 32
+            } else if i == 39 {
+                hit("row_b", None) // row_b at rank 39
+            } else {
+                hit(&format!("fill_{}", i), None)
+            }
+        })
+        .collect();
+
+    let result = fuse(
+        vec![
+            (RetrievalMethod::Fts, fts_hits),
+            (RetrievalMethod::Vector, vector_hits),
+        ],
+        50,
+    );
+
+    // row_a has (fts=4, vec=32) -> higher RRF score
+    // row_b has (fts=1, vec=39) -> lower RRF score
+    // row_a should appear before row_b
+    let a_pos = result.iter().position(|h| h.row_id == "row_a").unwrap();
+    let b_pos = result.iter().position(|h| h.row_id == "row_b").unwrap();
+    assert!(
+        a_pos < b_pos,
+        "row_a (fts=4, vec=32, score={}) should come before row_b (fts=1, vec=39, score={})",
+        result[a_pos].rrf_score,
+        result[b_pos].rrf_score
+    );
+}
+
+#[test]
 fn test_level_3_tiebreak_equal_best_ranks() {
     // Row A: best rank #2 from Fts only
     // Row B: best rank #2 from Vector only
