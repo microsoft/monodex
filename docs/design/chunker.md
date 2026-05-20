@@ -114,7 +114,7 @@ The final score is `100 * (1 - count_badness)^α * (1 - micro_badness)^β` with 
 Two CLI commands exist for chunker development:
 
 - **`monodex dump-chunks --file <path>`.** Runs the partitioner on a single file and prints the resulting chunks with sizes, breadcrumbs, and quality markers. Supports `--debug` for verbose split-decision logging, `--visualize` for full chunk contents, `--with-fallback` to enable line-based fallback (off by default in this command), and `--target-size` to override the default 6000-character target.
-- **`monodex audit-chunks --count <N> --dir <path>`.** Samples N TypeScript files from a directory, runs the partitioner on each (AST-only mode, no fallback), and reports aggregate quality scores. Useful for measuring the effect of partitioner changes across a real codebase.
+- **`monodex audit-chunks --count <N> --folder <path>`.** Samples N TypeScript files from a folder, runs the partitioner on each (AST-only mode, no fallback), and reports aggregate quality scores. Useful for measuring the effect of partitioner changes across a real codebase.
 
 Both commands run the partitioner without writing to the database, so they're safe to use during development.
 

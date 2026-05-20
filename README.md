@@ -361,7 +361,7 @@ monodex dump-chunks --file ./src/JsonFile.ts --debug
 monodex dump-chunks --file ./src/JsonFile.ts --target-size 4000
 
 # Audit chunking quality across multiple files (AST-only mode)
-monodex audit-chunks --count 20 --dir /path/to/project
+monodex audit-chunks --count 20 --folder /path/to/project
 ```
 
 **Chunk Quality Score**: 0-100%, higher is better. Scores below 95% may indicate chunking issues. Note: `dump-chunks` and `audit-chunks` use AST-only mode (fallback disabled) to accurately measure partitioner quality.
@@ -460,7 +460,7 @@ RUST_LOG=debug ./target/release/monodex crawl --catalog sparo --label main --com
 
 The crawl behavior (which files to index and how to chunk them) can be customized via configuration files.
 
-For the full inventory of files Monodex reads or writes (config-folder state, the database directory layout, repo-local config files), see [docs/design/monodex_files.md](https://github.com/microsoft/monodex/blob/main/docs/design/monodex_files.md).
+For the full inventory of files Monodex reads or writes (config-folder state, the database folder layout, repo-local config files), see [docs/design/monodex_files.md](https://github.com/microsoft/monodex/blob/main/docs/design/monodex_files.md).
 
 ### Config Discovery
 
@@ -474,7 +474,7 @@ No merging occurs. Exactly one config is used.
 
 ### Config Schema
 
-JSON schemas are available in the `schemas/` directory for IDE autocomplete and validation. Reference the appropriate schema in your config file via the `$schema` field:
+JSON schemas are available in the `schemas/` folder for IDE autocomplete and validation. Reference the appropriate schema in your config file via the `$schema` field:
 
 | Config File               | Schema File                   |
 | ------------------------- | ----------------------------- |
@@ -530,12 +530,12 @@ shouldCrawl = matchesFileType && (matchesPatternsToKeep || !matchesPatternsToExc
 
 - `fileTypes` is the primary filter. Unsupported file types are never crawled.
 - `patternsToKeep` overrides `patternsToExclude` (useful for keeping test files in `src/`)
-- Directory patterns (ending in `/`) match anywhere in the path
+- Folder patterns (ending in `/`) match anywhere in the path
 
 **Pattern syntax:**
 
 - Glob patterns use the standard syntax: `**` for recursive, `*` for wildcard
-- Directory patterns end with `/` (e.g., `node_modules/`)
+- Folder patterns end with `/` (e.g., `node_modules/`)
 - Example: `**/*.test.ts` matches test files at any depth
 
 ## Status

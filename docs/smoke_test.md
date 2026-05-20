@@ -39,7 +39,7 @@ If `~/.monodex/monodex-config.json` does not exist, create it. Use the absolute 
 ./target/release/monodex init-db
 ```
 
-The command should complete without error and create `~/.monodex/default-db/` containing `monodex-meta.json`, `chunks.lance/`, `label_metadata.lance/`, an empty `fts/` directory (per-label Tantivy indexes are created lazily on first FTS write), and a `locks/` directory used by the writer-lock layer.
+The command should complete without error and create `~/.monodex/default-db/` containing `monodex-meta.json`, `chunks.lance/`, `label_metadata.lance/`, an empty `fts/` folder (per-label Tantivy indexes are created lazily on first FTS write), and a `locks/` folder used by the writer-lock layer.
 
 This command is idempotent; running it again on an existing database is safe.
 
@@ -127,7 +127,7 @@ After this, subsequent `search` and `view` commands can omit `--catalog` and `--
 
 The procedure above runs against `~/.monodex/`, which is shared with the user's normal Monodex installation. For most verification work this is fine: the purge in step 1 ensures the test starts fresh, and re-using the same catalog and database between runs saves time.
 
-A clean-slate variant runs the same test against a completely fresh config folder, with no shared state. Set `MONODEX_CONFIG_FOLDER` to a temporary directory before any of the steps:
+A clean-slate variant runs the same test against a completely fresh config folder, with no shared state. Set `MONODEX_CONFIG_FOLDER` to a temporary folder before any of the steps:
 
 ```
 export MONODEX_CONFIG_FOLDER=/tmp/monodex-smoke-test

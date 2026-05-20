@@ -12,14 +12,14 @@ The README introduces the database/catalog/label/chunk hierarchy. Three refineme
 
 ## Data model
 
-The database is a directory containing two LanceDB tables and a tree of per-label Tantivy index directories. The on-disk layout (the `.lance/` table convention, `monodex-meta.json`, the schema-versioning rule, the FTS directory tree) is in [monodex_files.md](./monodex_files.md).
+The database is a folder containing two LanceDB tables and a tree of per-label Tantivy index folders. The on-disk layout (the `.lance/` table convention, `monodex-meta.json`, the schema-versioning rule, the FTS folder tree) is in [monodex_files.md](./monodex_files.md).
 
 The two LanceDB tables:
 
 - `chunks`: one row per indexed chunk. Carries the chunk text, embedding vector (nullable, so a chunk row can exist without an embedding when only FTS is in selection), identity fields, path/package context, and label membership. Schema in `src/engine/schema.rs`; the typed Rust row struct (`ChunkRow`) in `src/engine/storage/rows.rs`.
 - `label_metadata`: one row per label. Carries the catalog, the bare label name, the qualified `label_id`, the source kind, and per-retrieval-method state: a nullable source column (commit OID, working-directory sentinel, or NULL when the method is out of the label's retrieval selection) and a completion boolean per method. The set of in-selection methods for a label is derived from which method-source columns are non-NULL.
 
-FTS state lives outside the LanceDB tables, in a per-label Tantivy index directory at `<database-dir>/fts/<catalog>/<label>/`. Each label gets its own Tantivy index because BM25 statistics are computed per-corpus at index time; sharing one Tantivy index across labels would mix statistics from chunks that don't belong to the queried label. The per-label structure makes label-scoped FTS queries correct by construction.
+FTS state lives outside the LanceDB tables, in a per-label Tantivy index folder at `<database-folder>/fts/<catalog>/<label>/`. Each label gets its own Tantivy index because BM25 statistics are computed per-corpus at index time; sharing one Tantivy index across labels would mix statistics from chunks that don't belong to the queried label. The per-label structure makes label-scoped FTS queries correct by construction.
 
 The chunk row carries enough path/package/breadcrumb context to be displayed without a working tree or Git checkout. Search results stand alone.
 
@@ -56,7 +56,7 @@ A crawl run, end to end:
 
 1. **Label upsert**: Resolve `--commit` to a full SHA (or note that this is a `--working-dir` run); update the label's retrieval selection from `--retrieval` (set per-method `source` columns to the resolved commit, NULL out methods being dropped) and mark each in-selection method's `complete` flag false.
 2. **Tree visitor**: Enumerate files from the commit tree or from the working-directory blob map (`git ls-files` + `git status`).
-3. **Package indexing**: Build the package index, a map from directory paths to package names, by reading every `package.json` in the source (for commit mode, all `package.json` files in the commit tree; for working-directory mode, all `package.json` files in Git's working-tree view).
+3. **Package indexing**: Build the package index, a map from folder paths to package names, by reading every `package.json` in the source (for commit mode, all `package.json` files in the commit tree; for working-directory mode, all `package.json` files in Git's working-tree view).
 4. **File processing**: For each file: compute `file_id`, check the sentinel, and either skip-with-label-add or read-chunk-embed-upsert.
 5. **Label reassignment**: After all files succeed, scan chunks tagged with this label, drop the label from any whose `file_id` wasn't touched, and delete chunks whose `active_label_ids` becomes empty.
 6. **FTS phase**: If `fts` is in the new retrieval selection, batch-reconcile the per-label Tantivy index against the label's current chunks. Derive the currently indexed set from Tantivy's term dictionary, apply additions and removals, commit once. Schema/tokenizer ID mismatch on existing FTS state triggers a per-label rebuild.
@@ -96,7 +96,7 @@ Monodex reads and writes files in three places: the user's config folder (`~/.mo
 
 ## Source tree
 
-Module-organization rules — file size targets, where new code goes, banned patterns — are in the [code organization policy](../code_organization_policy.md). What follows is a one-or-two-line description of every non-test source file. Pure export-only `mod.rs` files are omitted; `mod.rs` files with substantive implementation are listed. Section headings are repo-relative directory paths, so `cli.rs` under `### src/app/` lives at `src/app/cli.rs`.
+Module-organization rules — file size targets, where new code goes, banned patterns — are in the [code organization policy](../code_organization_policy.md). What follows is a one-or-two-line description of every non-test source file. Pure export-only `mod.rs` files are omitted; `mod.rs` files with substantive implementation are listed. Section headings are repo-relative folder paths, so `cli.rs` under `### src/app/` lives at `src/app/cli.rs`.
 
 ### src/
 
@@ -122,7 +122,7 @@ Application-layer code, CLI-specific. Not reusable as a library.
 
 CLI subcommand handlers, each in its own file or subdirectory. Most are thin: parse args, call into the engine, format output.
 
-- `audit_chunks.rs`: `audit-chunks`: sample TypeScript files from a directory and report aggregate chunk-quality scores. AST-only mode.
+- `audit_chunks.rs`: `audit-chunks`: sample TypeScript files from a folder and report aggregate chunk-quality scores. AST-only mode.
 - `crawl.rs`: `crawl`: enumerate files (commit tree or working dir), drive the embed/upload pipeline, run label reassignment after success.
 - `debug_fts.rs`: `debug-fts`: print tokens for a chunk and optionally explain query ranking. Diagnostic for FTS tokenization issues.
 - `dump_chunks.rs`: `dump-chunks`: visualize partitioner output for a single file. Supports debug, visualize, and with-fallback modes.
@@ -168,14 +168,14 @@ Reusable indexing engine. Does not depend on `src/app/`.
 
 ### src/engine/fts/
 
-Tantivy-based full-text search. Per-label index directories under `<database-dir>/fts/<catalog>/<label>/`. See [concurrency.md](./concurrency.md) for the writer contract and [monodex_files.md](./monodex_files.md) for the on-disk layout.
+Tantivy-based full-text search. Per-label index folders under `<database-folder>/fts/<catalog>/<label>/`. See [concurrency.md](./concurrency.md) for the writer contract and [monodex_files.md](./monodex_files.md) for the on-disk layout.
 
 Keep the direct `tantivy` dependency aligned with the version resolved through LanceDB. After dependency changes, `cargo tree -i tantivy` should show a single Tantivy version; two side-by-side versions in the dep graph mean `tantivy::Index` from our crate and from LanceDB's are different types, with real binary-size cost.
 
-- `error.rs`: Helpers for typed discrimination of Tantivy NotFound-style errors. Used by FTS read paths to normalize directory disappearance to absent-index outcomes (`open_existing` returns `FtsOpenExistingOutcome::NoIndex`, `fts_search` returns `FtsSearchOutcome::NoIndex`) instead of propagating raw IO errors.
-- `index.rs`: Open and create per-label Tantivy indexes. Owns the `FtsIndex` handle and the heap-budget constant. Write paths use `open_or_create`; read paths use `open_existing` so a missing FTS directory has no mkdir side effect.
+- `error.rs`: Helpers for typed discrimination of Tantivy NotFound-style errors. Used by FTS read paths to normalize folder disappearance to absent-index outcomes (`open_existing` returns `FtsOpenExistingOutcome::NoIndex`, `fts_search` returns `FtsSearchOutcome::NoIndex`) instead of propagating raw IO errors.
+- `index.rs`: Open and create per-label Tantivy indexes. Owns the `FtsIndex` handle and the heap-budget constant. Write paths use `open_or_create`; read paths use `open_existing` so a missing FTS folder has no mkdir side effect.
 - `indexing.rs`: `index_chunks_for_fts` and `FtsIndexingStats`. Reads the label's chunks from LanceDB, derives the currently indexed set from Tantivy's term dictionary, applies additions and removals, commits once, writes the manifest. See [crawl.md](./crawl.md) for the indexing flow.
-- `manifest.rs`: Per-label FTS compatibility metadata at `<database-dir>/fts/<catalog>/<label>/manifest.json`. Stores `FTS_SCHEMA_ID` and `FTS_TOKENIZER_ID` for stale-index detection after upgrade. Read result is the typed `ManifestRead` enum (`Missing`, `Present`, `IdMismatch`, `Unreadable`); the four cases dispatch differently.
+- `manifest.rs`: Per-label FTS compatibility metadata at `<database-folder>/fts/<catalog>/<label>/manifest.json`. Stores `FTS_SCHEMA_ID` and `FTS_TOKENIZER_ID` for stale-index detection after upgrade. Read result is the typed `ManifestRead` enum (`Missing`, `Present`, `IdMismatch`, `Unreadable`); the four cases dispatch differently.
 - `schema.rs`: Tantivy schema for the FTS index (`row_id` as `STRING | STORED` for hit hydration; `text` as `TEXT` not stored). Distinct from `engine/schema.rs` (the LanceDB Arrow schema for the chunks/labels tables).
 - `search.rs`: `fts_search` and the `FtsHit` / `FtsSearchOutcome` result types (`Found`, `NoIndex`, `Stale`, `ParseError`). `Stale` carries an `FtsStaleReason` indicating why the index cannot be queried safely; the app layer emits a warning and skips Tantivy. Builds a Tantivy query parser bound to the monodex tokenizer.
 - `tokenizer.rs`: Custom tokenizer for source code. Splits on case transitions, underscores, dots, digit boundaries, ASCII whitespace and punctuation; keeps both the original token and the splits; the upper-to-lower transition keeps the last uppercase letter with the following word (`HTTPServer` → `httpserver`, `http`, `server`). Jieba word-segmentation for CJK runs, loaded once per process via `OnceLock`.
@@ -204,7 +204,7 @@ TypeScript/TSX AST-based chunking. See [chunker.md](./chunker.md) for the algori
 
 LanceDB storage layer. Typed operations on the two tables.
 
-- `database.rs`: Open a database directory, validate `monodex-meta.json` schema version, expose table handles. Single source of database-open errors.
+- `database.rs`: Open a database folder, validate `monodex-meta.json` schema version, expose table handles. Single source of database-open errors.
 - `labels.rs`: Read, upsert, and delete `label_metadata` rows. Handles the per-method retrieval-selection and completion lifecycle.
 - `locks.rs`: OS-level file-locking primitives (database, catalog, commit mutex) backing the writer-lock taxonomy. Watchdog thread for long-acquisition progress reporting. See [concurrency.md](./concurrency.md).
 - `predicate.rs`: LanceDB SQL predicate builders (`eq_str`, `in_quoted_strs`, etc.) used across the storage layer. Callers must pre-validate inputs: catalog names by `validate_catalog`, label IDs by `LabelId::parse`.

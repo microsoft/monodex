@@ -20,7 +20,7 @@ Two enumeration paths, depending on the source:
 
 **Commit mode:** Use `gix` to walk the commit tree recursively. The walker emits a sequence of `(blob_id, relative_path)` pairs for every blob in the tree. Non-blob entries (submodules, symlinks under some repo configurations) are filtered out. Monodex doesn't follow submodule pointers and doesn't materialize symlink targets.
 
-**Working-directory mode:** Build a map of Git's working-tree view using `git ls-files` (for tracked files) and `git status -u` (for untracked non-ignored files). The map contains `(relative_path, blob_id)` pairs for all files in Git's working-tree view: tracked files at their current working-tree contents (including local modifications), plus untracked non-ignored files. Deleted files are removed from the view. Files under hidden directories (`.github/`, `.vscode/`, etc.) are included because the enumeration is driven by the Git-derived blob map, not a filesystem walk. Blob IDs are computed by shelling out to `git hash-object`. `.gitignore`-excluded files are not included even when present on disk. The minimum required Git version is 2.35.0 (for `git ls-files --format`).
+**Working-directory mode:** Build a map of Git's working-tree view using `git ls-files` (for tracked files) and `git status -u` (for untracked non-ignored files). The map contains `(relative_path, blob_id)` pairs for all files in Git's working-tree view: tracked files at their current working-tree contents (including local modifications), plus untracked non-ignored files. Deleted files are removed from the view. Files under hidden folders (`.github/`, `.vscode/`, etc.) are included because the enumeration is driven by the Git-derived blob map, not a filesystem walk. Blob IDs are computed by shelling out to `git hash-object`. `.gitignore`-excluded files are not included even when present on disk. The minimum required Git version is 2.35.0 (for `git ls-files --format`).
 
 The blob-ID compatibility between the two modes is load-bearing: it's what makes a `--working-dir` re-crawl over an unchanged repo skip every file via the sentinel check, with no re-embedding. Earlier versions used a SHA-256 content hash for working-dir mode, which produced different `file_id` values from commit mode and broke incremental skipping. The current implementation uses `git ls-files`, `git status`, and `git hash-object --stdin-paths` so that `.gitattributes`, clean filters, and other repo-specific settings are respected and the resulting blob IDs match what `git` would compute on commit.
 
@@ -32,11 +32,11 @@ Build a `HashMap<directory_path, package_name>` covering every `package.json` in
 
 For commit mode, the strategy is two batched Git operations: `git ls-tree -r -z <commit>` to find every `package.json`, then `git cat-file --batch` over a single long-lived process to read all the blobs. This avoids per-file fork overhead and keeps the build to one focused tree enumeration plus one stream of blob reads.
 
-For working-directory mode, the package index is built by iterating the Git-aware blob map (the same working-tree view used by working-directory file enumeration; see Step 2) and reading each `package.json` from the filesystem. The blob map includes both tracked and untracked non-ignored files; `package.json` files under hidden directories are included.
+For working-directory mode, the package index is built by iterating the Git-aware blob map (the same working-tree view used by working-directory file enumeration; see Step 2) and reading each `package.json` from the filesystem. The blob map includes both tracked and untracked non-ignored files; `package.json` files under hidden folders are included.
 
-For each `package.json`, the `"name"` field is parsed out and stored under the directory's repo-relative path as the key. Repo-root `package.json` is keyed by the empty string `""`.
+For each `package.json`, the `"name"` field is parsed out and stored under the folder's repo-relative path as the key. Repo-root `package.json` is keyed by the empty string `""`.
 
-Lookup happens later, during file processing: given a file at `libraries/lib1/src/Example.ts`, the index is queried for ancestor directories in this order:
+Lookup happens later, during file processing: given a file at `libraries/lib1/src/Example.ts`, the index is queried for ancestor folders in this order:
 
 1. `libraries/lib1/src`
 2. `libraries/lib1`
@@ -80,15 +80,15 @@ The "only after success" rule matters because the touched set is only complete o
 
 ## Step 6: FTS phase
 
-This step runs only if `fts` is in the new retrieval selection. It is a batch reconciliation against the per-label Tantivy index at `<database-dir>/fts/<catalog>/<label>/`, not a per-file fast path.
+This step runs only if `fts` is in the new retrieval selection. It is a batch reconciliation against the per-label Tantivy index at `<database-folder>/fts/<catalog>/<label>/`, not a per-file fast path.
 
 The phase reads the label's chunks from LanceDB (via `get_chunks_for_label`) and derives the currently indexed `row_id` set from Tantivy's term dictionary (using the alive-bitset filter, so tombstoned-but-not-yet-merged docs do not appear). The diff is computed as a set difference of `row_id`s: chunks present in LanceDB but not in Tantivy are added; chunks present in Tantivy but no longer in LanceDB are removed via `delete_term`. After all additions and deletions are queued, the phase calls `commit()` once. For commit-mode crawls, the phase then calls `wait_merging_threads()` to consolidate; for working-dir crawls, it skips this and accepts fragmentation as the cost of speed (full re-crawl will clean up).
 
-After `commit()` succeeds, the manifest at `<database-dir>/fts/<catalog>/<label>/manifest.json` is written with the `FTS_SCHEMA_ID` and `FTS_TOKENIZER_ID` constants the index was built with. The manifest stores only compatibility metadata; it does not track row_ids.
+After `commit()` succeeds, the manifest at `<database-folder>/fts/<catalog>/<label>/manifest.json` is written with the `FTS_SCHEMA_ID` and `FTS_TOKENIZER_ID` constants the index was built with. The manifest stores only compatibility metadata; it does not track row_ids.
 
 **Schema and tokenizer ID mismatch.** The schema and tokenizer behavior are versioned by `FTS_SCHEMA_ID` and `FTS_TOKENIZER_ID` constants in `src/engine/identity.rs`. Mismatch is detected via the manifest's stored IDs, not by introspecting Tantivy's on-disk schema:
 
-- If the manifest's IDs do not match the current constants: delete the per-label FTS directory and rebuild from scratch. The intent is to recover automatically from version bumps.
+- If the manifest's IDs do not match the current constants: delete the per-label FTS folder and rebuild from scratch. The intent is to recover automatically from version bumps.
 - If Tantivy fails to open with the manifest's IDs matching, or if the manifest is unreadable while Tantivy state exists: error out with a clear message. This is corruption and should reach a human, not be papered over by a silent rebuild.
 
 These IDs do not participate in `row_id`. Chunk identity is a chunk-storage concept; FTS has its own invalidation surface, and a tokenizer tweak does not force re-embedding.

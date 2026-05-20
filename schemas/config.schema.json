@@ -17,7 +17,7 @@
       "properties": {
         "path": {
           "type": "string",
-          "description": "Path to the database directory. Must be an absolute path; tilde (~), environment variables ($VAR), and relative paths are not supported. Omit to use the default location.",
+          "description": "Path to the database folder. Must be an absolute path; tilde (~), environment variables ($VAR), and relative paths are not supported. Omit to use the default location.",
           "examples": ["/absolute/path/to/db"]
         }
       }
@@ -70,7 +70,7 @@
         },
         "path": {
           "type": "string",
-          "description": "Path to the catalog root directory. Must be an absolute path; tilde (~), environment variables ($VAR), and relative paths are not supported.",
+          "description": "Path to the catalog root folder. Must be an absolute path; tilde (~), environment variables ($VAR), and relative paths are not supported.",
           "examples": ["/path/to/monorepo"]
         }
       }
