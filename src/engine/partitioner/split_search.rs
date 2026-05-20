@@ -215,14 +215,9 @@ pub(crate) fn find_shallowest_split_scope<'a>(
     let node_start = node.start_position().row + 1;
     let node_end = node.end_position().row + 1;
 
-    debug_assert!(
-        node_start <= start_line && node_end >= end_line,
-        "find_shallowest_split_scope called with node that doesn't span the range: node {}-{}, range {}-{}",
-        node_start,
-        node_end,
-        start_line,
-        end_line
-    );
+    if node_start > start_line || node_end < end_line {
+        return node;
+    }
 
     // If this is a split scope, return it (shallowest wins)
     if is_split_scope(node.kind()) {
