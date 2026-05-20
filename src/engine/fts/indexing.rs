@@ -137,7 +137,7 @@ pub async fn index_chunks_for_fts(
     // Compute stats
     let added_count = successfully_added.len();
     let removed_count = removals.len();
-    let zero_token_skipped = additions.len() - added_count;
+    let zero_token_skipped = zero_token_row_ids.len();
 
     let final_indexed: BTreeSet<String> = currently_indexed
         .difference(&removals)

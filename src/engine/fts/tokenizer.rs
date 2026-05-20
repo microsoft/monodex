@@ -20,6 +20,8 @@
 //! matches such as `"user profile"` matching `getUserProfile`. It is a
 //! Monodex ranking policy, not an attempt to model a Tantivy synonym graph.
 
+use std::collections::HashSet;
+
 use tantivy::tokenizer::{Token, TokenStream, Tokenizer};
 
 /// The name under which this tokenizer is registered on Tantivy's TokenizerManager.
@@ -239,6 +241,7 @@ fn is_ascii_punctuation(ch: char) -> bool {
 /// - `XMLHttpRequest` → `["xml", "http", "request"]`
 fn split_identifier(ident: &str) -> Vec<String> {
     let mut parts = Vec::new();
+    let mut seen = HashSet::new();
     let mut current_part = String::new();
     let mut prev_was_upper = false;
     let mut prev_was_digit = false;
@@ -269,8 +272,9 @@ fn split_identifier(ident: &str) -> Vec<String> {
                 // Acronym case: remove last char from current_part - it belongs to next word
                 let last_char = current_part.pop().unwrap();
                 let rest = current_part.to_lowercase();
-                if !rest.is_empty() && !parts.contains(&rest) {
-                    parts.push(rest);
+                if !rest.is_empty() && !seen.contains(&rest) {
+                    parts.push(rest.clone());
+                    seen.insert(rest);
                 }
                 current_part.clear();
                 current_part.push(last_char);
@@ -278,8 +282,9 @@ fn split_identifier(ident: &str) -> Vec<String> {
                 // Normal split: push current part
                 if !current_part.is_empty() {
                     let part = current_part.to_lowercase();
-                    if !parts.contains(&part) {
-                        parts.push(part);
+                    if !seen.contains(&part) {
+                        parts.push(part.clone());
+                        seen.insert(part);
                     }
                 }
                 current_part.clear();
@@ -302,8 +307,9 @@ fn split_identifier(ident: &str) -> Vec<String> {
     // Push final part
     if !current_part.is_empty() {
         let part = current_part.to_lowercase();
-        if !parts.contains(&part) {
-            parts.push(part);
+        if !seen.contains(&part) {
+            parts.push(part.clone());
+            seen.insert(part);
         }
     }
 

@@ -35,6 +35,14 @@ PUBLISHING PROCEDURE:
 
 - `dump-chunks` "small chunk" counts no longer disagree, and handle empty input.
 
+- **RRF tiebreak now orders results correctly when scores differ by less than `f32::EPSILON`.** Previously, scores very close together could be treated as equal, causing unpredictable ordering.
+
+- **FTS indexing now correctly counts skipped zero-token chunks.** The `zero_token_skipped` stat is now consistent with the `zero_token_row_ids` list.
+
+- **Embedding now warns when input is truncated to 8192 tokens.** The warning shows original, truncated, and discarded token counts.
+
+- **Single-method search results now carry the correct rank.** Previously, all single-method results were assigned rank 1.
+
 ## 0.6.0 (2026-05-13)
 
 ### Added

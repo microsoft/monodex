@@ -148,8 +148,17 @@ impl ParallelEmbedder {
         let ids = encoding.get_ids();
         let attention_mask = encoding.get_attention_mask();
 
-        // Truncate if needed
-        let seq_len = ids.len().min(MAX_LENGTH);
+        // Truncate if needed, with warning
+        let token_count = ids.len();
+        if token_count > MAX_LENGTH {
+            eprintln!(
+                "Warning: embedding input truncated from {} to {} tokens ({} discarded)",
+                token_count,
+                MAX_LENGTH,
+                token_count - MAX_LENGTH
+            );
+        }
+        let seq_len = token_count.min(MAX_LENGTH);
 
         // Create input tensors
         let input_ids: Vec<i64> = ids[..seq_len].iter().map(|&id| id as i64).collect();
@@ -171,6 +180,11 @@ impl ParallelEmbedder {
         let embedding: Vec<f32> = (0..HIDDEN_SIZE)
             .map(|i| (0..seq_len).map(|j| data[j * HIDDEN_SIZE + i]).sum::<f32>() / seq_len as f32)
             .collect();
+
+        // L2 normalization is omitted intentionally. The only consumer is vector_search
+        // with DistanceType::Cosine, which is scale-invariant. Adding an ANN index or
+        // switching to L2/dot-product distance would require normalizing the returned
+        // vector here.
 
         Ok(embedding)
     }

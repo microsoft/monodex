@@ -55,25 +55,24 @@ impl PackageIndex {
     }
 
     /// Insert a package name for a folder path.
-    #[allow(dead_code)]
     pub(super) fn insert_package_name(&mut self, dir_path: String, name: String) {
         self.package_name_by_dir.insert(dir_path, name);
     }
 
     /// Get the package name for a specific folder (exact match, no upward search).
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub(super) fn get_package_name(&self, dir_path: &str) -> Option<&str> {
         self.package_name_by_dir.get(dir_path).map(String::as_str)
     }
 
     /// Return the number of packages in the index.
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub(super) fn len(&self) -> usize {
         self.package_name_by_dir.len()
     }
 
     /// Return true if the index is empty.
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub(super) fn is_empty(&self) -> bool {
         self.package_name_by_dir.is_empty()
     }
