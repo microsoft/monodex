@@ -124,8 +124,8 @@ fn main() -> anyhow::Result<()> {
                 cli.debug,
             )?;
         }
-        Commands::AuditChunks { count, dir } => {
-            monodex::app::commands::run_audit_chunks(count, dir)?;
+        Commands::AuditChunks { count, folder } => {
+            monodex::app::commands::run_audit_chunks(count, folder)?;
         }
         Commands::DebugFts {
             id,

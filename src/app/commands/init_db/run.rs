@@ -19,7 +19,7 @@ use crate::engine::storage::{
 // Existing database state enum
 // ============================================================================
 
-/// Represents the state of an existing database directory.
+/// Represents the state of an existing database folder.
 ///
 /// Used by `read_existing_database_state` to classify what's on disk,
 /// then consumed by `check_existing_database_pre_lock` and `check_existing_database`
@@ -29,24 +29,24 @@ enum ExistingDatabaseState {
     Missing,
     /// Path exists and contains only lockfile/locks/fts detritus.
     EmptyDirectory,
-    /// Meta file and both table directories exist; schema version matches.
+    /// Meta file and both table folders exist; schema version matches.
     Complete(MetaFile),
-    /// Meta file is missing, but at least one table directory exists.
+    /// Meta file is missing, but at least one table folder exists.
     /// Pre-lock: tolerate (concurrent init may be in progress).
     /// Under-lock: bail (partial state is corruption).
     TablesWithoutMeta,
-    /// Meta file exists but at least one table directory is missing.
+    /// Meta file exists but at least one table folder is missing.
     /// Always a bail at both call sites today.
     MetaWithoutTables,
     /// Meta file's recorded schema version does not match the current binary's.
     IncompatibleSchema { recorded: u32, current: u32 },
     /// Meta file is unreadable / corrupt.
     CorruptMeta,
-    /// Path exists, not empty, no meta file, no table directories.
+    /// Path exists, not empty, no meta file, no table folders.
     NonMonodexDirectory,
 }
 
-/// Read and classify the state of an existing database directory.
+/// Read and classify the state of an existing database folder.
 ///
 /// This function is infallible - it returns a state classification,
 /// not a Result. Callers decide what policy to apply to each state.
@@ -74,7 +74,7 @@ fn read_existing_database_state(db_path: &Path) -> ExistingDatabaseState {
             };
         }
 
-        // Check that table directories exist
+        // Check that table folders exist
         if !chunks_path.exists() || !labels_path.exists() {
             return ExistingDatabaseState::MetaWithoutTables;
         }
@@ -86,7 +86,7 @@ fn read_existing_database_state(db_path: &Path) -> ExistingDatabaseState {
             return ExistingDatabaseState::TablesWithoutMeta;
         }
 
-        // Check if directory is empty (ignoring lockfile, locks/, and fts/ detritus)
+        // Check if folder is empty (ignoring lockfile, locks/, and fts/ detritus)
         let is_empty = db_path
             .read_dir()
             .map(|mut entries| {
@@ -117,7 +117,7 @@ fn read_existing_database_state(db_path: &Path) -> ExistingDatabaseState {
 /// Format the "parent missing" error with the database path.
 pub(super) fn err_parent_missing(db_path: &Path) -> String {
     format!(
-        "Cannot create database at {}: parent directory does not exist.",
+        "Cannot create database at {}: parent folder does not exist.",
         db_path.display()
     )
 }
@@ -162,11 +162,11 @@ pub fn run_init_db(config: &Config, delete_everything: bool) -> Result<()> {
     // Step 1: Resolve database path from config
     let db_path = resolve_database_path(config)?;
 
-    // Step 2: Validate parent directory exists (with exception for default-db)
-    // This must happen BEFORE any directory creation.
+    // Step 2: Validate parent folder exists (with exception for default-db)
+    // This must happen BEFORE any folder creation.
     validate_parent_directory(&config.paths, &db_path)?;
 
-    // Step 3: Create the database root directory (if it doesn't exist)
+    // Step 3: Create the database root folder (if it doesn't exist)
     // For default-db, we can create config_folder if needed. For custom paths, parent must exist.
     let config_folder = &config.paths.config_folder;
     let default_db_path = config_folder.join("default-db");
@@ -196,7 +196,7 @@ pub fn run_init_db(config: &Config, delete_everything: bool) -> Result<()> {
                         e.ok()
                             .map(|e| {
                                 let name = e.file_name();
-                                // Ignore locks directory - we hold a lock under it
+                                // Ignore locks folder - we hold a lock under it
                                 name != "locks"
                             })
                             .unwrap_or(false)
@@ -264,7 +264,7 @@ pub fn run_init_db(config: &Config, delete_everything: bool) -> Result<()> {
 /// Returns None if the path doesn't exist, is empty (ignoring lockfile/locks detritus),
 /// or is in a transient mid-init state (tables exist but meta missing).
 /// Returns error for terminal conditions that no concurrent writer could resolve:
-/// corrupt meta, schema mismatch, meta present but tables missing, or non-empty non-monodex directory.
+/// corrupt meta, schema mismatch, meta present but tables missing, or non-empty non-monodex folder.
 ///
 /// The pre-lock check is tolerant of the "tables exist, meta missing" state because another
 /// process might be mid-init. The caller should acquire the exclusive lock and recheck with
@@ -287,7 +287,7 @@ pub(super) fn check_existing_database_pre_lock(db_path: &Path) -> Result<Option<
 /// Strict existence check for init-db (used under the exclusive lock).
 ///
 /// Returns Some(MetaFile) if a fully-valid initialized database exists.
-/// Returns None if path doesn't exist or is an empty directory (ignoring lockfile/locks detritus).
+/// Returns None if path doesn't exist or is an empty folder (ignoring lockfile/locks detritus).
 /// Returns error if path exists but is not a valid database, including partial state.
 ///
 /// This is the strict version used after acquiring the exclusive lock. Under the lock,
@@ -307,7 +307,7 @@ pub(super) fn check_existing_database(db_path: &Path) -> Result<Option<MetaFile>
     }
 }
 
-/// Validate that the parent directory exists, with exception for default-db.
+/// Validate that the parent folder exists, with exception for default-db.
 fn validate_parent_directory(paths: &crate::paths::Paths, db_path: &Path) -> Result<()> {
     // Special case: if the path is exactly the default-db path under config_folder,
     // we can create config_folder itself.
@@ -327,18 +327,18 @@ fn validate_parent_directory(paths: &crate::paths::Paths, db_path: &Path) -> Res
     Ok(())
 }
 
-/// Delete all contents of the database directory except the locks/ subdirectory.
+/// Delete all contents of the database folder except the locks/ subfolder.
 ///
 /// This is used by `init-db --delete-everything` to wipe the database clean
 /// while still holding the lock under locks/.
 fn delete_database_contents(db_path: &Path) -> Result<()> {
     let entries: Vec<_> = db_path
         .read_dir()
-        .map_err(|e| anyhow!("Failed to read database directory: {}", e))?
+        .map_err(|e| anyhow!("Failed to read database folder: {}", e))?
         .filter_map(|e| e.ok())
         .filter(|e| {
             let name = e.file_name();
-            // Don't delete the locks directory - we hold a lock under it
+            // Don't delete the locks folder - we hold a lock under it
             name != "locks"
         })
         .collect();
@@ -347,7 +347,7 @@ fn delete_database_contents(db_path: &Path) -> Result<()> {
         let path = entry.path();
         if path.is_dir() {
             fs::remove_dir_all(&path)
-                .map_err(|e| anyhow!("Failed to remove directory {}: {}", path.display(), e))?;
+                .map_err(|e| anyhow!("Failed to remove folder {}: {}", path.display(), e))?;
         } else {
             fs::remove_file(&path)
                 .map_err(|e| anyhow!("Failed to remove file {}: {}", path.display(), e))?;
@@ -357,7 +357,7 @@ fn delete_database_contents(db_path: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Create the database directory and initialize LanceDB tables.
+/// Create the database folder and initialize LanceDB tables.
 async fn create_database(db_path: &Path) -> Result<()> {
     // Open LanceDB connection
     let conn = lancedb::connect(db_path.to_str().unwrap())
@@ -377,10 +377,9 @@ async fn create_database(db_path: &Path) -> Result<()> {
         .await
         .map_err(|e| anyhow!("Failed to create label_metadata table: {}", e))?;
 
-    // Create fts directory for Tantivy indexes (populated lazily per label)
+    // Create fts folder for Tantivy indexes (populated lazily per label)
     let fts_dir = db_path.join("fts");
-    std::fs::create_dir_all(&fts_dir)
-        .map_err(|e| anyhow!("Failed to create fts directory: {}", e))?;
+    std::fs::create_dir_all(&fts_dir).map_err(|e| anyhow!("Failed to create fts folder: {}", e))?;
 
     // Write meta file using shared implementation (with fsync)
     let meta = MetaFile::new();

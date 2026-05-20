@@ -111,10 +111,10 @@ pub fn write_manifest(path: &Path, manifest: &FtsManifest) -> Result<()> {
     let content = serde_json::to_string_pretty(manifest)
         .map_err(|e| anyhow!("Failed to serialize manifest: {}", e))?;
 
-    // Ensure parent directory exists
+    // Ensure parent folder exists
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
-            .map_err(|e| anyhow!("Failed to create manifest directory: {}", e))?;
+            .map_err(|e| anyhow!("Failed to create manifest folder: {}", e))?;
     }
 
     std::fs::write(path, content).map_err(|e| anyhow!("Failed to write manifest: {}", e))?;
