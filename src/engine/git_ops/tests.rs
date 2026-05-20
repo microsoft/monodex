@@ -122,7 +122,7 @@ fn test_enumerate_working_directory() {
         enumerate_working_directory(&repo_path).expect("Failed to enumerate working directory");
     assert!(!entries.is_empty(), "Should have found some files");
     // README.md should be found (it's a regular file that should be found)
-    // Note: Hidden files/directories (dot-prefixed) are skipped during enumeration
+    // Note: Hidden files/folders (dot-prefixed) are skipped during enumeration
     assert!(entries.iter().any(|e| e.relative_path == "README.md"));
     // All entries should have a 40-character hex blob_id
     for entry in &entries {
@@ -147,7 +147,7 @@ fn test_file_id_identical_between_modes() {
     use std::fs;
     use tempfile::TempDir;
 
-    // Create a temporary directory
+    // Create a temporary folder
     let temp_dir = TempDir::new().expect("Failed to create temp dir");
     let repo_path = temp_dir.path();
 
@@ -262,7 +262,7 @@ fn test_working_dir_blob_id_matches_commit() {
     );
 }
 
-/// Git-tracked files under hidden directories must be indexed.
+/// Git-tracked files under hidden folders must be indexed.
 /// Previously, working-directory crawls skipped files under .github/, .vscode/, etc.
 /// even when Git tracked them.
 #[test]
@@ -302,7 +302,7 @@ fn test_repo_with_dot_basename_produces_output() {
     use std::fs;
     use tempfile::TempDir;
 
-    // Create a temporary directory with a dot-prefixed name
+    // Create a temporary folder with a dot-prefixed name
     let temp_base = TempDir::new().expect("Failed to create temp dir");
     let dot_repo_path = temp_base.path().join(".my-repo");
     fs::create_dir_all(&dot_repo_path).expect("Failed to create .my-repo dir");
@@ -459,7 +459,7 @@ fn test_untracked_non_ignored_file_appears_in_working_dir_enumeration() {
     use std::fs;
     use tempfile::TempDir;
 
-    // Create a temporary directory
+    // Create a temporary folder
     let temp_dir = TempDir::new().expect("Failed to create temp dir");
     let repo_path = temp_dir.path();
 
@@ -540,7 +540,7 @@ fn test_untracked_package_json_resolved_in_working_dir_package_index() {
     use std::fs;
     use tempfile::TempDir;
 
-    // Create a temporary directory
+    // Create a temporary folder
     let temp_dir = TempDir::new().expect("Failed to create temp dir");
     let repo_path = temp_dir.path();
 
@@ -587,7 +587,7 @@ fn test_untracked_package_json_resolved_in_working_dir_package_index() {
         .expect("Failed to run git commit");
     assert!(git_commit.status.success(), "git commit failed");
 
-    // Create an untracked package directory with its own package.json and source file
+    // Create an untracked package folder with its own package.json and source file
     let untracked_pkg_dir = repo_path.join("untracked-pkg");
     fs::create_dir_all(&untracked_pkg_dir).expect("Failed to create untracked-pkg dir");
     fs::write(

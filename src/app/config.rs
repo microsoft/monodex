@@ -23,7 +23,7 @@ use crate::paths::Paths;
 #[derive(Debug, serde::Deserialize, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct DatabaseConfig {
-    /// Optional path to the database directory.
+    /// Optional path to the database folder.
     /// If not specified, defaults to <config_folder>/default-db.
     /// Must be an absolute path; tilde (~) and environment variables ($VAR) are not supported.
     pub path: Option<String>,

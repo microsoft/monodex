@@ -324,7 +324,7 @@ pub fn enumerate_working_directory(repo_path: &Path) -> Result<Vec<FileEntry>> {
 
 /// Build package index from the working directory.
 /// Uses the Git-aware blob map to find all `package.json` files in Git's working-tree
-/// view (tracked plus untracked non-ignored), including those under hidden directories
+/// view (tracked plus untracked non-ignored), including those under hidden folders
 /// like .github/ or .vscode/.
 pub fn build_package_index_for_working_dir(repo_path: &Path) -> Result<PackageIndex> {
     let mut index = PackageIndex::new();

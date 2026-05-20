@@ -21,7 +21,7 @@ pub const META_FILE: &str = "monodex-meta.json";
 pub struct Database {
     /// The LanceDB connection
     conn: Connection,
-    /// Path to the database root directory
+    /// Path to the database root folder
     path: PathBuf,
 }
 
@@ -81,7 +81,7 @@ impl Database {
     /// Open an existing monodex database.
     ///
     /// Validates that:
-    /// 1. The database directory exists
+    /// 1. The database folder exists
     /// 2. `monodex-meta.json` exists and is valid
     /// 3. The schema version matches `MONODEX_SCHEMA_VERSION`
     ///
@@ -124,12 +124,12 @@ impl Database {
             );
         }
 
-        // Check that table directories exist
+        // Check that table folders exist
         let chunks_path = path.join(format!("{}.lance", CHUNKS_TABLE));
         let labels_path = path.join(format!("{}.lance", LABEL_METADATA_TABLE));
         if !chunks_path.exists() || !labels_path.exists() {
             bail!(
-                "Database at '{}' is missing table directories. Manual cleanup required.",
+                "Database at '{}' is missing table folders. Manual cleanup required.",
                 path.display()
             );
         }
@@ -164,7 +164,7 @@ impl Database {
             .map_err(|e| anyhow!("Failed to flush {}: {}", path.display(), e))?
             .sync_all()?;
 
-        // Sync the parent directory to ensure the file entry is durable
+        // Sync the parent folder to ensure the file entry is durable
         #[cfg(unix)]
         {
             if let Some(parent) = path.parent() {

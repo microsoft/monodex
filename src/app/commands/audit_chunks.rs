@@ -8,18 +8,18 @@ use std::path::PathBuf;
 use crate::app::number_format::format_count;
 use crate::engine::partitioner::{ChunkQualityReport, PartitionConfig, partition_typescript};
 
-pub fn run_audit_chunks(count: usize, dir: String) -> Result<()> {
+pub fn run_audit_chunks(count: usize, folder: String) -> Result<()> {
     use rand::seq::IndexedRandom;
 
     println!(
         "📊 Sampling {} TypeScript files from: {}",
         format_count(count as u64),
-        dir
+        folder
     );
     println!();
 
     // Collect all TypeScript files
-    let ts_files: Vec<PathBuf> = walkdir::WalkDir::new(&dir)
+    let ts_files: Vec<PathBuf> = walkdir::WalkDir::new(&folder)
         .into_iter()
         .filter_map(|e| e.ok())
         .filter(|e| {
@@ -73,14 +73,14 @@ pub fn run_audit_chunks(count: usize, dir: String) -> Result<()> {
 
     println!("\n=== Quality Scores (worst first) ===\n");
     for (i, (path, report, _)) in results.iter().enumerate() {
-        let rel_path = path.strip_prefix(&dir).unwrap_or(path);
+        let rel_path = path.strip_prefix(&folder).unwrap_or(path);
         println!("{}. {} {}", i + 1, report.format(), rel_path.display());
     }
 
     // Show top 3 worst for investigation
     println!("\n=== Top 3 Worst Files ===\n");
     for (path, report, chunks) in results.iter().take(3) {
-        let rel_path = path.strip_prefix(&dir).unwrap_or(path);
+        let rel_path = path.strip_prefix(&folder).unwrap_or(path);
         println!("--- {} ---", rel_path.display());
         println!("{}", report.format());
 

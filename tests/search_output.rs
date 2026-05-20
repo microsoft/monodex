@@ -402,7 +402,7 @@ fn test_fts_parse_error_under_hybrid__quick_excluded() {
 
 /// Test that FTS NoIndex under hybrid degrades to vector-only with warning.
 /// - Crawl with both methods
-/// - Manually delete the FTS directory
+/// - Manually delete the FTS folder
 /// - Search with no flag (hybrid)
 /// - Assert: Ok (degraded to vector-only)
 #[test]
@@ -434,11 +434,11 @@ fn test_fts_noindex_degradation_under_hybrid__quick_excluded() {
         )
         .expect("crawl failed");
 
-        // Resolve database path and delete FTS directory
+        // Resolve database path and delete FTS folder
         let db_path = monodex::app::resolve_database_path(&config).unwrap();
-        let fts_dir = db_path.join("fts").join("test-catalog").join("main");
-        if fts_dir.exists() {
-            std::fs::remove_dir_all(&fts_dir).expect("Failed to delete FTS directory");
+        let fts_folder = db_path.join("fts").join("test-catalog").join("main");
+        if fts_folder.exists() {
+            std::fs::remove_dir_all(&fts_folder).expect("Failed to delete FTS folder");
         }
 
         // Search with no flag (hybrid) - should degrade to vector-only

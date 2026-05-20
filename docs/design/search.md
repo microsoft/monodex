@@ -9,7 +9,7 @@ The relevant source files are `src/app/commands/search.rs` (top-level command ha
 Monodex ships two retrieval methods: `vector` (semantic similarity over chunk embeddings) and `fts` (lexical search over chunk text via Tantivy). Each is queried independently and produces ranked `row_id` results scoped to a label. They expose engine APIs as peers:
 
 - `vector_search(label, embedding_query, limit)` over the `chunks` table's `vector` column.
-- `fts_search(label, text_query, limit)` over the per-label Tantivy index at `<database-dir>/fts/<catalog>/<label>/`.
+- `fts_search(label, text_query, limit)` over the per-label Tantivy index at `<database-folder>/fts/<catalog>/<label>/`.
 
 Each label carries a **retrieval selection**: the set of methods built for it. The selection is set at crawl time via `--retrieval` (see [crawl.md](./crawl.md)) and consulted at search time. A method not in the selection cannot be queried for the label.
 
@@ -110,13 +110,13 @@ At very large `--limit` the rule degenerates: with `--limit >= 50`, `candidate_l
 Either retriever can fail or degrade. The rules:
 
 - **FTS `ParseError`**: hard error. The user typed something with FTS-meaningful syntax (a quote, a colon, a field-prefix); silently degrading to vector-only would surface results that miss the user's evident intent.
-- **FTS `NoIndex`** (the directory genuinely doesn't exist; most likely a concurrent `purge --catalog` between metadata read and FTS open): warn and degrade to vector-only. Fires only when `fts_complete = true`; the `fts_complete = false` case is covered by the upstream incomplete-method warning and would be a duplicate.
+- **FTS `NoIndex`** (the folder genuinely doesn't exist; most likely a concurrent `purge --catalog` between metadata read and FTS open): warn and degrade to vector-only. Fires only when `fts_complete = true`; the `fts_complete = false` case is covered by the upstream incomplete-method warning and would be a duplicate.
 - **FTS returns zero hits**: not a failure. Fusion proceeds with vector-only candidates; results show `[v]` markers.
 - **Vector embedder/backend failure**: hard error. Vector failures are infrastructure problems (model load, ONNX runtime, LanceDB I/O); silently degrading would mask them.
 - **Vector returns zero hits**: not a failure. This is reachable only when the label's chunk set is empty for vector (vector search is nearest-neighbor; non-empty corpus always returns the nearest chunks regardless of relevance).
 - **Both methods return zero hits**: print `No results.` regardless of preceding warnings. The `No results.` line is a load-bearing tool signal: agents and machine consumers rely on its presence to mean "zero results" and its absence to mean "results follow."
 
-Under single-method search (`--retrieval fts` against a label whose `fts_complete = true` but the on-disk directory is missing), the same load-bearing rule applies: a NoIndex warning fires, then `No results.` follows. There is no fallback path in single-method mode, so the warning makes the missing-state visible and `No results.` carries the zero-results signal that consumers rely on.
+Under single-method search (`--retrieval fts` against a label whose `fts_complete = true` but the on-disk folder is missing), the same load-bearing rule applies: a NoIndex warning fires, then `No results.` follows. There is no fallback path in single-method mode, so the warning makes the missing-state visible and `No results.` carries the zero-results signal that consumers rely on.
 
 The `NoIndex` rule is the most asymmetric. It exists because `NoIndex` is the one failure mode that genuinely is "the data is gone, but the user's query is fine"; every other failure either reflects a user-input problem or an infrastructure problem.
 
@@ -205,10 +205,10 @@ Stderr is preserved for output that is outside the renderer's scope: crawl-time 
 
 The arguments diverge meaningfully across retrieval methods (FTS-debug needs `--query` parsed into Tantivy's query AST; a hypothetical vector-debug would need different inputs entirely), so this is a standalone command rather than a subcommand of a generic `debug`.
 
-The `tantivy-cli` crate is also usable against the on-disk FTS index for advanced introspection. The directory layout is in [monodex_files.md](./monodex_files.md).
+The `tantivy-cli` crate is also usable against the on-disk FTS index for advanced introspection. The folder layout is in [monodex_files.md](./monodex_files.md).
 
 ## Concurrency
 
 Search acquires no Monodex locks. A reader runs concurrently with a writing `monodex crawl` in another process. Tantivy supports multiple `IndexReader`s alongside one `IndexWriter`, with readers seeing the last-committed snapshot. LanceDB readers see committed table state.
 
-A reader during a concurrent `purge --catalog X` may encounter directory-disappearance errors as the purge unlinks `<database-dir>/fts/<X>/`. The FTS read paths use typed-error discrimination: a `NotFound` from any Tantivy operation (open, search, segment access) on a per-label FTS path normalizes to `FtsSearchOutcome::NoIndex`, which surfaces as the "FTS state missing" warning rather than a raw IO error. Other Tantivy errors (corruption, mmap failures that are not `NotFound`) remain hard errors. See [concurrency.md](./concurrency.md) for the full reader contract.
+A reader during a concurrent `purge --catalog X` may encounter folder-disappearance errors as the purge unlinks `<database-folder>/fts/<X>/`. The FTS read paths use typed-error discrimination: a `NotFound` from any Tantivy operation (open, search, segment access) on a per-label FTS path normalizes to `FtsSearchOutcome::NoIndex`, which surfaces as the "FTS state missing" warning rather than a raw IO error. Other Tantivy errors (corruption, mmap failures that are not `NotFound`) remain hard errors. See [concurrency.md](./concurrency.md) for the full reader contract.

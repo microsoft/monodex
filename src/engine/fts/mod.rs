@@ -2,7 +2,7 @@
 //!
 //! Purpose: Export FTS submodules and public surface for the rest of the codebase.
 //! Edit here when: Adding or removing FTS submodules, or changing the public surface
-//! re-exported from this directory.
+//! re-exported from this folder.
 //! Do not edit here for: FTS indexing logic (see `indexing.rs`), tokenizer behavior
 //! (see `tokenizer.rs`), schema (see `schema.rs`), search semantics (see `search.rs`),
 //! manifest handling (see `manifest.rs`), index management (see `index.rs`),

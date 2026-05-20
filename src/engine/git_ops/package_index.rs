@@ -6,10 +6,10 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::Path;
 
-/// Lookup structure mapping directory paths to package names.
+/// Lookup structure mapping folder paths to package names.
 ///
 /// Built from all package.json files in the source tree, used to resolve
-/// package names for files based on their containing directory.
+/// package names for files based on their containing folder.
 pub struct PackageIndex {
     package_name_by_dir: HashMap<String, String>,
 }
@@ -21,7 +21,7 @@ impl PackageIndex {
         }
     }
 
-    /// Find the package name for a file by searching upward from its directory.
+    /// Find the package name for a file by searching upward from its folder.
     pub fn find_package_name(&self, relative_path: &str) -> Option<&str> {
         let path = Path::new(relative_path);
         let mut current = path.parent().unwrap_or(path);
@@ -54,12 +54,12 @@ impl PackageIndex {
         None
     }
 
-    /// Insert a package name for a directory path.
+    /// Insert a package name for a folder path.
     pub(super) fn insert_package_name(&mut self, dir_path: String, name: String) {
         self.package_name_by_dir.insert(dir_path, name);
     }
 
-    /// Get the package name for a specific directory (exact match, no upward search).
+    /// Get the package name for a specific folder (exact match, no upward search).
     #[cfg(test)]
     pub(super) fn get_package_name(&self, dir_path: &str) -> Option<&str> {
         self.package_name_by_dir.get(dir_path).map(String::as_str)

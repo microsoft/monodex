@@ -177,7 +177,7 @@ pub fn run_dump_chunks(
 
 /// Find the package name for a given source file.
 ///
-/// This walks upwards from the file's directory to find the nearest package.json
+/// This walks upwards from the file's folder to find the nearest package.json
 /// and extracts the "name" field. If no package.json is found, it uses
 /// the relative folder path from the repo root as a fallback identifier.
 ///
@@ -192,7 +192,7 @@ pub fn run_dump_chunks(
 fn find_package_name(file_path: &str, repo_root: &str) -> String {
     let path = Path::new(file_path);
 
-    // Start from the file's directory
+    // Start from the file's folder
     let mut current = path.parent().unwrap_or(path);
 
     // Walk upwards looking for package.json
@@ -238,10 +238,10 @@ fn strip_to_relative_path(file_path: &str, repo_root: &str) -> String {
 
     // Try to strip the repo root
     if let Ok(rel) = file_path.strip_prefix(repo_path) {
-        // Get the directory part only (remove the filename)
-        let dir = rel.parent().unwrap_or(rel);
+        // Get the folder part only (remove the filename)
+        let folder = rel.parent().unwrap_or(rel);
         // Convert to string, replace backslashes with forward slashes
-        dir.to_string_lossy().replace('\\', "/")
+        folder.to_string_lossy().replace('\\', "/")
     } else {
         // Couldn't strip - use just the folder name
         file_path

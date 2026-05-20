@@ -66,12 +66,12 @@ fn test_chunk_row(
     }
 }
 
-/// Create a test database with FTS directory structure.
+/// Create a test database with FTS folder structure.
 async fn create_test_db_with_fts(db_path: &Path) -> Database {
     use lancedb::connect;
 
-    // Create database directory
-    std::fs::create_dir_all(db_path).expect("Failed to create db directory");
+    // Create database folder
+    std::fs::create_dir_all(db_path).expect("Failed to create db folder");
 
     // Create LanceDB tables
     let conn = connect(db_path.to_str().unwrap())
@@ -94,8 +94,8 @@ async fn create_test_db_with_fts(db_path: &Path) -> Database {
     let meta_file = File::create(db_path.join(META_FILE)).expect("Failed to create meta file");
     serde_json::to_writer_pretty(meta_file, &meta).expect("Failed to write meta file");
 
-    // Create FTS directory (normally done by init-db)
-    std::fs::create_dir_all(db_path.join("fts")).expect("Failed to create fts directory");
+    // Create FTS folder (normally done by init-db)
+    std::fs::create_dir_all(db_path.join("fts")).expect("Failed to create fts folder");
 
     // Open database (creates LanceDB tables)
     Database::open(db_path)
@@ -210,12 +210,12 @@ fn test_manifest_id_mismatch_triggers_rebuild() -> Result<()> {
     let db_path = temp_dir.path();
     let label_id = make_label_id("test-catalog", "main");
 
-    // Create FTS directory structure
+    // Create FTS folder structure
     std::fs::create_dir_all(db_path.join("fts").join("test-catalog").join("main"))?;
 
     // Create a manifest with mismatched IDs
-    let manifest_dir = db_path.join("fts").join("test-catalog").join("main");
-    let manifest_path = manifest_dir.join("manifest.json");
+    let manifest_folder = db_path.join("fts").join("test-catalog").join("main");
+    let manifest_path = manifest_folder.join("manifest.json");
 
     let bad_manifest = FtsManifest {
         fts_schema_id: "old-schema:v1".to_string(),
@@ -470,7 +470,7 @@ fn test_open_existing_returns_none_for_missing() -> Result<()> {
     let db_path = temp_dir.path();
     let label_id = make_label_id("test-catalog", "missing-label");
 
-    // Don't create any FTS directory
+    // Don't create any FTS folder
 
     use crate::engine::fts::index::FtsOpenExistingOutcome;
     let result = FtsIndex::open_existing(db_path, &label_id)?;

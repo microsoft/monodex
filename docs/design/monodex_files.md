@@ -1,11 +1,11 @@
 # Files Monodex reads and writes
 
-This document inventories every file involved in Monodex's runtime contract: config-folder state, the database directory, repo-local files Monodex reads from the indexed repository, and the schema and template files that ship with the project. It is the central reference for "what is this file, who owns it, what writes it, and is it safe to modify by hand."
+This document inventories every file involved in Monodex's runtime contract: config-folder state, the database folder, repo-local files Monodex reads from the indexed repository, and the schema and template files that ship with the project. It is the central reference for "what is this file, who owns it, what writes it, and is it safe to modify by hand."
 
 Two placeholders are used throughout:
 
 - `<config-folder>`: the Monodex config folder. Defaults to `~/.monodex/`, overridable via the `MONODEX_CONFIG_FOLDER` environment variable or `--config-folder` CLI flag. Resolution logic in `src/paths.rs`. A relative path is resolved against the current working directory at process start; empty or whitespace-only values are treated as unset.
-- `<database-dir>`: the database directory. Defaults to `<config-folder>/default-db/`, relocatable via the `database.path` field in `monodex-config.json`. Must be an absolute path on a local filesystem.
+- `<database-folder>`: the database folder. Defaults to `<config-folder>/default-db/`, relocatable via the `database.path` field in `monodex-config.json`. Must be an absolute path on a local filesystem.
 
 ## A note on validation
 
@@ -20,7 +20,7 @@ One distinction worth knowing: `monodex-config.json` and `monodex-crawl-config.j
 
 ## Config folder
 
-The config folder contains three user-facing JSON files plus the default database directory.
+The config folder contains three user-facing JSON files plus the default database folder.
 
 ### `<config-folder>/monodex-config.json`
 
@@ -36,32 +36,32 @@ User-editable, optional. The user-global crawl config: file-type-to-strategy map
 
 This file is not auto-created by current Monodex. Auto-creation on first run, with a starter template seeded from `examples/monodex-crawl-config.json`, is part of the planned `monodex init` flow.
 
-## Database directory
+## Database folder
 
-`<database-dir>` contains a metadata file and the LanceDB tables. It is not designed to be edited by hand. Every file in it is tool-managed except where noted.
+`<database-folder>` contains a metadata file and the LanceDB tables. It is not designed to be edited by hand. Every file in it is tool-managed except where noted.
 
-The database location must be on a local filesystem. Network filesystems and synced cloud folders (NFS, SMB, Dropbox, OneDrive, iCloud, Google Drive, etc.) are not supported. The writer-lock layer that coordinates concurrent operations against this directory is described in [concurrency.md](./concurrency.md); its lockfiles live under `<database-dir>/locks/`.
+The database location must be on a local filesystem. Network filesystems and synced cloud folders (NFS, SMB, Dropbox, OneDrive, iCloud, Google Drive, etc.) are not supported. The writer-lock layer that coordinates concurrent operations against this folder is described in [concurrency.md](./concurrency.md); its lockfiles live under `<database-folder>/locks/`.
 
-### `<database-dir>/monodex-meta.json`
+### `<database-folder>/monodex-meta.json`
 
 Records the schema version, creation timestamp, the binary version that created the database, and the Lance format version at creation time. Written by `monodex init-db`; read on every database open. Defined in `src/engine/storage/database.rs`.
 
 The `monodex_schema_version` field is the load-bearing one. Every database open reads it and compares it to the `MONODEX_SCHEMA_VERSION` constant in `src/engine/schema.rs`. A mismatch fails the open with a clear error rather than attempting silent migration. Bumping the schema version is a breaking change to existing databases (users have to rebuild), and any change to the schema's column shape requires a bump. This includes adding columns, even though LanceDB itself can store rows with unset columns: an older binary running against a newer database has no contract that says "blank cells in this column are OK," so the safe rule is to treat any shape change as breaking. The compatibility cost of avoiding a bump (writing code to read schemas with unfamiliar columns, deciding what to do with new columns when writing rows) is not worth absorbing without a concrete need.
 
-The current remedy for a schema-mismatch error is `monodex init-db --delete-everything`, which deletes the entire `<database-dir>` and recreates it. The schema-mismatch error message points at this command directly. All catalogs must be re-crawled afterward; this is acceptable while recrawl remains cheap relative to the migration-code-and-coordination cost of supporting cross-version databases. A `monodex upgrade-db` verb is in the backlog as the eventual replacement once users have databases large or long-lived enough that recrawl becomes painful.
+The current remedy for a schema-mismatch error is `monodex init-db --delete-everything`, which deletes the entire `<database-folder>` and recreates it. The schema-mismatch error message points at this command directly. All catalogs must be re-crawled afterward; this is acceptable while recrawl remains cheap relative to the migration-code-and-coordination cost of supporting cross-version databases. A `monodex upgrade-db` verb is in the backlog as the eventual replacement once users have databases large or long-lived enough that recrawl becomes painful.
 
-### `<database-dir>/chunks.lance/` and `<database-dir>/label_metadata.lance/`
+### `<database-folder>/chunks.lance/` and `<database-folder>/label_metadata.lance/`
 
-LanceDB tables. The `.lance/` suffix is LanceDB's directory-based table format: every LanceDB table is a directory with that suffix containing data files, transaction logs, and index files. The suffix is a LanceDB convention, not a Monodex one; that's why the LanceDB tables are sibling directories under `<database-dir>` rather than nested inside a `vectordb/` subdirectory. Schema definitions live in `src/engine/schema.rs`; row types in `src/engine/storage/rows.rs`.
+LanceDB tables. The `.lance/` suffix is LanceDB's directory-based table format: every LanceDB table is a directory with that suffix containing data files, transaction logs, and index files. The suffix is a LanceDB convention, not a Monodex one; that's why the LanceDB tables are sibling directories under `<database-folder>` rather than nested inside a `vectordb/` subdirectory. Schema definitions live in `src/engine/schema.rs`; row types in `src/engine/storage/rows.rs`.
 
-The naming convention for `<database-dir>` siblings is: any directory ending in `.lance/` is a LanceDB table; everything else is something else. The Tantivy FTS state lives at `<database-dir>/fts/`, described in its own section below.
+The naming convention for `<database-folder>` siblings is: any directory ending in `.lance/` is a LanceDB table; everything else is something else. The Tantivy FTS state lives at `<database-folder>/fts/`, described in its own section below.
 
-### `<database-dir>/fts/`
+### `<database-folder>/fts/`
 
-Per-label Tantivy index directories for full-text search. Tool-managed; not designed to be edited by hand. Layout:
+Per-label Tantivy index folders for full-text search. Tool-managed; not designed to be edited by hand. Layout:
 
 ```
-<database-dir>/fts/
+<database-folder>/fts/
   <catalog>/
     <label>/
       meta.json        (Tantivy's; tracks which segments belong to this index)
@@ -72,15 +72,15 @@ Per-label Tantivy index directories for full-text search. Tool-managed; not desi
 
 Each label gets its own Tantivy index because BM25 statistics are computed per-corpus at index time. Sharing one Tantivy index across labels would mix statistics from chunks that don't belong to the queried label.
 
-`<database-dir>/fts/` is created by `monodex init-db`. Per-catalog and per-label subdirectories are created lazily on first FTS write for that label. The colon-form qualified label_id (`catalog:label`) is for in-memory use; the on-disk form uses nested directories to avoid colons (Windows hostility).
+`<database-folder>/fts/` is created by `monodex init-db`. Per-catalog and per-label subfolders are created lazily on first FTS write for that label. The colon-form qualified label_id (`catalog:label`) is for in-memory use; the on-disk form uses nested folders to avoid colons (Windows hostility).
 
 The Monodex-side `manifest.json` stores FTS compatibility metadata: the `FTS_SCHEMA_ID` and `FTS_TOKENIZER_ID` constants the index was built with. When these don't match the current binary's constants, the index is stale and must be rebuilt. The manifest does not track row_ids; the currently indexed set is derived from Tantivy's term dictionary at crawl time. See [crawl.md](./crawl.md) for the indexing flow and [search.md](./search.md) for tokenizer behavior.
 
-Post-purge invariant: after `monodex purge --all` succeeds, `<database-dir>/fts/` exists and is empty, regardless of whether it existed before. After `monodex purge --catalog <C>`, `<database-dir>/fts/<C>/` is removed entirely; sibling catalogs are untouched.
+Post-purge invariant: after `monodex purge --all` succeeds, `<database-folder>/fts/` exists and is empty, regardless of whether it existed before. After `monodex purge --catalog <C>`, `<database-folder>/fts/<C>/` is removed entirely; sibling catalogs are untouched.
 
-### `<database-dir>/locks/`
+### `<database-folder>/locks/`
 
-Lockfiles used by the writer-lock layer (see [concurrency.md](./concurrency.md)). Contents are empty; the file's role is as a named handle for OS-level file locking (`flock` on POSIX, `LockFileEx` on Windows). The directory contains `database.lock`, `commit.lock`, and a `per-catalog/` subdirectory holding one lockfile per catalog. Lockfiles are persistent: they are not deleted on lock release, and `rm -rf locks/` is safe when no Monodex process is running.
+Lockfiles used by the writer-lock layer (see [concurrency.md](./concurrency.md)). Contents are empty; the file's role is as a named handle for OS-level file locking (`flock` on POSIX, `LockFileEx` on Windows). The folder contains `database.lock`, `commit.lock`, and a `per-catalog/` subfolder holding one lockfile per catalog. Lockfiles are persistent: they are not deleted on lock release, and `rm -rf locks/` is safe when no Monodex process is running.
 
 ## Repo-local files
 
@@ -92,7 +92,7 @@ User-editable, optional. If present at the root of the indexed repo, this overri
 
 ### `package.json` files anywhere in the repo
 
-Read during the package-indexing step of every crawl (see [crawl.md](./crawl.md)). Monodex reads only the `"name"` field; other fields are ignored. The package index is built by enumerating every `package.json` in the commit tree (commit-mode crawls) or the working directory (working-dir crawls) and resolving each indexed file to its nearest-ancestor package by directory. Monodex does not write to `package.json` files.
+Read during the package-indexing step of every crawl (see [crawl.md](./crawl.md)). Monodex reads only the `"name"` field; other fields are ignored. The package index is built by enumerating every `package.json` in the commit tree (commit-mode crawls) or the working directory (working-dir crawls) and resolving each indexed file to its nearest-ancestor package by folder. Monodex does not write to `package.json` files.
 
 ## Shipped artifacts
 
@@ -120,4 +120,4 @@ Each is a fully-commented example of the corresponding format with sensible defa
 
 JSON-with-comments is the format Rush Stack uses for user-editable JSON. Comments serve two purposes: as ambient documentation that survives editing (the user keeps the comments when they tweak a value, so the next time they open the file they remember what each field does), and as an upgrade vector. When the comment guidance changes, Monodex can offer to upgrade the comments in a user's existing file while preserving their values, analogous to how Debian package upgrades present new versions of `/etc` config files for diff-and-merge. This is not a settled industry convention; calling the format JSONC is misleading because several different specifications use that name. The format is JSON-with-comments. It is not JSON5 (a JavaScript subset much broader than JSON-with-comments).
 
-The current directory name `examples/` is a misnomer: these files are templates first and examples second. A future rename to something like `config-templates/` is a candidate for the backlog.
+The current folder name `examples/` is a misnomer: these files are templates first and examples second. A future rename to something like `config-templates/` is a candidate for the backlog.

@@ -46,7 +46,7 @@ pub enum Commands {
     /// Creates database tables for chunks and label metadata.
     /// Idempotent: safe to run on an existing database.
     InitDb {
-        /// Delete the entire database directory and recreate it from scratch.
+        /// Delete the entire database folder and recreate it from scratch.
         /// Use this to recover from a schema mismatch error. WARNING: destroys
         /// all indexed data; you will need to re-crawl every catalog/label.
         #[arg(long)]
@@ -168,9 +168,9 @@ pub enum Commands {
         #[arg(long, default_value = "20")]
         count: usize,
 
-        /// Directory to sample from
+        /// Folder to sample from
         #[arg(long)]
-        dir: String,
+        folder: String,
     },
 
     /// Diagnose tokenization or ranking for a single chunk.

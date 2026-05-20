@@ -617,8 +617,8 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let db_path = temp_dir.path();
 
-        // Create database directory
-        std::fs::create_dir_all(db_path).expect("Failed to create db directory");
+        // Create database folder
+        std::fs::create_dir_all(db_path).expect("Failed to create db folder");
 
         // Create LanceDB tables
         let conn = connect(db_path.to_str().unwrap())
@@ -641,8 +641,8 @@ mod tests {
         let meta_file = File::create(db_path.join(META_FILE)).expect("Failed to create meta file");
         serde_json::to_writer_pretty(meta_file, &meta).expect("Failed to write meta file");
 
-        // Create FTS directory (normally done by init-db)
-        std::fs::create_dir_all(db_path.join("fts")).expect("Failed to create fts directory");
+        // Create FTS folder (normally done by init-db)
+        std::fs::create_dir_all(db_path.join("fts")).expect("Failed to create fts folder");
 
         // Open database
         let db = Database::open(db_path)

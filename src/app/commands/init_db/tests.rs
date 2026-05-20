@@ -47,20 +47,17 @@ fn test_happy_path_creates_database() {
 
     // Verify structure
     let db_path = temp_dir.path().join("default-db");
-    assert!(db_path.exists(), "Database directory should exist");
+    assert!(db_path.exists(), "Database folder should exist");
     assert!(
         db_path.join(META_FILE).exists(),
         "monodex-meta.json should exist"
     );
 
-    // Verify locks directory was created
-    assert!(
-        db_path.join("locks").exists(),
-        "locks directory should exist"
-    );
+    // Verify locks folder was created
+    assert!(db_path.join("locks").exists(), "locks folder should exist");
 
-    // Verify fts directory was created
-    assert!(db_path.join("fts").exists(), "fts directory should exist");
+    // Verify fts folder was created
+    assert!(db_path.join("fts").exists(), "fts folder should exist");
 }
 
 #[test]
@@ -112,7 +109,7 @@ fn test_parent_missing_non_default_db() {
 fn test_path_exists_but_not_monodex_database() {
     let temp_dir = TempDir::new().unwrap();
 
-    // Create a directory with a stray file (not a monodex database)
+    // Create a folder with a stray file (not a monodex database)
     let db_path = temp_dir.path().join("my-db");
     fs::create_dir_all(&db_path).unwrap();
     std::fs::File::create(db_path.join("stray-file.txt"))
@@ -196,7 +193,7 @@ fn test_schema_version_mismatch() {
 fn test_meta_exists_tables_missing() {
     let temp_dir = TempDir::new().unwrap();
 
-    // Create database directory with meta file but no tables
+    // Create database folder with meta file but no tables
     let db_path = temp_dir.path().join("default-db");
     fs::create_dir_all(&db_path).unwrap();
     let meta = MetaFile::new();
@@ -219,7 +216,7 @@ fn test_meta_exists_tables_missing() {
 fn test_tables_exist_meta_missing() {
     let temp_dir = TempDir::new().unwrap();
 
-    // Create database directory with tables but no meta
+    // Create database folder with tables but no meta
     let db_path = temp_dir.path().join("default-db");
     fs::create_dir_all(&db_path).unwrap();
     fs::create_dir_all(db_path.join("chunks.lance")).unwrap();
@@ -239,10 +236,10 @@ fn test_tables_exist_meta_missing() {
 
 #[test]
 fn test_empty_directory_with_locks_dir_succeeds() {
-    // Test that a directory containing only locks/ is treated as empty
+    // Test that a folder containing only locks/ is treated as empty
     let temp_dir = TempDir::new().unwrap();
 
-    // Create database directory with only locks/database.lock
+    // Create database folder with only locks/database.lock
     let db_path = temp_dir.path().join("default-db");
     fs::create_dir_all(db_path.join("locks")).unwrap();
     std::fs::File::create(db_path.join("locks/database.lock")).unwrap();
@@ -267,10 +264,10 @@ fn test_empty_directory_with_locks_dir_succeeds() {
 
 #[test]
 fn test_empty_directory_with_fts_dir_succeeds() {
-    // Test that a directory containing only fts/ is treated as empty
+    // Test that a folder containing only fts/ is treated as empty
     let temp_dir = TempDir::new().unwrap();
 
-    // Create database directory with only fts/
+    // Create database folder with only fts/
     let db_path = temp_dir.path().join("default-db");
     fs::create_dir_all(db_path.join("fts")).unwrap();
 
@@ -366,10 +363,10 @@ fn test_delete_everything_with_existing_database() {
         !db_path.join("extra-file.txt").exists(),
         "Extra file should be deleted"
     );
-    // Verify locks directory still exists (not deleted)
+    // Verify locks folder still exists (not deleted)
     assert!(
         db_path.join("locks").exists(),
-        "locks directory should be preserved"
+        "locks folder should be preserved"
     );
 }
 
@@ -439,7 +436,7 @@ fn test_delete_everything_with_v3_database() {
     let paths = Paths::for_test(temp_dir.path().into());
     let config = load_config(paths).expect("Config should load");
 
-    // Create a database directory with a hand-written v3 meta file
+    // Create a database folder with a hand-written v3 meta file
     let db_path = temp_dir.path().join("default-db");
     fs::create_dir_all(&db_path).unwrap();
 
@@ -449,7 +446,7 @@ fn test_delete_everything_with_v3_database() {
 }"#;
     std::fs::write(db_path.join(META_FILE), meta_content).unwrap();
 
-    // Also create minimal table directories so it looks like a real database
+    // Also create minimal table folders so it looks like a real database
     fs::create_dir_all(db_path.join("chunks.lance")).unwrap();
     fs::create_dir_all(db_path.join("label_metadata.lance")).unwrap();
 

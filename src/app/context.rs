@@ -119,7 +119,7 @@ pub fn load_default_context(paths: &Paths) -> Option<DefaultContext> {
 pub fn save_default_context(paths: &Paths, catalog: &str, label: &str) -> anyhow::Result<()> {
     let path = paths.context_file();
 
-    // Create parent directory if needed
+    // Create parent folder if needed
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
