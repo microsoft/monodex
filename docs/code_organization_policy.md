@@ -19,7 +19,7 @@ A coherent file at 750 lines is better than two incoherent files at 400. The thr
 | Types-only file           | any           | 500              | 800                     |
 | Test-only file            | any           | 800              | 1200                    |
 
-Lines = production code excluding `#[cfg(test)]` blocks and the module header. `mod.rs`, `lib.rs`, and `main.rs` files containing only declarations, re-exports, and small dispatch logic are not counted. (Substantive code in `mod.rs` is forbidden per the banned patterns below.)
+Lines = production code excluding `#[cfg(test)]` blocks and the module header. `mod.rs`, `lib.rs`, and `main.rs` files containing only declarations, re-exports, and small dispatch logic are not counted.
 
 Production modules that don't fit a more specific row use the algorithm/engine row.
 
@@ -125,7 +125,7 @@ Within the integration-test layer itself, prefer fewer tests that exercise reali
 
 ### Purpose
 
-`just ci-quick` is the fast variant of `just ci`. Same fmt and clippy checks, but with the slowest tests filtered out at runtime. It exists for the developer inner loop, the moments between edits when fast feedback matters. Repository CI workflow selection is managed separately; this section only defines the local quick tier and the invariant that `just ci` remains the full gate.
+`just ci-quick` is the fast variant of `just ci`. Same fmt, clippy, and facade checks, but with the slowest tests filtered out at runtime. It exists for the developer inner loop, the moments between edits when fast feedback matters. Repository CI workflow selection is managed separately; this section only defines the local quick tier and the invariant that `just ci` remains the full gate.
 
 ### Mechanism
 
@@ -168,18 +168,26 @@ Counter-examples: a loop variable iterating folders is `current_folder`, not `cu
 
 ## Banned patterns
 
-- No wildcard re-exports (`pub use submodule::*`). List re-exports explicitly.
 - No putting unrelated items together just because they're small.
 - No structural splits in the same change as feature or fix work. Splits are their own change unless explicitly authorized by the maintainer or the planned reorganization being applied.
-- No substantive code in `mod.rs`. It's the directory's table of contents (module declarations, explicit re-exports, header), not its content. A small number of simple constants that are part of the directory's public surface is fine; move them out when they grow into an implementation vocabulary with its own edit intent.
 
 ## Module organization at the directory level
 
-A directory is an organizational unit: a name that predicts what's inside. The `mod.rs` is the directory's table of contents: module declarations, explicit re-exports, the header. Non-trivial code lives in named sibling files, never in `mod.rs`.
+A directory is an organizational unit: a name that predicts what's inside. The `mod.rs` is the directory's table of contents, holding module declarations, explicit re-exports, and the header; non-trivial code lives in named sibling files. A small number of simple constants that are part of the directory's public surface is fine; move them out when they grow into an implementation vocabulary with its own edit intent.
 
-**Cross-directory reach.** Prefer the shortest path through a directory's `mod.rs` re-exports. If an item is reachable only by a deep path that skips `mod.rs`, either it belongs in the directory's surface (add a `pub use` in `mod.rs`) or your use site is reaching past the directory's contract and the design should be reconsidered. Don't introduce a new deep-path use site to an item `mod.rs` already re-exports under a shorter name.
+### Facade integrity
 
-**Visibility keywords.** Items inside files default to `pub`; the directory boundary is what the policy maintains, not item-level discipline. Child `mod` declarations in `mod.rs` are `pub mod` when the child name is part of the intended navigation surface, and plain `mod` when external callers reach items via `mod.rs` re-exports instead. Both are valid: `engine/identifier.rs` is `pub mod` because `identifier` is itself the concept callers reach for; `app/crawl/phases.rs` is `pub mod` because `phases` is an intended decomposition unit, not an implementation detail; `engine/fts/index.rs` is plain `mod` because callers reach its items via `engine::fts::FtsIndex`, already re-exported. An existing `pub mod` is not itself a problem to fix; the trigger for action is a use site that bypasses a shorter path already exposed by `mod.rs`. Narrower keywords (`pub(super)`, `pub(crate)`) are available for sensitive seams but not required.
+A directory's `mod.rs` is its public boundary: what an outside caller can reach is decided by `mod.rs` re-exports, not by the caller writing a deep path. This is a structural rule about boundaries, not a rule about minimizing visibility keywords; the goal is that each directory has exactly one declared surface, so a reader knows where to look and a caller cannot quietly bypass it. The boundary rule has three parts.
+
+**Child modules are declared with plain `mod`.** In a directory `mod.rs`, child modules are declared `mod child;`, never `pub mod child;` or `pub(crate) mod child;`. Items that outside callers need are surfaced by explicit `pub use child::Item;` re-exports in `mod.rs`. The sole exception is a child that must currently be named from outside the library crate, from `tests/` or `main.rs` via a `monodex::...` path naming the child directly. Such a child stays `pub mod`, but only when listed in the facade-check allowlist (see below). An allowlisted `pub mod` is a deliberate, marked exception; plain `mod` is the default.
+
+**Cross-directory reach goes through the facade.** A use site outside `a/b/c/` that reaches `crate::a::b::c::internal` by deep path is a facade violation, whatever visibility keywords are involved. The fix is a re-export in the relevant `mod.rs`, never a wider `mod` declaration. Re-export at the item's own visibility (`pub use` for a `pub` item, `pub(crate) use` for a `pub(crate)` item); do not widen the item to make re-exports uniform. List re-exports explicitly, one item per name; wildcard re-exports (`pub use child::*`) are banned, because they make the facade's surface unreadable. A deep-path reach that looks intentional means the target belongs in the facade's surface, not that the rule should bend.
+
+**Sibling reach stays out of the facade.** An item used only by siblings in the same directory needs no `mod.rs` entry: mark it `pub(super)` and siblings reach it directly.
+
+Two scope clarifications. *Item visibility inside a file* is not governed here. A `pub` item that is externally unreachable carries no information but is not a violation, and need not be demoted. (The `unreachable_pub` lint flags such items. It is deliberately not adopted, because it enforces a stricter, different rule of item-level minimum visibility, and an agent silencing it may add an unwanted re-export rather than improve the boundary.) *Machine check:* `just check-facades` (run by both `just ci` and `just ci-quick`) scans every `src/` `mod.rs` and fails on any `pub mod` / `pub(crate) mod` child not in the allowlist. The check is source-tree-only; `mod.rs` files under `tests/` are not policed, and integration-test fixture facades may use their own local style. The allowlist is the set of children currently named from `tests/` or `main.rs` by a direct `monodex::...` path. That set is presently an accident of what the integration tests reach, and is to be redrawn deliberately once an intended crate API surface is designed.
+
+When the check fails on a new declaration, the allowlist is not the default remedy: re-export the needed item from the facade, or change the caller to a path the facade already exposes. Add to the allowlist only when a caller intentionally needs to name the child module itself and no facade path can serve, and call the addition out in the PR description.
 
 **File layout.** This project uses `<dir>/mod.rs`, not the `<dir>.rs` + `<dir>/` form Rust 2018 also permits.
 
