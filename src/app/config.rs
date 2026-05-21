@@ -13,7 +13,7 @@ use std::path::PathBuf;
 use anyhow::anyhow;
 
 use crate::engine::identifier::validate_catalog;
-use crate::engine::system_info::{
+use crate::engine::{
     ResolvedEmbeddingConfig, compute_auto_embedding_config, estimate_ram_usage, format_bytes,
     get_physical_core_count,
 };

@@ -1,8 +1,8 @@
 # Run all CI checks (format, clippy, all tests)
-ci: fmt-check clippy test
+ci: fmt-check clippy check-facades test
 
 # Run quick CI checks (format, clippy, fast tests only)
-ci-quick: fmt-check clippy test-quick
+ci-quick: fmt-check clippy check-facades test-quick
 
 # Format check
 fmt-check:
@@ -31,3 +31,7 @@ build:
 # Clean build artifacts
 clean:
 	cargo clean
+
+# Enforce mod.rs facade integrity
+check-facades:
+	./scripts/check-facades.sh

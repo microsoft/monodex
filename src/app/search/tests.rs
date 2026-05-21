@@ -3,7 +3,7 @@
 //! Do not edit here for: Search output rendering implementation (see `../search.rs`).
 
 use super::*;
-use crate::engine::fusion::{FusedHit, RankedContribution};
+use crate::engine::{FusedHit, RankedContribution};
 
 fn make_fused_hit(row_id: &str, rrf_score: f32, methods: &[RetrievalMethod]) -> FusedHit {
     let contributors: Vec<RankedContribution> = methods

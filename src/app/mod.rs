@@ -4,14 +4,14 @@
 
 mod chunk_display;
 mod chunk_selector;
-pub mod cli;
+mod cli;
 pub mod commands;
 pub mod config;
-pub mod context;
-pub mod crawl;
+mod context;
+mod crawl;
 mod lock_progress;
 mod number_format;
-pub mod search;
+mod search;
 mod terminal_output;
 
 pub use cli::{Cli, Commands, CrawlSourceArgs};

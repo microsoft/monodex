@@ -16,12 +16,8 @@
 
 use std::io::{self, Write};
 
-use crate::engine::{
-    retrieval::RetrievalMethod,
-    storage::ChunkRow,
-    warning::DecisionWarning,
-    {fusion::FusedHit, storage::LabelMetadataRow},
-};
+use crate::engine::storage::{ChunkRow, LabelMetadataRow};
+use crate::engine::{DecisionWarning, FusedHit, RankedContribution, RetrievalMethod};
 
 use std::collections::HashMap;
 
@@ -251,7 +247,7 @@ fn render_result_header<W: Write>(
 /// Build provenance marker from contributors.
 ///
 /// Returns "f", "v", or "f+v" (alphabetical order).
-fn build_provenance_marker(contributors: &[crate::engine::fusion::RankedContribution]) -> String {
+fn build_provenance_marker(contributors: &[RankedContribution]) -> String {
     let has_fts = contributors
         .iter()
         .any(|c| c.method == RetrievalMethod::Fts);

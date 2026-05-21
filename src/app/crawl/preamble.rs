@@ -12,14 +12,13 @@ use crate::app::config::Config;
 use crate::app::crawl::types::CrawlSourceMetadata;
 use crate::app::lock_progress::stderr_lock_progress;
 use crate::app::{resolve_database_path, validate_config_path};
-use crate::engine::crawl_config::{CompiledCrawlConfig, load_compiled_crawl_config};
-use crate::engine::git_ops::resolve_commit_oid;
 use crate::engine::identifier::LabelId;
 use crate::engine::retrieval::RetrievalMethod;
 use crate::engine::storage::{
     CatalogLock, DatabaseLockShared, SOURCE_KIND_GIT_COMMIT, SOURCE_KIND_WORKING_DIRECTORY,
     acquire_catalog_lock, acquire_database_shared,
 };
+use crate::engine::{CompiledCrawlConfig, load_compiled_crawl_config, resolve_commit_oid};
 
 /// Source discriminator for the crawl preamble.
 #[derive(Clone, Copy)]

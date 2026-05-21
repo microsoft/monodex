@@ -2,6 +2,7 @@
 //! Edit here when: Adding or modifying tests for commit reading, working-directory enumeration, or the package index.
 //! Do not edit here for: Production code changes — edit the relevant submodule (`blob_source.rs`, `package_index.rs`, `commit.rs`, `working_dir.rs`).
 
+use super::working_dir::{build_package_index_for_working_dir, enumerate_working_directory};
 use super::*;
 use std::path::PathBuf;
 use std::process::Command;

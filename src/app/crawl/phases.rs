@@ -10,15 +10,11 @@ use std::sync::Arc;
 
 use crate::app::crawl::types::PhaseResults;
 use crate::app::number_format::format_count;
+use crate::engine::identifier::LabelId;
+use crate::engine::storage::{ChunkStorage, LabelMetadataRow, LabelStorage};
 use crate::engine::{
-    TARGET_CHARS,
-    chunker::{ChunkContext, chunk_content},
-    crawl_config::CompiledCrawlConfig,
-    git_ops::{BlobSource, FileEntry},
-    identifier::LabelId,
-    retrieval::RetrievalMethod,
-    storage::{ChunkStorage, LabelMetadataRow, LabelStorage},
-    warning::{CrawlWarning, WarningSink},
+    BlobSource, ChunkContext, CompiledCrawlConfig, CrawlWarning, FileEntry, PackageIndex,
+    RetrievalMethod, TARGET_CHARS, WarningSink, chunk_content,
 };
 
 /// Opens the database and returns storage handles.
@@ -95,9 +91,7 @@ pub fn enumerate_files(blob_source: &dyn BlobSource) -> Result<Vec<FileEntry>> {
 }
 
 /// Builds the package index from the blob source.
-pub fn build_package_index(
-    blob_source: &dyn BlobSource,
-) -> Result<crate::engine::git_ops::PackageIndex> {
+pub fn build_package_index(blob_source: &dyn BlobSource) -> Result<PackageIndex> {
     println!("📦 Building package index...");
     let package_index = blob_source.build_package_index()?;
     println!("Package index built successfully");
@@ -316,7 +310,7 @@ pub struct ChunkingOutput {
 pub fn chunk_new_files(
     new_files: &[FileEntry],
     blob_source: &dyn BlobSource,
-    package_index: &crate::engine::git_ops::PackageIndex,
+    package_index: &PackageIndex,
     crawl_config: &CompiledCrawlConfig,
     catalog_name: &str,
     label_id: &LabelId,
@@ -715,9 +709,8 @@ mod tests {
     /// with error "non-UTF-8 file contents" and be skipped, not crash the crawl.
     #[test]
     fn test_chunk_new_files_emits_warning_for_non_utf8() {
-        use crate::engine::crawl_config::get_default_crawl_config;
-        use crate::engine::git_ops::{BlobSource, FileEntry, PackageIndex};
         use crate::engine::identifier::LabelId;
+        use crate::engine::{BlobSource, FileEntry, PackageIndex, get_default_crawl_config};
         use std::cell::Cell;
         use std::path::Path;
 

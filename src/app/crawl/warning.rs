@@ -4,7 +4,7 @@
 //! Edit here when: Changing warning message format, adding new warning renderers.
 //! Do not edit here for: Warning type definitions (see `engine/warning.rs`), warning emission in phases (see `phases.rs`).
 
-use crate::engine::warning::CrawlWarning;
+use crate::engine::CrawlWarning;
 use std::cell::Cell;
 use std::io::Write;
 

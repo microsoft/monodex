@@ -9,12 +9,12 @@
 //! error types (see `error.rs`), or vector search (see `engine/storage/chunks/`).
 
 mod error;
-pub mod index;
-pub mod indexing;
-pub mod manifest;
-pub mod schema;
-pub mod search;
-pub mod tokenizer;
+mod index;
+mod indexing;
+mod manifest;
+mod schema;
+mod search;
+mod tokenizer;
 
 #[cfg(test)]
 mod tests;
