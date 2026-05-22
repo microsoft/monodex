@@ -1,6 +1,5 @@
 ---
 source: src/engine/partitioner/tests.rs
-assertion_line: 285
 expression: summary
 ---
 === QUALITY SCORE ===
