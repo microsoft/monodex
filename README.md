@@ -173,7 +173,7 @@ Create `~/.monodex/monodex-config.json`:
 
 The `embeddingModel` section controls memory and CPU usage for embedding generation:
 
-- **`modelInstances`**: Number of ONNX sessions. Each session uses approximately 700MB-1GB for the model weights and runtime, but the auto-detection heuristic plans for 2.5 GiB per instance to provide conservative headroom for memory fragmentation, peak usage during inference, and avoiding OOM on memory-constrained systems. Use `"auto"` to automatically size based on available system memory, or an integer ≥ 1 for explicit control.
+- **`modelInstances`**: Number of ONNX sessions. Each session uses approximately 700MB-1GB for the model weights and runtime, but the auto-detection heuristic plans for 2.5 GB per instance to provide conservative headroom for memory fragmentation, peak usage during inference, and avoiding OOM on memory-constrained systems. Use `"auto"` to automatically size based on available system memory, or an integer ≥ 1 for explicit control.
 - **`threadsPerInstance`**: Threads per ONNX session for intra-op parallelism. Use `"auto"` to automatically size based on CPU cores, or an integer ≥ 1 for explicit control.
 
 **Catalog types:**
@@ -364,7 +364,7 @@ monodex dump-chunks --file ./src/JsonFile.ts --target-size 4000
 monodex audit-chunks --count 20 --folder /path/to/project
 ```
 
-**Chunk Quality Score**: 0-100%, higher is better. Scores below 95% may indicate chunking issues. Note: `dump-chunks` and `audit-chunks` use AST-only mode (fallback disabled) to accurately measure partitioner quality.
+**Chunk Quality Score**: 0-100%, higher is better. The score is a maintainer heuristic, not a pass/fail metric. Scores below roughly 85% are worth inspecting; scores below roughly 60% usually indicate tiny chunks, oversized chunks, or severe over-splitting. Note: `dump-chunks` and `audit-chunks` use AST-only mode (fallback disabled) to accurately measure partitioner quality.
 
 ### Debug FTS Tokenization
 

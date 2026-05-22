@@ -7,7 +7,7 @@ use anyhow::Result;
 /// RAM used per ONNX model instance (in bytes)
 ///
 /// Based on empirical measurement, each ONNX session uses approximately 700MB-1GB
-/// for the model weights plus runtime overhead. However, we use 2.5 GiB as the
+/// for the model weights plus runtime overhead. However, we use 2.5 GB as the
 /// planning constant to provide conservative headroom for:
 /// - Memory fragmentation
 /// - Peak usage during inference
@@ -16,14 +16,14 @@ use anyhow::Result;
 ///
 /// This conservative sizing ensures that the auto-detection heuristic errs on the
 /// side of using fewer instances rather than risking OOM failures.
-pub const PER_INSTANCE_RAM: u64 = 2 * 1024 * 1024 * 1024 + 512 * 1024 * 1024; // 2.5 GiB
+pub const PER_INSTANCE_RAM: u64 = 2_500_000_000; // 2.5 GB
 
 /// Baseline RAM to reserve for OS and other processes (in bytes)
-/// We reserve the larger of 4 GiB or 25% of total RAM
-const BASELINE_RESERVE_MIN: u64 = 4 * 1024 * 1024 * 1024; // 4 GiB
+/// We reserve the larger of 4 GB or 25% of total RAM
+const BASELINE_RESERVE_MIN: u64 = 4_000_000_000; // 4 GB
 
 /// Additional overhead for embedding process (tokenizer, buffers, etc.)
-pub const EMBEDDING_OVERHEAD: u64 = 512 * 1024 * 1024; // 0.5 GiB
+pub const EMBEDDING_OVERHEAD: u64 = 500_000_000; // 0.5 GB
 
 /// Resolved embedding configuration
 #[derive(Debug, Clone)]
@@ -76,7 +76,7 @@ pub fn get_physical_core_count() -> usize {
 ///
 /// ```text
 /// effective_total_ram = min(total_memory, cgroup_memory_limit) [Linux only]
-/// baseline_reserve = max(4 GiB, 25% of effective_total_ram)
+/// baseline_reserve = max(4 GB, 25% of effective_total_ram)
 /// usable_ram = effective_total_ram - baseline_reserve
 /// ram_limited_instances = floor(usable_ram / PER_INSTANCE_RAM)
 ///
@@ -182,8 +182,8 @@ fn get_effective_total_ram(sys: &sysinfo::System, total_memory: u64) -> (u64, bo
 
 /// Format bytes as human-readable string (e.g., "16.0 GB")
 pub fn format_bytes(bytes: u64) -> String {
-    const GB: u64 = 1024 * 1024 * 1024;
-    const MB: u64 = 1024 * 1024;
+    const GB: u64 = 1_000_000_000;
+    const MB: u64 = 1_000_000;
 
     if bytes >= GB {
         format!("{:.1} GB", bytes as f64 / GB as f64)
@@ -225,8 +225,8 @@ mod tests {
     fn test_format_bytes() {
         assert_eq!(format_bytes(0), "0 bytes");
         assert_eq!(format_bytes(1024), "1024 bytes");
-        assert_eq!(format_bytes(1024 * 1024), "1.0 MB");
-        assert_eq!(format_bytes(2 * 1024 * 1024 * 1024), "2.0 GB");
-        assert_eq!(format_bytes(2_500_000_000), "2.3 GB");
+        assert_eq!(format_bytes(1_000_000), "1.0 MB");
+        assert_eq!(format_bytes(2_000_000_000), "2.0 GB");
+        assert_eq!(format_bytes(2_500_000_000), "2.5 GB");
     }
 }

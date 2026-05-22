@@ -102,12 +102,12 @@ The result of the split-search is reflected in the breadcrumb attached to each c
 
 ### Quality scoring
 
-`src/engine/partitioner/scoring.rs` computes a 0-100% score for a complete partitioning, used by `audit-chunks` to summarize chunker behavior across a sample of files. The score combines two badnesses:
+`src/engine/partitioner/scoring.rs` computes a 0-100% score for a complete partitioning, used by `audit-chunks` and `dump-chunks` to summarize chunker behavior. The score is a maintainer triage heuristic, not a calibrated metric. It combines two badnesses:
 
-- **Count badness.** Penalizes producing too many chunks relative to the ideal partition (total content size divided by max chunk size, rounded up). A file that should partition into 3 chunks but produces 7 has high count badness.
-- **Micro badness.** Penalizes individual chunks being either too small (size below the threshold) or too large (size at or above max). For each chunk, a per-chunk badness is computed and averaged across the partition.
+- **Size badness.** A per-chunk penalty that is zero across the healthy band `[SMALL_CHUNK_CHARS, TARGET_CHARS]` and nonzero only for chunks below `SMALL_CHUNK_CHARS` or above `TARGET_CHARS`. A single whole-file chunk at or below `TARGET_CHARS` is never penalized (it cannot be grown and must not be split, so a small whole-file chunk is not a runt).
+- **Count badness.** A penalty that is forgiving of moderate over-splitting and only rises sharply as chunk count approaches the all-runt case.
 
-The final score is `100 * (1 - count_badness)^α * (1 - micro_badness)^β` with both exponents currently set to 1. Scores below 95% are considered indicators of a chunking problem worth examining; the partitioner's quality is not a settled-once metric but something tuned over time, and these scoring weights are subject to revision.
+The two badnesses combine multiplicatively with no exponents. Scores below roughly 85% are worth inspecting; scores below roughly 60% usually indicate tiny chunks, oversized chunks, or severe over-splitting.
 
 ### Development tools
 

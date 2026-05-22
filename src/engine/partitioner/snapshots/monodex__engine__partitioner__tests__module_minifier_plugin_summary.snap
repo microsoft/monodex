@@ -3,7 +3,7 @@ source: src/engine/partitioner/tests.rs
 expression: summary
 ---
 === QUALITY SCORE ===
-Score: 80.0%
+Score: 95.3%
 Total chunks: 6
 Small chunks (<500 chars): 0
 Chars: 1248-5807 (mean 3960)
