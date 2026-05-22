@@ -364,7 +364,7 @@ monodex dump-chunks --file ./src/JsonFile.ts --target-size 4000
 monodex audit-chunks --count 20 --folder /path/to/project
 ```
 
-**Chunk Quality Score**: 0-100%, higher is better. Scores below 95% may indicate chunking issues. Note: `dump-chunks` and `audit-chunks` use AST-only mode (fallback disabled) to accurately measure partitioner quality.
+**Chunk Quality Score**: 0-100%, higher is better. The score is a maintainer heuristic, not a pass/fail metric. Scores below roughly 85% are worth inspecting; scores below roughly 60% usually indicate tiny chunks, oversized chunks, or severe over-splitting. Note: `dump-chunks` and `audit-chunks` use AST-only mode (fallback disabled) to accurately measure partitioner quality.
 
 ### Debug FTS Tokenization
 
