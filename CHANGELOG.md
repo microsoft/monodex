@@ -24,6 +24,12 @@ PUBLISHING PROCEDURE:
 5. After publishing, the next PR author will add a new "## Unreleased" section
 -->
 
+## Unreleased
+
+### Changed
+
+- Memory sizes now use base-1000 units throughout, which may slightly affect the automatic model-instance count heuristic.
+
 ## 0.6.1 (2026-05-20)
 
 ### Changed

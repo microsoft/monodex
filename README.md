@@ -173,7 +173,7 @@ Create `~/.monodex/monodex-config.json`:
 
 The `embeddingModel` section controls memory and CPU usage for embedding generation:
 
-- **`modelInstances`**: Number of ONNX sessions. Each session uses approximately 700MB-1GB for the model weights and runtime, but the auto-detection heuristic plans for 2.5 GiB per instance to provide conservative headroom for memory fragmentation, peak usage during inference, and avoiding OOM on memory-constrained systems. Use `"auto"` to automatically size based on available system memory, or an integer ≥ 1 for explicit control.
+- **`modelInstances`**: Number of ONNX sessions. Each session uses approximately 700MB-1GB for the model weights and runtime, but the auto-detection heuristic plans for 2.5 GB per instance to provide conservative headroom for memory fragmentation, peak usage during inference, and avoiding OOM on memory-constrained systems. Use `"auto"` to automatically size based on available system memory, or an integer ≥ 1 for explicit control.
 - **`threadsPerInstance`**: Threads per ONNX session for intra-op parallelism. Use `"auto"` to automatically size based on CPU cores, or an integer ≥ 1 for explicit control.
 
 **Catalog types:**

@@ -182,8 +182,8 @@ fn get_effective_total_ram(sys: &sysinfo::System, total_memory: u64) -> (u64, bo
 
 /// Format bytes as human-readable string (e.g., "16.0 GB")
 pub fn format_bytes(bytes: u64) -> String {
-    const GB: u64 = 1024 * 1024 * 1024;
-    const MB: u64 = 1024 * 1024;
+    const GB: u64 = 1_000_000_000;
+    const MB: u64 = 1_000_000;
 
     if bytes >= GB {
         format!("{:.1} GB", bytes as f64 / GB as f64)
@@ -225,8 +225,8 @@ mod tests {
     fn test_format_bytes() {
         assert_eq!(format_bytes(0), "0 bytes");
         assert_eq!(format_bytes(1024), "1024 bytes");
-        assert_eq!(format_bytes(1024 * 1024), "1.0 MB");
-        assert_eq!(format_bytes(2 * 1024 * 1024 * 1024), "2.0 GB");
-        assert_eq!(format_bytes(2_500_000_000), "2.3 GB");
+        assert_eq!(format_bytes(1_000_000), "1.0 MB");
+        assert_eq!(format_bytes(2_000_000_000), "2.0 GB");
+        assert_eq!(format_bytes(2_500_000_000), "2.5 GB");
     }
 }
