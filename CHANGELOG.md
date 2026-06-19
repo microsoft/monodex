@@ -28,6 +28,8 @@ PUBLISHING PROCEDURE:
 
 ### Changed
 
+- Monodex no longer requires OpenSSL development headers to build. All TLS dependencies (ort, hf-hub, and lancedb's transitive reqwest) now use the rustls TLS backend with the ring crypto provider, so no C toolchain is needed for TLS on any platform.
+
 - Memory sizes now use base-1000 units throughout, which may slightly affect the automatic model-instance count heuristic.
 - Improved the chunk-quality score reported by the `audit-chunks` and `dump-chunks` commands. The score now more reliably flags genuinely bad partitioner output.
 
