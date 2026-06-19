@@ -1,7 +1,7 @@
 {
   // Database configuration (optional, defaults shown)
   "database": {
-    "path": "~/.monodex/default-db"
+    "path": "./default-db"
   },
 
   // Catalog definitions (required)

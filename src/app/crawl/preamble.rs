@@ -71,8 +71,12 @@ pub(crate) fn prepare_crawl_preamble(
         .get(catalog_name)
         .ok_or_else(|| anyhow!("Catalog '{}' not found in config", catalog_name))?;
 
-    // Validate catalog path (must be absolute, no ~ or $VAR)
-    let repo_path = validate_config_path("catalog path", &catalog_config.path)?;
+    // Validate catalog path (absolute or dotted-relative, no ~ or $VAR)
+    let repo_path = validate_config_path(
+        "catalog path",
+        &catalog_config.path,
+        &config.paths.config_folder,
+    )?;
     println!("Repository: {}", repo_path.display());
     println!("Type: {}", catalog_config.r#type);
 

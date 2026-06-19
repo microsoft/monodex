@@ -24,8 +24,10 @@ use crate::paths::Paths;
 #[serde(deny_unknown_fields)]
 pub struct DatabaseConfig {
     /// Optional path to the database folder.
-    /// If not specified, defaults to <config_folder>/default-db.
-    /// Must be an absolute path; tilde (~) and environment variables ($VAR) are not supported.
+    /// If not specified, defaults to `./default-db` (resolved against the config folder).
+    /// May be an absolute path, or a relative path starting with `./` or `../`
+    /// (resolved against the folder containing `monodex-config.json`).
+    /// Tilde (`~`) and environment variables (`$VAR`) are not supported.
     pub path: Option<String>,
 }
 
@@ -253,47 +255,103 @@ pub fn load_config(paths: Paths) -> anyhow::Result<Config> {
     })
 }
 
-/// Validate that a config-file path setting is an absolute, literal path.
+/// Normalize a path by resolving `.` and `..` components without touching the filesystem.
 ///
-/// Rejects tilde expansion ('~'), environment variable substitution ('$'),
-/// and relative paths so config values mean the same thing regardless of
-/// the user's shell, working directory, or platform.
-pub fn validate_config_path(field_name: &str, value: &str) -> anyhow::Result<PathBuf> {
+/// This produces the same result as `Path::canonicalize` for well-formed paths
+/// but without requiring the path to exist on disk.
+///
+/// # Panics
+///
+/// Panics in debug builds if `path` is not absolute. Does not panic in release
+/// builds. Callers should note that if `path` is not absolute, leading `..`
+/// components are preserved (not truncated against a hypothetical root), which
+/// may produce a path that climbs above the filesystem root on the platform in
+/// question. In practice, `validate_config_path` only calls this with
+/// `config_folder.join(relative_path)`, which is always absolute.
+fn normalize_path(path: &std::path::Path) -> PathBuf {
+    debug_assert!(
+        path.is_absolute(),
+        "normalize_path expects an absolute path; relative paths may produce incorrect results"
+    );
+
+    let mut resolved = PathBuf::new();
+    for comp in path.components() {
+        match comp {
+            std::path::Component::CurDir => { /* skip */ }
+            std::path::Component::ParentDir => {
+                if resolved.pop() {
+                    // removed the last component
+                } else {
+                    resolved.push(comp);
+                }
+            }
+            comp => resolved.push(comp),
+        }
+    }
+    resolved
+}
+
+/// Validate that a config-file path setting is an absolute or dot-relative path.
+///
+/// Absolute paths are returned as-is. Relative paths beginning with `./` or
+/// `../` are resolved against the folder containing `monodex-config.json`
+/// (the config folder). Bare names (no leading `./` or `../`), tilde
+/// expansion (`~`), and environment variable substitution (`$VAR`) are
+/// rejected so config values mean the same thing regardless of the user's
+/// shell, working directory, or platform.
+pub fn validate_config_path(
+    field_name: &str,
+    value: &str,
+    config_folder: &std::path::Path,
+) -> anyhow::Result<PathBuf> {
     if value.starts_with('~') {
         anyhow::bail!(
-            "Invalid {} '{}': '~' is not supported. Provide an absolute path.",
+            "Invalid {} '{}': tilde (~) is not supported. \
+             Must be an absolute path, or a relative path starting with './' or '../' \
+             (resolved against the config folder).",
             field_name,
             value
         );
     }
     if value.contains('$') {
         anyhow::bail!(
-            "Invalid {} '{}': environment variable substitution is not supported. Provide an absolute path.",
+            "Invalid {} '{}': environment variable substitution is not supported. \
+             Must be an absolute path, or a relative path starting with './' or '../' \
+             (resolved against the config folder).",
             field_name,
             value
         );
     }
     let path = PathBuf::from(value);
-    if !path.is_absolute() {
+    if path.is_absolute() {
+        Ok(path)
+    } else if value.starts_with("./")
+        || value.starts_with("../")
+        || (cfg!(target_os = "windows") && (value.starts_with(".\\") || value.starts_with("..\\")))
+    {
+        Ok(normalize_path(&config_folder.join(path)))
+    } else {
         anyhow::bail!(
-            "Invalid {} '{}': must be an absolute path.",
+            "Invalid {} '{}': must be an absolute path, or a relative path starting \
+             with './' or '../' (resolved against the config folder).",
             field_name,
             value
         );
     }
-    Ok(path)
 }
 
 /// Resolve the database path from config.
 ///
-/// - If `database.path` is specified in config, validates it as an absolute path and returns it.
+/// - If `database.path` is specified in config, validates it and returns the resolved path.
+///   Absolute paths are returned as-is; relative paths starting with `./` or `../` are
+///   resolved against the config folder.
 /// - Otherwise returns `<config_folder>/default-db`.
 pub fn resolve_database_path(config: &Config) -> anyhow::Result<PathBuf> {
     // Check if database.path is specified in config
     if let Some(db_config) = &config.database
         && let Some(path) = &db_config.path
     {
-        return validate_config_path("database.path", path);
+        return validate_config_path("database.path", path, &config.paths.config_folder);
     }
 
     // Default: <config_folder>/default-db

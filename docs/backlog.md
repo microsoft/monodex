@@ -6,6 +6,12 @@ For official feature requests, create a GitHub issue. If an issue needs higher p
 
 ## Near term
 
+<a id="BL105"></a>
+
+**BL105 Enable cargo-deny license checking.** cargo-deny is already wired for the crate-ban and advisory checks; this item turns on its license check, which verifies that every crate in the dependency graph, transitive included, carries a license compatible with shipping monodex as an MIT binary on crates.io. Deferred from the install-cleanup work because it needs a one-time audit of the current tree's licenses and a written allow-policy: which SPDX licenses are acceptable, plus per-crate exceptions or clarifications for any crate with a missing or ambiguous license field. The first run will surface crates needing explicit handling before it passes. Its own PR.
+
+(severity=licensing, work=small)
+
 <a id="BL38"></a>
 
 **BL38 Test scenarios that need actual execution.** Several end-to-end behaviors of the crawl pipeline have never been exercised by an automated test, only by manual verification. The two that most need automation: interrupted-crawl resume (Ctrl+C mid-crawl, verify chunks already written persist with their label, sentinel chunks skip correctly on resume, the per-method completion flag stays false until the resumed crawl finishes, label reassignment does not run on the partial crawl but does run after the successful resume); file-moves-between-packages (move a file between packages between two crawls of the same label, verify new path produces new chunks via different `file_id`, old path's chunks lose the label during reassignment, orphan chunks are detectable for the planned GC). Sketch only; the implementing PR specifies exact reproduction steps and pass/fail criteria.
@@ -17,10 +23,6 @@ For official feature requests, create a GitHub issue. If an issue needs higher p
 **BL39 Database-on-network-filesystem refusal.** Users can configure `database.path` to point anywhere. NFS, SMB, and synced cloud folders (Dropbox, OneDrive, iCloud, Google Drive) have different concurrency and durability semantics from local filesystems and are not supported. Monodex should detect these at database-open time and refuse with a clear message rather than silently misbehaving. README's configuration section should also state this declaratively.
 
 (severity=correctness, work=medium)
-
-<a id="BL40"></a>
-
-**BL40 Side-by-side dependency duplication guard.** The released binary is 152MB stripped; side-by-side copies of large dependencies (Tantivy, LanceDB, Arrow, ONNX runtime) compound this fast and are easy to introduce via transitive-dep version drift. Two-step at investigation time (`cargo tree -d`, then `cargo bloat --filter <crate>` per duplicate), one-step at steady state (a CI step that asserts no large-dependency duplicates appear, with the exact crate list tuned over time). Resolutions can be non-trivial: a downgrade or pin can break compat with a transitive dep that wanted the newer version. Current discipline (Tantivy aligned with LanceDB's transitive Tantivy version) is documented in `docs/design/architecture.md`; the broader guard keeps it enforced.
 
 (severity=binary-size, work=medium)
 

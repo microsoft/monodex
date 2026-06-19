@@ -17,8 +17,8 @@
       "properties": {
         "path": {
           "type": "string",
-          "description": "Path to the database folder. Must be an absolute path; tilde (~), environment variables ($VAR), and relative paths are not supported. Omit to use the default location.",
-          "examples": ["/absolute/path/to/db"]
+          "description": "Path to the database folder. May be an absolute path, or a relative path starting with './' or '../' (resolved against the folder containing monodex-config.json). Tilde (~) and environment variables ($VAR) are not supported. Omit to use the default location.",
+          "examples": ["./default-db", "/absolute/path/to/db"]
         }
       }
     },
@@ -70,7 +70,7 @@
         },
         "path": {
           "type": "string",
-          "description": "Path to the catalog root folder. Must be an absolute path; tilde (~), environment variables ($VAR), and relative paths are not supported.",
+          "description": "Path to the catalog root folder. May be an absolute path, or a relative path starting with './' or '../' (resolved against the folder containing monodex-config.json). Tilde (~) and environment variables ($VAR) are not supported.",
           "examples": ["/path/to/monorepo"]
         }
       }

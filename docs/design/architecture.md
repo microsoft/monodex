@@ -170,7 +170,7 @@ Reusable indexing engine. Does not depend on `src/app/`.
 
 Tantivy-based full-text search. Per-label index folders under `<database-folder>/fts/<catalog>/<label>/`. See [concurrency.md](./concurrency.md) for the writer contract and [monodex_files.md](./monodex_files.md) for the on-disk layout.
 
-Keep the direct `tantivy` dependency aligned with the version resolved through LanceDB. After dependency changes, `cargo tree -i tantivy` should show a single Tantivy version; two side-by-side versions in the dep graph mean `tantivy::Index` from our crate and from LanceDB's are different types, with real binary-size cost.
+A single Tantivy version is enforced in CI by cargo-deny's duplicate-version check (`deny.toml`). Two side-by-side versions in the dep graph mean `tantivy::Index` from our crate and from LanceDB's are different types, with real binary-size cost.
 
 - `error.rs`: Helpers for typed discrimination of Tantivy NotFound-style errors. Used by FTS read paths to normalize folder disappearance to absent-index outcomes (`open_existing` returns `FtsOpenExistingOutcome::NoIndex`, `fts_search` returns `FtsSearchOutcome::NoIndex`) instead of propagating raw IO errors.
 - `index.rs`: Open and create per-label Tantivy indexes. Owns the `FtsIndex` handle and the heap-budget constant. Write paths use `open_or_create`; read paths use `open_existing` so a missing FTS folder has no mkdir side effect.

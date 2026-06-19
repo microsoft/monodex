@@ -1,6 +1,6 @@
 [package]
 name = "monodex"
-version = "0.6.1"
+version = "0.6.2"
 edition = "2024"
 rust-version = "1.93"
 description = "Fast, accurate code search for large Rush monorepos"
@@ -21,9 +21,9 @@ exclude = [
 
 [dependencies]
 # ML/Embeddings
-ort = { version = "2.0.0-rc.12", features = ["download-binaries"] }
+ort = { version = "2.0.0-rc.12", default-features = false, features = ["std", "ndarray", "tracing", "download-binaries", "copy-dylibs", "api-24", "tls-rustls"] }
 tokenizers = "0.22.2"
-hf-hub = "0.5.0"
+hf-hub = { version = "0.5.0", default-features = false, features = ["rustls-tls", "tokio", "ureq"] }
 
 # CLI
 clap = { version = "4.6.0", features = ["derive"] }
@@ -76,7 +76,7 @@ jieba-rs = "0.8"
 
 [dev-dependencies]
 insta = { version = "1.47", features = ["yaml"] }
-jsonschema = "0.45"
+jsonschema = { version = "0.45", default-features = false }
 tempfile = "3"
 serial_test = "3"
 

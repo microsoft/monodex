@@ -24,9 +24,13 @@ PUBLISHING PROCEDURE:
 5. After publishing, the next PR author will add a new "## Unreleased" section
 -->
 
-## Unreleased
+## 0.6.2 (2026-06-18)
 
 ### Changed
+
+- Monodex no longer requires OpenSSL or a C/C++ build toolchain to install. `cargo install monodex` now works on a clean machine without those system prerequisites.
+
+- `database.path` and `catalogs.<name>.path` in `monodex-config.json` now accept relative paths starting with `./` or `../`, resolved against the folder containing the config file. Bare names (like `default-db` without `./`) remain an error. Tilde (`~`) and environment variables (`$VAR`) are still not supported.
 
 - Memory sizes now use base-1000 units throughout, which may slightly affect the automatic model-instance count heuristic.
 - Improved the chunk-quality score reported by the `audit-chunks` and `dump-chunks` commands. The score now more reliably flags genuinely bad partitioner output.
