@@ -22,14 +22,14 @@ exclude = [
 [dependencies]
 # ML/Embeddings
 ort = { version = "2.0.0-rc.12", default-features = false, features = ["std", "ndarray", "tracing", "download-binaries", "copy-dylibs", "api-24", "tls-rustls"] }
-tokenizers = "0.22.2"
+tokenizers = "0.23.1"
 hf-hub = { version = "0.5.0", default-features = false, features = ["rustls-tls", "tokio", "ureq"] }
 
 # CLI
 clap = { version = "4.6.0", features = ["derive"] }
 
 # Git operations
-gix = { version = "0.81", features = ["blob-diff", "revision"] }
+gix = { version = "0.84", features = ["blob-diff", "revision"] }
 
 # File system
 walkdir = "2.5.0"
@@ -40,10 +40,10 @@ serde_json = "1.0.133"
 json_comments = "0.2"
 
 # Vector database (LanceDB - embedded, in-process)
-lancedb = "0.27"
-arrow-array = "57"
-arrow-schema = "57"
-arrow-buffer = "57"
+lancedb = "0.30"
+arrow-array = "58"
+arrow-schema = "58"
+arrow-buffer = "58"
 
 # Async runtime (needed for LanceDB)
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
@@ -54,15 +54,15 @@ anyhow = "1.0.93"
 thiserror = "2.0"
 time = "0.3"
 globset = "0.4"
-dirs = "5.0"
+dirs = "6.0"
 twox-hash = "2.1"
 sha2 = "0.11"
 hex = "0.4"
 github-slugger = "0.1"
 rayon = "1.10"
-fs4 = "0.12"
+fs4 = "1.1"
 crossbeam-channel = "0.5"
-sysinfo = "0.33"
+sysinfo = "0.38"
 terminal_size = "0.4"
 
 # Tree-sitter for AST parsing
@@ -71,12 +71,12 @@ tree-sitter-typescript = "0.23"
 rand = "0.10"
 
 # Full-text search (Tantivy)
-tantivy = "0.24"
-jieba-rs = "0.8"
+tantivy = "0.26"
+jieba-rs = "0.9"
 
 [dev-dependencies]
 insta = { version = "1.47", features = ["yaml"] }
-jsonschema = { version = "0.45", default-features = false }
+jsonschema = { version = "0.46", default-features = false }
 tempfile = "3"
 serial_test = "3"
 
