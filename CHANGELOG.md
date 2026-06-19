@@ -28,7 +28,7 @@ PUBLISHING PROCEDURE:
 
 ### Changed
 
-- Monodex no longer requires OpenSSL development headers to build. All TLS dependencies (ort, hf-hub, and lancedb's transitive reqwest) now use the rustls TLS backend with the ring crypto provider, so no C toolchain is needed for TLS on any platform.
+- Monodex no longer requires OpenSSL or a C/C++ build toolchain to install. `cargo install monodex` now works on a clean machine without those system prerequisites.
 
 - `database.path` and `catalogs.<name>.path` in `monodex-config.json` now accept relative paths starting with `./` or `../`, resolved against the folder containing the config file. Bare names (like `default-db` without `./`) remain an error. Tilde (`~`) and environment variables (`$VAR`) are still not supported.
 
