@@ -262,11 +262,12 @@ pub fn load_config(paths: Paths) -> anyhow::Result<Config> {
 ///
 /// # Panics
 ///
-/// Does not panic, but callers should note that if `path` is not absolute,
-/// leading `..` components are preserved (not truncated against a hypothetical
-/// root), which may produce a path that climbs above the filesystem root on
-/// the platform in question. In practice, `validate_config_path` only calls
-/// this with `config_folder.join(relative_path)`, which is always absolute.
+/// Panics in debug builds if `path` is not absolute. Does not panic in release
+/// builds. Callers should note that if `path` is not absolute, leading `..`
+/// components are preserved (not truncated against a hypothetical root), which
+/// may produce a path that climbs above the filesystem root on the platform in
+/// question. In practice, `validate_config_path` only calls this with
+/// `config_folder.join(relative_path)`, which is always absolute.
 fn normalize_path(path: &std::path::Path) -> PathBuf {
     debug_assert!(
         path.is_absolute(),
