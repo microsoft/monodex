@@ -325,7 +325,10 @@ pub fn validate_config_path(
     let path = PathBuf::from(value);
     if path.is_absolute() {
         Ok(path)
-    } else if value.starts_with("./") || value.starts_with("../") {
+    } else if value.starts_with("./")
+        || value.starts_with("../")
+        || (cfg!(target_os = "windows") && (value.starts_with(".\\") || value.starts_with("..\\")))
+    {
         Ok(normalize_path(&config_folder.join(path)))
     } else {
         anyhow::bail!(

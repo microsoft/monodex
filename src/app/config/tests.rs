@@ -331,6 +331,31 @@ fn test_validate_config_path_rejects_bare_name_for_catalog() {
     );
 }
 
+#[cfg(not(target_os = "windows"))]
+#[test]
+fn test_validate_config_path_rejects_backslash_on_nonwindows() {
+    // On non-Windows, backslash-relative paths like .\ and ..\ are not valid
+    // relative paths and should be rejected like any other bare name.
+    let config_folder = PathBuf::from("/etc/monodex");
+    let result = validate_config_path("database.path", ".\\my-db", &config_folder);
+    assert!(result.is_err());
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("'./'"),
+        "Expected error mentioning './', got: {}",
+        err
+    );
+}
+
+#[cfg(target_os = "windows")]
+#[test]
+fn test_validate_config_path_accepts_backslash_on_windows() {
+    // On Windows, .\ and ..\ are valid relative paths and should resolve.
+    let config_folder = PathBuf::from(r"C:\etc\monodex");
+    let result = validate_config_path("database.path", r".\my-db", &config_folder).unwrap();
+    assert_eq!(result, PathBuf::from(r"C:\etc\monodex\my-db"));
+}
+
 #[test]
 fn test_resolve_database_path_defaults_to_config_folder() {
     // When no database.path, should use <config_folder>/default-db
