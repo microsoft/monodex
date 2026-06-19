@@ -168,7 +168,7 @@ fn test_resolve_database_path_rejects_tilde() {
     assert!(result.is_err());
     let err = result.unwrap_err().to_string();
     assert!(
-        err.contains("'~' is not supported"),
+        err.contains("tilde (~) is not supported"),
         "Expected error about tilde, got: {}",
         err
     );
@@ -212,7 +212,7 @@ fn test_resolve_database_path_rejects_env_var() {
 }
 
 #[test]
-fn test_resolve_database_path_rejects_relative_path() {
+fn test_resolve_database_path_rejects_bare_name() {
     let dir = tempdir().unwrap();
     let config_path = dir.path().join("monodex-config.json");
     let mut file = std::fs::File::create(&config_path).unwrap();
@@ -221,7 +221,7 @@ fn test_resolve_database_path_rejects_relative_path() {
         file,
         r#"{{
                 "catalogs": {{}},
-                "database": {{ "path": "./my-db" }}
+                "database": {{ "path": "my-db" }}
             }}"#
     )
     .unwrap();
@@ -232,8 +232,8 @@ fn test_resolve_database_path_rejects_relative_path() {
     assert!(result.is_err());
     let err = result.unwrap_err().to_string();
     assert!(
-        err.contains("must be an absolute path"),
-        "Expected error about absolute path, got: {}",
+        err.contains("'./'"),
+        "Expected error mentioning './', got: {}",
         err
     );
     assert!(
@@ -262,6 +262,73 @@ fn test_resolve_database_path_accepts_absolute_path() {
     let config = load_config(paths).unwrap();
     let path = resolve_database_path(&config).unwrap();
     assert_eq!(path, PathBuf::from("/custom/db"));
+}
+
+#[test]
+fn test_resolve_database_path_accepts_dot_relative() {
+    let dir = tempdir().unwrap();
+    let config_path = dir.path().join("monodex-config.json");
+    let mut file = std::fs::File::create(&config_path).unwrap();
+
+    writeln!(
+        file,
+        r#"{{
+                "catalogs": {{}},
+                "database": {{ "path": "./my-db" }}
+            }}"#
+    )
+    .unwrap();
+
+    let paths = Paths::for_test(dir.path().into());
+    let config = load_config(paths).unwrap();
+    let path = resolve_database_path(&config).unwrap();
+    assert_eq!(path, dir.path().join("my-db"));
+}
+
+#[test]
+fn test_resolve_database_path_accepts_dotdot_relative() {
+    let dir = tempdir().unwrap();
+    let config_path = dir.path().join("monodex-config.json");
+    let mut file = std::fs::File::create(&config_path).unwrap();
+
+    writeln!(
+        file,
+        r#"{{
+                "catalogs": {{}},
+                "database": {{ "path": "../sibling-db" }}
+            }}"#
+    )
+    .unwrap();
+
+    let paths = Paths::for_test(dir.path().into());
+    let config = load_config(paths).unwrap();
+    let path = resolve_database_path(&config).unwrap();
+    assert_eq!(path, dir.path().parent().unwrap().join("sibling-db"));
+}
+
+#[test]
+fn test_validate_config_path_accepts_dot_relative_for_catalog() {
+    let config_folder = PathBuf::from("/etc/monodex");
+    let result = validate_config_path("catalog path", "./repos/foo", &config_folder).unwrap();
+    assert_eq!(result, PathBuf::from("/etc/monodex/repos/foo"));
+}
+
+#[test]
+fn test_validate_config_path_rejects_bare_name_for_catalog() {
+    let config_folder = PathBuf::from("/etc/monodex");
+    let result = validate_config_path("catalog path", "repos/foo", &config_folder);
+    assert!(result.is_err());
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("'./'"),
+        "Expected error mentioning './', got: {}",
+        err
+    );
+    assert!(
+        err.contains("catalog path"),
+        "Expected error to mention field name, got: {}",
+        err
+    );
 }
 
 #[test]

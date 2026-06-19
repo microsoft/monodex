@@ -130,7 +130,7 @@ Create `~/.monodex/monodex-config.json`:
 {
   // Database configuration (optional, defaults shown)
   "database": {
-    "path": "~/.monodex/default-db"
+    "path": "./default-db"
   },
 
   // Catalog definitions (required)
@@ -162,8 +162,8 @@ Create `~/.monodex/monodex-config.json`:
 | Field                               | Required | Description                                                                         |
 | ----------------------------------- | -------- | ----------------------------------------------------------------------------------- |
 | `catalogs.<name>.type`              | Yes      | Catalog type: `"monorepo"`                                                          |
-| `catalogs.<name>.path`              | Yes      | Absolute path to the repository root                                                |
-| `database.path`                     | No       | Custom database path (default: `~/.monodex/default-db`). If set, it must be an absolute path. Tilde (`~`), environment variables (`$VAR`), and relative paths are not supported. The path must point to a local filesystem; network filesystems (NFS, SMB) and synced cloud folders (Dropbox, OneDrive, iCloud, Google Drive) are not supported. |
+| `catalogs.<name>.path`              | Yes      | Path to the repository root. May be an absolute path, or a relative path starting with `./` or `../` (resolved against the folder containing monodex-config.json). Tilde (`~`) and environment variables (`$VAR`) are not supported. |
+| `database.path`                     | No       | Custom database path (default: `./default-db`, i.e. <config-folder>/default-db). May be an absolute path, or a relative path starting with `./` or `../` (resolved against the folder containing monodex-config.json). Tilde (`~`) and environment variables (`$VAR`) are not supported. The path must point to a local filesystem; network filesystems (NFS, SMB) and synced cloud folders (Dropbox, OneDrive, iCloud, Google Drive) are not supported. |
 | `embeddingModel.modelInstances`     | No       | Number of ONNX model instances (default: `"auto"`). Primary driver of memory usage. |
 | `embeddingModel.threadsPerInstance` | No       | Threads per model instance (default: `"auto"`). CPU tuning only.                    |
 

@@ -5,7 +5,7 @@ This document inventories every file involved in Monodex's runtime contract: con
 Two placeholders are used throughout:
 
 - `<config-folder>`: the Monodex config folder. Defaults to `~/.monodex/`, overridable via the `MONODEX_CONFIG_FOLDER` environment variable or `--config-folder` CLI flag. Resolution logic in `src/paths.rs`. A relative path is resolved against the current working directory at process start; empty or whitespace-only values are treated as unset.
-- `<database-folder>`: the database folder. Defaults to `<config-folder>/default-db/`, relocatable via the `database.path` field in `monodex-config.json`. Must be an absolute path on a local filesystem.
+- `<database-folder>`: the database folder. Defaults to `<config-folder>/default-db/`, relocatable via the `database.path` field in `monodex-config.json`. May be an absolute path, or a relative path starting with `./` or `../` (resolved against the config folder). Must be on a local filesystem.
 
 ## A note on validation
 
