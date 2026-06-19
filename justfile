@@ -1,5 +1,5 @@
-# Run all CI checks (format, clippy, all tests)
-ci: fmt-check clippy check-facades test
+# Run all CI checks (format, clippy, deny, all tests)
+ci: fmt-check clippy check-facades deny test
 
 # Run quick CI checks (format, clippy, fast tests only)
 ci-quick: fmt-check clippy check-facades test-quick
@@ -35,3 +35,7 @@ clean:
 # Enforce mod.rs facade integrity
 check-facades:
 	./scripts/check-facades.sh
+
+# Run cargo-deny bans and advisories checks
+deny:
+	cargo deny check bans advisories

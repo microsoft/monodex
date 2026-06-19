@@ -37,12 +37,16 @@ jobs:
       - name: Install protoc
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
 
-      - name: Cache cargo registry, git deps, and target
+      - name: Install cargo-deny
+        run: cargo install --locked cargo-deny@0.19.9
+
+      - name: Cache cargo registry, git deps, target, and installed bins
         uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
+            ~/.cargo/bin
             target
           key: ${{ runner.os }}-cargo-${{ steps.rust.outputs.version }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
@@ -57,6 +61,9 @@ jobs:
 
       - name: Check facade integrity
         run: ./scripts/check-facades.sh
+
+      - name: Cargo deny
+        run: cargo deny check bans advisories
 
       - name: Test
         run: cargo test --workspace --locked

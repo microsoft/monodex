@@ -1,0 +1,17 @@
+[advisories]
+unmaintained = "workspace"
+
+[bans]
+multiple-versions = "allow"
+deny = [
+    { crate = "aws-lc-sys",  use-instead = "ring",   reason = "needs a C toolchain; we use rustls on ring" },
+    { crate = "openssl-sys", use-instead = "rustls", reason = "we use rustls, not OpenSSL" },
+    { crate = "tantivy",      deny-multiple-versions = true },
+    { crate = "lance",        deny-multiple-versions = true },
+    { crate = "lancedb",      deny-multiple-versions = true },
+    { crate = "arrow-array",  deny-multiple-versions = true },
+    { crate = "arrow-schema", deny-multiple-versions = true },
+    { crate = "arrow-buffer", deny-multiple-versions = true },
+    { crate = "ort",          deny-multiple-versions = true },
+    { crate = "ort-sys",      deny-multiple-versions = true },
+]
