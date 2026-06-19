@@ -76,7 +76,7 @@ jieba-rs = "0.8"
 
 [dev-dependencies]
 insta = { version = "1.47", features = ["yaml"] }
-jsonschema = { version = "0.45", default-features = false, features = ["resolve-http", "resolve-file", "tls-ring"] }
+jsonschema = { version = "0.45", default-features = false }
 tempfile = "3"
 serial_test = "3"
 
