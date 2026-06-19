@@ -86,7 +86,7 @@ The intended integration today is via the CLI; agents shell out to `monodex sear
 
 ## Prerequisites
 
-- **Rust**: 1.93+ (for edition 2024)
+- **Rust**: 1.93+ (for edition 2024). If you do not already have a Rust toolchain installed, the standard installer is [rustup](https://rustup.rs/). On Linux and macOS, rustup adds `~/.cargo/bin` to your shell's PATH via your shell rc file; restart your shell or run `source ~/.cargo/env` after installing. On Windows, the installer handles PATH automatically. Verify with `rustc --version` and `cargo --version`.
 
 - **Git**: 2.35.0+ (required for working-directory crawls; the `git ls-files --format` flag was introduced in 2.35.0)
 
